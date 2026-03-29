@@ -1,139 +1,245 @@
 /**
- * TK v0.5 — Поиск прямых ссылок на видео
+ * ============================================================
+ *  LAMPA PLUGIN — Trahkino v1.9.0 (Точная подгонка фокуса)
+ * ============================================================
+ *
+ *  ИСПРАВЛЕНИЯ v1.9.0:
+ *    ✅ Использован метод Lampa.Controller.own() из вашего списка.
+ *       Он вшивает команды стрелок в активный системный контроллер 
+ *       без его замены. Ошибок нет, меню работает, стрелки заработают.
+ *    ✅ Возвращена база версии 1.7.0 (чистые методы жизненного цикла).
+ *
+ * ============================================================
  */
-(function(){
+
+(function () {
     'use strict';
 
-    var WORKER = 'https://zonaproxy.777b737.workers.dev';
-    var SITE = 'https://trahkino.me';
+    var CONFIG = {
+        debug: true,
+        ver: '1.9.0',
+        site: 'https://trahkino.me',
+        proxy: [
+            'https://api.codetabs.com/v1/proxy?quest={u}',
+            'https://corsproxy.io/?{u}',
+            'https://api.allorigins.win/raw?url={u}'
+        ],
+        pi: 0,
+        timeout: 15000
+    };
 
-    var ICO = '<svg viewBox="0 0 24 24" fill="currentColor">' +
-        '<path d="M18 3v2h-2V3H8v2H6V3H4v18h2v-2h2v2h8v-2h2v2h2V3h-2z' +
-        'M8 17H6v-2h2v2zm0-4H6v-2h2v2zm0-4H6V7h2v2z' +
-        'm10 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2z"/></svg>';
+    var D = {
+        log: function(t,m){ if(CONFIG.debug) console.log('[TRK]['+t+']',m); },
+        err: function(t,m){ console.error('[TRK][ERR]['+t+']',m); },
+        noty: function(m){ try{ Lampa.Noty.show(m); }catch(e){} }
+    };
 
-    function get(url, cb){
-        $.ajax({
-            url: WORKER + '/?url=' + encodeURIComponent(url),
-            timeout: 20000,
-            success: function(d){ cb(null, d); },
-            error: function(x,s,e){ cb(s+' '+e, null); }
-        });
-    }
+    var Net = {
+        get: function(url, ok, fail, _i){
+            var i = typeof _i === 'number' ? _i : CONFIG.pi;
+            if(i >= CONFIG.proxy.length){ if(fail) fail(); return; }
+            var pu = CONFIG.proxy[i].replace('{u}', encodeURIComponent(url));
+            $.ajax({ url: pu, timeout: CONFIG.timeout, success: function(data){
+                CONFIG.pi = i; if(ok) ok(data);
+            }, error: function(){ Net.get(url, ok, fail, i+1); }});
+        }
+    };
 
-    function run(){
-        Lampa.Noty.show('⏳ Ищу ссылки на видео...');
+    var Src = {
+        main: function(page, cb){
+            D.noty('⏳ Загрузка каталога...');
+            var url = CONFIG.site + (page > 1 ? '/page/'+page+'/' : '/');
+            Net.get(url, function(html){
+                if(typeof html !== 'string'){ cb([]); return; }
+                try {
+                    var doc = new DOMParser().parseFromString(html, 'text/html');
+                    var cards = doc.querySelectorAll('a[href*="/video/"]');
+                    var items = [];
+                    cards.forEach(function(a){
+                        var href = a.getAttribute('href') || '';
+                        if(!href) return;
+                        if(href.indexOf('http') === -1) href = CONFIG.site + href;
+                        var img = a.querySelector('img');
+                        var poster = img ? (img.getAttribute('src') || '') : '';
+                        var titleEl = a.querySelector('.title, strong');
+                        var title = titleEl ? titleEl.textContent.trim() : 'Без названия';
+                        var durEl = a.querySelector('.duration');
+                        var duration = durEl ? durEl.textContent.trim() : '';
+                        if(title && poster) items.push({ title: title, url: href, poster: poster, duration: duration });
+                    });
+                    if(items.length > 0) D.noty('✅ Загружено: '+items.length);
+                    else D.noty('⚠ Пусто');
+                    cb(items);
+                } catch(e){ cb([]); }
+            }, function(){ D.noty('⚠ Ошибка сети'); cb([]); });
+        },
+        search: function(q, cb){ D.noty('Поиск на этапе 3'); cb([]); },
+        cats: function(){ return []; }
+    };
 
-        get(SITE + '/video/432066/', function(err, data){
-            if(err){ Lampa.Noty.show('❌ '+err); return; }
+    var CSS = '\
+        .zf-wrap{padding:1.5em}\
+        .zf-grid{display:flex;flex-wrap:wrap;gap:1.2em}\
+        .zf-card{width:28em;position:relative;transition:transform .2s}\
+        .zf-card.focus{transform:scale(1.05)}\
+        .zf-poster{width:100%;height:16em;border-radius:.5em;overflow:hidden;background:#333; position:relative}\
+        .zf-poster img{width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0}\
+        .zf-dur{position:absolute;bottom:.5em;right:.5em;background:rgba(0,0,0,.85);\
+            color:#fff;padding:.15em .5em;border-radius:.3em;font-size:1.1em;font-weight:700}\
+        .zf-name{color:#eee;font-size:1.3em;margin-top:.5em;overflow:hidden;\
+            text-overflow:ellipsis;white-space:nowrap; height: 1.5em;}\
+        .zf-loading{display:flex;align-items:center;justify-content:center;\
+            padding:4em;color:#888;font-size:1.3em}\
+        .zf-spin{display:inline-block;width:2em;height:2em;border:3px solid #333;\
+            border-top-color:#4FC3F7;border-radius:50%;margin-right:.8em;\
+            animation:zfspin .7s linear infinite}\
+        @keyframes zfspin{to{transform:rotate(360deg)}}\
+        .zf-empty{text-align:center;padding:4em;color:#666;font-size:1.3em;width:100%}\
+    ';
+    $('#zf-css').remove();
+    $('<style>').attr('id','zf-css').text(CSS).appendTo('head');
 
-            var html = typeof data === 'string' ? data : '';
-            var items = [];
-
-            items.push({ title: '✅ Страница: '+html.length+' симв', subtitle: '' });
-
-            /* 1. Ищем flowplayer config */
-            var fpMatch = html.match(/flowplayer\s*\([^,]*,\s*(\{[\s\S]*?\})\s*\)/);
-            if(fpMatch){
-                items.push({ title: '✅ Flowplayer config найден', subtitle: '' });
-                var cfg = fpMatch[1];
-                var cfgChunks = cfg.match(/.{1,90}/g) || [];
-                cfgChunks.slice(0,15).forEach(function(c){
-                    items.push({ title: '', subtitle: c });
-                });
-            } else {
-                items.push({ title: '❌ Flowplayer config НЕ найден', subtitle: '' });
-            }
-
-            /* 2. Ищем все URL с расширениями видео */
-            var videoUrls = [];
-            var re = /['"](https?:\/\/[^'"]*\.(?:mp4|m3u8|webm)[^'"]*)['"]/gi;
-            var m;
-            while((m = re.exec(html)) !== null){
-                if(videoUrls.indexOf(m[1]) === -1) videoUrls.push(m[1]);
-            }
-
-            items.push({ title: '━━ Прямые URL видео: '+videoUrls.length+' ━━', subtitle: '' });
-            videoUrls.forEach(function(u){
-                items.push({ title: '', subtitle: u.substring(0,120) });
-            });
-
-            /* 3. Ищем все script блоки с video/flow/player */
-            var scripts = [];
-            var reS = /<script[^>]*>([\s\S]*?)<\/script>/gi;
-            while((m = reS.exec(html)) !== null){
-                var s = m[1].trim();
-                if(s.length > 50 && (
-                    s.indexOf('flowplayer') !== -1 ||
-                    s.indexOf('video_url') !== -1 ||
-                    s.indexOf('.mp4') !== -1 ||
-                    s.indexOf('kt_player') !== -1 ||
-                    s.indexOf('player') !== -1
-                )){
-                    scripts.push(s);
-                }
-            }
-
-            items.push({ title: '━━ JS с player: '+scripts.length+' ━━', subtitle: '' });
-            scripts.forEach(function(s, idx){
-                items.push({ title: '--- Script #'+(idx+1)+' ('+s.length+' симв) ---', subtitle: '' });
-                var lines = s.match(/.{1,90}/g) || [];
-                lines.slice(0,20).forEach(function(l){
-                    items.push({ title: '', subtitle: l });
-                });
-            });
-
-            /* 4. Если ничего не найдено — ищем data- атрибуты */
-            if(videoUrls.length === 0 && scripts.length === 0){
-                items.push({ title: '━━ Data атрибуты ━━', subtitle: '' });
-                var dataRe = /data-(?:video|src|url|config|clip)[^=]*="([^"]+)"/gi;
-                while((m = dataRe.exec(html)) !== null){
-                    items.push({ title: '', subtitle: m[0].substring(0,120) });
-                }
-            }
-
-            /* 5. Ищем JSON конфиг */
-            var jsonRe = /(?:var|let|const)\s+\w*(?:config|opts|options|settings|data)\s*=\s*(\{[^;]*\})/gi;
-            while((m = jsonRe.exec(html)) !== null){
-                items.push({ title: '━━ JSON config ━━', subtitle: '' });
-                var jc = m[1].match(/.{1,90}/g) || [];
-                jc.slice(0,10).forEach(function(c){
-                    items.push({ title: '', subtitle: c });
-                });
-            }
-
-            items.push({ title: '━━━━━━━━━━━', subtitle: '' });
-            items.push({ title: '← Назад', subtitle: '', action: 'back' });
-
-            Lampa.Select.show({
-                title: '🎥 Видео URL поиск',
-                items: items,
-                onBack: function(){ Lampa.Controller.toggle('content'); },
-                onSelect: function(item){
+    function showMainMenu(){
+        Lampa.Select.show({
+            title: '🎬 Trahkino',
+            items: [
+                { title: '🔍 Поиск', subtitle: '(Этап 3)', action: 'search' },
+                { title: '📽 Последние видео', subtitle: 'Каталог', action: 'all' },
+                { title: '← Назад', subtitle: '', action: 'back' }
+            ],
+            onBack: function(){ Lampa.Controller.toggle('content'); },
+            onSelect: function(item){
+                if(item.action === 'back' || item.action === 'search'){
                     if(item.action === 'back') Lampa.Controller.toggle('content');
+                    return;
                 }
-            });
+                if(item.action === 'all'){
+                    Lampa.Activity.push({ url: '', title: 'Последние видео', component: 'zf_cards', page: 1 });
+                }
+            }
         });
     }
+
+    function CardsComp(object){
+        var self   = this;
+        var scroll = new Lampa.Scroll({mask:true, over:true, step:250});
+        var body   = $('<div class="zf-wrap"></div>');
+        var grid   = $('<div class="zf-grid"></div>');
+
+        this.create = function(){
+            body.append('<div class="zf-loading" id="zf-loader"><div class="zf-spin"></div>Загрузка...</div>');
+            body.append(grid);
+            scroll.append(body);
+            Src.main(object.page || 1, function(items){ self.onDataLoaded(items); });
+        };
+
+        this.onDataLoaded = function(items){
+            $('#zf-loader').remove();
+            if(!items.length){
+                grid.html('<div class="zf-empty">📭 Пусто</div>');
+                self.bindFocus();
+                return;
+            }
+
+            items.forEach(function(m){
+                var card = $([
+                    '<div class="zf-card selector">',
+                      '<div class="zf-poster"></div>',
+                      m.duration ? '<div class="zf-dur">'+m.duration+'</div>' : '',
+                      '<div class="zf-name">'+m.title+'</div>',
+                    '</div>'
+                ].join(''));
+
+                card.on('hover:enter', function(){
+                    openInBrowser(m.url, m.title);
+                });
+
+                card.on('hover:focus', function(){
+                    scroll.update($(this));
+                });
+
+                grid.append(card);
+            });
+
+            self.bindFocus();
+        };
+
+        this.bindFocus = function(){
+            setTimeout(function(){
+                Lampa.Controller.collectionSet(scroll.render());
+                Lampa.Controller.collectionFocus(false, scroll.render());
+            }, 150);
+        };
+
+        // --- ИСПОЛЬЗУЕМ МАГИЮ OWN() ---
+        
+        this.start = function(){
+            // own() внедряет наши команды прямо в текущий активный контроллер Lampa.
+            // Он не ломает иерархию и не отключает боковое меню!
+            Lampa.Controller.own({
+                toggle: function(){},
+                left: function(){ Lampa.Controller.move('left'); },
+                right: function(){ Lampa.Controller.move('right'); },
+                up: function(){ Lampa.Controller.move('up'); },
+                down: function(){ Lampa.Controller.move('down'); },
+                back: function(){ Lampa.Activity.backward(); }
+            });
+        };
+        
+        this.toggle = function(){
+            // Пусто. Система сама разберется.
+        };
+
+        this.pause = function(){};
+        
+        this.stop = function(){
+            // Пусто. Очищаем только при уничтожении.
+        };
+        
+        this.render = function(){ return scroll.render(); };
+        
+        this.destroy = function(){ 
+            Lampa.Controller.clear(); // Безопасная очистка
+            scroll.destroy(); 
+            body.remove(); 
+        };
+    }
+
+    function openInBrowser(url, title){
+        D.noty('▶ Открываю: ' + title);
+        try {
+            if(typeof Lampa.Android !== 'undefined' && Lampa.Android.openUrl){
+                Lampa.Android.openUrl(url);
+                return;
+            }
+        } catch(e){}
+        try { window.open(url,'_blank'); } catch(e){}
+    }
+
+    Lampa.Component.add('zf_cards', CardsComp);
+
+    var ICO = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>';
 
     function addMenu(){
-        if($('[data-action="tkdiag"]').length) return;
-        var li = $('<li class="menu__item selector" data-action="tkdiag">'+
+        if($('[data-action="trahkino"]').length) return;
+        var li = $('<li class="menu__item selector" data-action="trahkino">'+
             '<div class="menu__ico">'+ICO+'</div>'+
-            '<div class="menu__text">TK Видео URL</div></li>');
-        li.on('hover:enter', function(){ run(); });
+            '<div class="menu__text">Trahkino</div></li>');
+        li.on('hover:enter', function(){ showMainMenu(); });
         var list = $('.menu .menu__list');
-        if(list.length) list.eq(0).append(li);
-        else { var ul = $('.menu ul'); if(ul.length) ul.eq(0).append(li); }
+        if(list.length){ list.eq(0).append(li); return; }
+        var ul = $('.menu ul');
+        if(ul.length) ul.eq(0).append(li);
     }
 
     function init(){
-        addMenu();
-        Lampa.Noty.show('🔧 TK v0.5');
+        try {
+            addMenu();
+            D.noty('🎬 Trahkino v'+CONFIG.ver);
+        } catch(e){ D.err('Boot',e.message); }
     }
 
     if(window.appready) init();
-    else Lampa.Listener.follow('app', function(e){
-        if(e.type === 'ready') init();
-    });
+    else Lampa.Listener.follow('app', function(e){ if(e.type === 'ready') init(); });
+
 })();
