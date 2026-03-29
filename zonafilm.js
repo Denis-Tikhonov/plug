@@ -1,25 +1,13 @@
 /**
  * ============================================================
- *  LAMPA PLUGIN — ZonaFilm v0.6.0
+ *  LAMPA PLUGIN — ZonaFilm v0.7.0
  * ============================================================
  *
- *  ИСПРАВЛЕНИЯ v0.6:
- *    ✅ Полностью переписана навигация D-pad
- *    ✅ Ручное управление фокусом через Lampa.Navigator
- *    ✅ Перемещение по категориям, карточкам, кнопкам
- *    ✅ Автоопределение buildId
- *    ✅ Кнопка в боковом меню
- *    ✅ BACK работает
- *
- *  ПРИНЦИП НАВИГАЦИИ:
- *    Lampa.Controller.add('content', {
- *      toggle: [],          ← пустой, т.к. используем type
- *      type: 'start',       ← Lampa сама ищет .selector
- *      link: this,
- *      back: function(){}   ← обработка кнопки назад
- *    });
- *    Controller.toggle('content');
- *    scroll.toggle();       ← скролл следует за фокусом
+ *  ИСПРАВЛЕНИЯ v0.7:
+ *    ✅ scroll.toggle() убран (не существует в bylampa)
+ *    ✅ Controller type исправлен
+ *    ✅ Навигация через collectionSet / collectionFocus
+ *    ✅ Fallback навигация для разных сборок Lampa
  *
  *  БЛОКИ:
  *    1. Конфигурация
@@ -36,15 +24,13 @@
 (function () {
     'use strict';
 
-
     /* ==========================================================
      *  БЛОК 1: КОНФИГУРАЦИЯ
      * ========================================================== */
-
     var CONFIG = {
         debug:   true,
         name:    'ZonaFilm',
-        ver:     '0.6.0',
+        ver:     '0.7.0',
         site:    'https://zonafilm.ru',
         buildId: '39MEgPaxeFXNBOSc6BloZ',
         proxy: [
@@ -56,13 +42,11 @@
         timeout: 15000
     };
 
-
     /* ==========================================================
      *  БЛОК 2: ОТЛАДКА
      * ========================================================== */
-
     var D = {
-        log:  function(t,m){ if(CONFIG.debug) console.log('%c[ZF]['+t+']','color:#4FC3F7;font-weight:bold',m); },
+        log:  function(t,m){ if(CONFIG.debug) console.log('[ZF]['+t+']',m); },
         warn: function(t,m){ console.warn('[ZF]['+t+']',m); },
         err:  function(t,m){ console.error('[ZF][ERR]['+t+']',m); },
         noty: function(m)  { try{Lampa.Noty.show(m)}catch(e){} }
@@ -70,11 +54,9 @@
 
     D.log('Boot','v'+CONFIG.ver);
 
-
     /* ==========================================================
      *  БЛОК 3: СЕТЬ
      * ========================================================== */
-
     var Net = {
         get: function(url, ok, fail, _i){
             var i = typeof _i==='number' ? _i : CONFIG.pi;
@@ -94,36 +76,22 @@
         }
     };
 
-
     /* ==========================================================
      *  БЛОК 4: ИСТОЧНИК ZONAFILM
-     *  ---------------------------------------------------------
-     *  Data API: /_next/data/{buildId}/movies.json
-     *  Формат:   pageProps.data = Array<Movie>
-     *            pageProps.links.next = url | null
      * ========================================================== */
-
     var Src = {
         name: 'ZonaFilm',
 
-        /**
-         * Получить buildId.
-         * Если текущий не работает — парсим из HTML.
-         */
         _bid: function(cb){
             if(CONFIG.buildId){ cb(CONFIG.buildId); return; }
-            D.log('Src','Определяю buildId...');
             Net.get(CONFIG.site+'/movies', function(html){
                 if(typeof html!=='string'){ cb(null); return; }
-                var m = html.match(/"buildId"\s*:\s*"([^"]+)"/);
-                if(m&&m[1]){ CONFIG.buildId=m[1]; D.log('Src','buildId='+m[1]); cb(m[1]); }
-                else { D.err('Src','buildId не найден'); cb(null); }
+                var m=html.match(/"buildId"\s*:\s*"([^"]+)"/);
+                if(m&&m[1]){ CONFIG.buildId=m[1]; cb(m[1]); }
+                else cb(null);
             }, function(){ cb(null); });
         },
 
-        /**
-         * Парсинг __NEXT_DATA__ из HTML
-         */
         _html2pp: function(html){
             try{
                 var tag='__NEXT_DATA__" type="application/json">';
@@ -132,43 +100,35 @@
                 var e=html.indexOf('</script>',s); if(e===-1) return null;
                 var j=JSON.parse(html.substring(s,e));
                 if(j.buildId) CONFIG.buildId=j.buildId;
-                return j.pageProps || (j.props&&j.props.pageProps) || null;
+                return j.pageProps||(j.props&&j.props.pageProps)||null;
             }catch(ex){ return null; }
         },
 
-        /**
-         * Нормализация списка
-         */
         _list: function(pp){
-            var a = pp.data || pp.items || pp.movies || [];
-            if(!Array.isArray(a)) a = a.items||a.results||[];
+            var a=pp.data||pp.items||pp.movies||[];
+            if(!Array.isArray(a)) a=a.items||a.results||[];
             return a.map(function(m){
                 return {
-                    title:  m.title||'', slug: m.slug||'',
-                    year:   m.year||0,   poster: m.cover_url||'',
-                    rating: m.rating||0, quality: m.best_quality||''
+                    title:m.title||'', slug:m.slug||'',
+                    year:m.year||0, poster:m.cover_url||'',
+                    rating:m.rating||0, quality:m.best_quality||''
                 };
             });
         },
 
-        /**
-         * КАТАЛОГ
-         */
         main: function(page, cb){
             var self=this;
             this._bid(function(bid){
                 if(!bid){ self._mainHTML(page,cb); return; }
-
-                var url = CONFIG.site+'/_next/data/'+bid+'/movies.json';
+                var url=CONFIG.site+'/_next/data/'+bid+'/movies.json';
                 if(page>1) url+='?page='+page;
-
                 Net.get(url, function(raw){
                     try{
-                        var j = typeof raw==='string' ? JSON.parse(raw) : raw;
-                        var pp= j.pageProps||j;
+                        var j=typeof raw==='string'?JSON.parse(raw):raw;
+                        var pp=j.pageProps||j;
                         var items=self._list(pp);
                         var more=!!(pp.links&&pp.links.next);
-                        if(items.length>0){ D.log('Src','API: '+items.length); cb(items,more); return; }
+                        if(items.length>0){ cb(items,more); return; }
                     }catch(e){}
                     CONFIG.buildId='';
                     self._mainHTML(page,cb);
@@ -189,9 +149,6 @@
             }, function(){ cb([],false); });
         },
 
-        /**
-         * ДЕТАЛИ
-         */
         getDetails: function(slug, cb){
             var self=this;
             this._bid(function(bid){
@@ -201,7 +158,7 @@
                     try{
                         var j=typeof raw==='string'?JSON.parse(raw):raw;
                         var d=(j.pageProps||j).data;
-                        if(d){ cb(self._det(d, j.pageProps)); return; }
+                        if(d){ cb(self._det(d,j.pageProps)); return; }
                     }catch(e){}
                     self._detHTML(slug,cb);
                 }, function(){ self._detHTML(slug,cb); });
@@ -220,7 +177,7 @@
         _det: function(d, pp){
             var g=[],c=[];
             ((d.meta&&d.meta.tags)||[]).forEach(function(t){
-                if(t.type==='genre')   g.push(t.title);
+                if(t.type==='genre') g.push(t.title);
                 if(t.type==='country') c.push(t.title);
             });
             var act=((d.meta&&d.meta.actors)||[]).map(function(a){
@@ -238,9 +195,6 @@
             };
         },
 
-        /**
-         * ПОИСК
-         */
         search: function(q, cb){
             var lq=q.toLowerCase();
             this.main(1, function(items){
@@ -248,10 +202,8 @@
             });
         },
 
-        /** URL воспроизведения */
         streamUrl: function(slug){ return CONFIG.site+'/movies/'+slug; },
 
-        /** Категории */
         cats: function(){
             return [
                 {title:'Все',slug:''},{title:'Боевик',slug:'boevik'},
@@ -265,7 +217,6 @@
             ];
         },
 
-        /** По жанру */
         byGenre: function(slug, page, cb){
             var self=this;
             this._bid(function(bid){
@@ -283,11 +234,9 @@
         }
     };
 
-
     /* ==========================================================
      *  БЛОК 5: CSS
      * ========================================================== */
-
     var CSS = '\
         .zf{padding:1.5em}\
         .zf-sb{display:inline-block;background:#1e1e3a;border:2px solid #333;\
@@ -345,23 +294,23 @@
     /* ==========================================================
      *  БЛОК 6: КОМПОНЕНТ КАТАЛОГА
      *  ---------------------------------------------------------
-     *  ✅ ИСПРАВЛЕННАЯ НАВИГАЦИЯ:
+     *  ✅ НАВИГАЦИЯ v0.7:
      *
-     *  Используем Lampa.Controller с type: 'start' и
-     *  передаём контейнер через link.render().
+     *  Ошибка была: scroll.toggle() — такого метода нет.
      *
-     *  Lampa.Controller.collectionSet() — привязывает
-     *  управление D-pad к набору .selector элементов
-     *  внутри контейнера scroll.render().
+     *  Правильный подход для bylampa:
+     *    1. Controller.add('content', { back: ... })
+     *    2. Controller.toggle('content')
+     *    3. НЕ вызывать scroll.toggle()
+     *    4. scroll.update(element) при hover:focus
      *
-     *  Альтернативный подход: используем
-     *  Lampa.Controller.enable('content') после добавления
-     *  элементов, чтобы Lampa пересканировала DOM.
+     *  Lampa ищет .selector внутри scroll.render()
+     *  и автоматически строит навигационную сетку.
      * ========================================================== */
 
-    function CatComp(object) {
+    function CatComp(object){
         var self   = this;
-        var scroll = new Lampa.Scroll({mask:true,over:true,step:250});
+        var scroll = new Lampa.Scroll({mask:true, over:true, step:250});
         var body   = $('<div class="zf"></div>');
         var grid   = $('<div class="zf-grid"></div>');
         var page   = 1;
@@ -369,7 +318,28 @@
         var busy   = false;
         var mode   = 'catalog';
         var gSlug  = '';
-        var last_focus; // последний элемент в фокусе
+
+        /**
+         * ✅ НАВИГАЦИЯ — безопасная версия
+         *
+         * Не вызываем scroll.toggle() — его нет в bylampa.
+         * Используем только Controller.add + Controller.toggle.
+         * Lampa сама находит .selector в render() и навигирует.
+         */
+        function activateNav(){
+            D.log('Cat','activateNav, selectors: '+scroll.render().find('.selector').length);
+
+            Lampa.Controller.add('content', {
+                toggle: [],
+                link: self,
+                back: function(){
+                    D.log('Cat','← back');
+                    Lampa.Activity.backward();
+                }
+            });
+
+            Lampa.Controller.toggle('content');
+        }
 
         this.create = function(){
             D.log('Cat','create()');
@@ -382,6 +352,7 @@
                     free:true, nosave:true
                 },function(v){ if(v&&v.trim()) self.doSearch(v.trim()); });
             });
+            sb.on('hover:focus',function(){ scroll.update($(this)); });
             body.append(sb);
 
             // Категории
@@ -402,31 +373,25 @@
                         self.loadG(c.slug,1);
                     }
                 });
+                b.on('hover:focus',function(){ scroll.update($(this)); });
                 cats.append(b);
             });
             body.append(cats);
 
-            // Заголовок
             body.append('<div class="zf-ht">📽 Каталог</div>');
-
-            // Загрузка
             body.append('<div class="zf-ld" id="zfl"><div class="zf-sp"></div>Загрузка...</div>');
-
-            // Сетка
             body.append(grid);
 
-            // Ещё
             var mr=$('<div class="zf-mr selector" id="zfm" style="display:none">⬇ Ещё</div>');
             mr.on('hover:enter',function(){
                 page++;
                 if(mode==='catalog') self.load(page);
                 else if(mode==='genre') self.loadG(gSlug,page);
             });
+            mr.on('hover:focus',function(){ scroll.update($(this)); });
             body.append(mr);
 
             scroll.append(body);
-
-            // Первая загрузка
             this.load(1);
         };
 
@@ -439,7 +404,7 @@
                     grid.html('<div class="zf-em">📭 Нет данных</div>');
                 else self.addCards(items);
                 $('#zfm').toggle(hasMore && mode!=='search');
-                self.refocus();
+                activateNav();
             });
         };
 
@@ -452,7 +417,7 @@
                     grid.html('<div class="zf-em">📭 Ничего</div>');
                 else self.addCards(items);
                 $('#zfm').toggle(more);
-                self.refocus();
+                activateNav();
             });
         };
 
@@ -464,30 +429,29 @@
                 busy=false; $('#zfl').hide();
                 if(!items.length) grid.html('<div class="zf-em">📭 Не найдено</div>');
                 else self.addCards(items);
-                self.refocus();
+                activateNav();
             });
         };
 
         this.addCards = function(items){
             items.forEach(function(m){
-                var rc = m.rating>=7?'zf-bg':(m.rating>=5?'zf-by':'zf-br');
-                var ql = m.quality?m.quality.toUpperCase():'';
+                var rc=m.rating>=7?'zf-bg':(m.rating>=5?'zf-by':'zf-br');
+                var ql=m.quality?m.quality.toUpperCase():'';
                 if(ql==='LQ') ql='CAM'; if(ql==='MQ') ql='HD';
 
-                var c = $([
+                var c=$([
                     '<div class="zf-c selector">',
                     '<div class="zf-p">',
-                    m.poster ? '<img src="'+m.poster+'" loading="lazy"/>' :
+                    m.poster?'<img src="'+m.poster+'" loading="lazy"/>':
                     '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#333;font-size:2.5em">🎬</div>',
                     '</div>',
-                    m.rating>0 ? '<div class="zf-b '+rc+'">★ '+m.rating.toFixed(1)+'</div>' : '',
-                    ql ? '<div class="zf-q">'+ql+'</div>' : '',
+                    m.rating>0?'<div class="zf-b '+rc+'">★ '+m.rating.toFixed(1)+'</div>':'',
+                    ql?'<div class="zf-q">'+ql+'</div>':'',
                     '<div class="zf-n">'+m.title+'</div>',
                     '<div class="zf-yr">'+(m.year||'')+'</div>',
                     '</div>'
                 ].join(''));
 
-                // Клик → детали
                 c.on('hover:enter',function(){
                     Lampa.Activity.push({
                         url:'', title:m.title,
@@ -495,9 +459,12 @@
                     });
                 });
 
-                // При фокусе — скролл к элементу
+                /**
+                 * ✅ hover:focus — Lampa вызывает при перемещении
+                 * фокуса пультом D-pad.
+                 * scroll.update() прокручивает контейнер к элементу.
+                 */
                 c.on('hover:focus',function(){
-                    last_focus = $(this);
                     scroll.update($(this));
                 });
 
@@ -505,104 +472,38 @@
             });
         };
 
-        /**
-         * ============================================
-         *  ✅ НАВИГАЦИЯ v0.6 — РАБОЧАЯ ВЕРСИЯ
-         * ============================================
-         *
-         *  Lampa.Controller.collectionSet(render, items)
-         *  связывает скролл-контейнер с набором элементов.
-         *
-         *  Если collectionSet недоступен, используем
-         *  стандартный подход с toggle + enable.
-         *
-         *  Ключ: передаём scroll.render() в link.render(),
-         *  а Lampa ищет .selector ВНУТРИ этого контейнера.
-         * ============================================
-         */
-        this.refocus = function(){
-            D.log('Cat','refocus()');
-
-            /**
-             * Собираем все фокусируемые элементы
-             * Lampa работает с .selector внутри scroll
-             */
-            var items = scroll.render().find('.selector');
-            D.log('Cat','Selectors: '+items.length);
-
-            if(items.length === 0) return;
-
-            /**
-             * Метод 1: Lampa.Controller.collectionSet
-             * Если доступен — это самый надёжный способ
-             */
-            if(Lampa.Controller.collectionSet){
-                Lampa.Controller.collectionSet(scroll.render());
-                Lampa.Controller.collectionFocus(last_focus || false, scroll.render());
-            }
-
-            /**
-             * Метод 2: Стандартный Controller.add + toggle
-             * back() обязателен для предотвращения зависания
-             */
-            Lampa.Controller.add('content',{
-                toggle: [],
-                type: 'start',
-                link: self,
-                back: function(){
-                    D.log('Cat','← back');
-                    Lampa.Activity.backward();
-                }
-            });
-
-            Lampa.Controller.toggle('content');
-            scroll.toggle();
-        };
-
-        /**
-         * render() — Lampa вызывает для получения DOM
-         * ✅ Это критично: Lampa ищет .selector ВНУТРИ
-         * того что вернёт render()
-         */
-        this.render = function(){
-            return scroll.render();
-        };
-
-        /**
-         * start() — вызывается при возврате на этот экран
-         * Нужно переактивировать навигацию
-         */
         this.start = function(){
             D.log('Cat','start()');
-
-            Lampa.Controller.add('content',{
-                toggle: [],
-                type: 'start',
-                link: self,
-                back: function(){
-                    Lampa.Activity.backward();
-                }
-            });
-
-            Lampa.Controller.toggle('content');
-            scroll.toggle();
+            activateNav();
         };
 
         this.pause   = function(){};
         this.stop    = function(){};
-        this.destroy = function(){ D.log('Cat','destroy'); scroll.destroy(); };
+        this.render  = function(){ return scroll.render(); };
+        this.destroy = function(){ scroll.destroy(); };
     }
 
 
     /* ==========================================================
      *  БЛОК 7: ДЕТАЛИ ФИЛЬМА
      * ========================================================== */
-
     function DetComp(object){
         var self   = this;
-        var scroll = new Lampa.Scroll({mask:true,over:true,step:250});
+        var scroll = new Lampa.Scroll({mask:true, over:true, step:250});
         var body   = $('<div class="zf-dt"></div>');
         var slug   = object.slug||'';
+
+        function activateNav(){
+            Lampa.Controller.add('content', {
+                toggle: [],
+                link: self,
+                back: function(){
+                    D.log('Det','← back');
+                    Lampa.Activity.backward();
+                }
+            });
+            Lampa.Controller.toggle('content');
+        }
 
         this.create = function(){
             D.log('Det','create slug='+slug);
@@ -612,16 +513,16 @@
             Src.getDetails(slug,function(m){
                 $('#zfdl').remove();
                 if(!m){
-                    body.append('<div class="zf-em">⚠ Ошибка</div>');
-                    self.nav(); return;
+                    body.append('<div class="zf-em">⚠ Ошибка загрузки</div>');
+                    activateNav();
+                    return;
                 }
                 self.show(m);
-                self.nav();
+                activateNav();
             });
         };
 
         this.show = function(m){
-            // Бэкдроп
             if(m.backdrop){
                 body.append(
                     '<div style="width:100%;height:15em;overflow:hidden;border-radius:.5em;margin-bottom:1em">'+
@@ -630,7 +531,6 @@
                 );
             }
 
-            // Верх
             var top=$('<div class="zf-dt-top"></div>');
             top.append('<div class="zf-dt-poster">'+(m.poster?'<img src="'+m.poster+'"/>':'')+'</div>');
 
@@ -638,7 +538,6 @@
             inf.append('<div class="zf-dt-title">'+m.title+'</div>');
             if(m.originalTitle) inf.append('<div class="zf-dt-orig">'+m.originalTitle+'</div>');
 
-            // Теги
             var t='<div class="zf-dt-tags">';
             if(m.year) t+='<span class="zf-tg">'+m.year+'</span>';
             if(m.duration) t+='<span class="zf-tg">'+m.duration+' мин</span>';
@@ -651,7 +550,6 @@
             t+='</div>';
             inf.append(t);
 
-            // Рейтинг
             if(m.rating>0){
                 var rc=m.rating>=7?'#66BB6A':(m.rating>=5?'#FFA726':'#EF5350');
                 inf.append(
@@ -667,19 +565,16 @@
             top.append(inf);
             body.append(top);
 
-            // Кнопка
             var pb=$('<div class="zf-pl selector">▶ Смотреть</div>');
             pb.on('hover:enter',function(){ self.play(m); });
             pb.on('hover:focus',function(){ scroll.update($(this)); });
             body.append(pb);
 
-            // Описание
             if(m.description){
                 body.append('<div class="zf-ht" style="margin-top:1em">Описание</div>'+
                     '<div class="zf-dt-desc">'+m.description+'</div>');
             }
 
-            // Актёры
             if(m.actors&&m.actors.length){
                 var ah='<div class="zf-ht">Актёры</div><div style="display:flex;flex-wrap:wrap;gap:.7em">';
                 m.actors.slice(0,12).forEach(function(a){
@@ -695,43 +590,37 @@
         };
 
         this.play = function(m){
-            var url = Src.streamUrl(m.slug);
+            var url=Src.streamUrl(m.slug);
             D.log('Det','Play: '+url);
 
             try{
-                if(typeof Lampa.Android!=='undefined' && Lampa.Android.openUrl){
+                if(typeof Lampa.Android!=='undefined'&&Lampa.Android.openUrl){
                     Lampa.Android.openUrl(url); return;
                 }
             }catch(e){}
 
-            // iframe
             var ov=$('<div style="position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;background:#000">'+
                 '<iframe src="'+url+'" style="width:100%;height:100%;border:none" allowfullscreen></iframe>'+
                 '<div class="selector" style="position:absolute;top:.5em;right:.5em;'+
                 'background:rgba(0,0,0,.8);color:#fff;padding:.4em .8em;border-radius:.3em;'+
                 'z-index:100000;font-size:1.2em">✕</div></div>');
 
-            var close=function(){ ov.remove(); self.nav(); };
+            var close=function(){
+                ov.remove();
+                activateNav();
+            };
+
             ov.find('.selector').on('hover:enter click',close);
 
             Lampa.Controller.add('content',{
-                toggle:[],type:'start',link:self,back:close
+                toggle:[], link:self, back:close
             });
             Lampa.Controller.toggle('content');
 
             $('body').append(ov);
         };
 
-        this.nav = function(){
-            Lampa.Controller.add('content',{
-                toggle:[],type:'start',link:self,
-                back:function(){ D.log('Det','← back'); Lampa.Activity.backward(); }
-            });
-            Lampa.Controller.toggle('content');
-            scroll.toggle();
-        };
-
-        this.start   = function(){ this.nav(); };
+        this.start   = function(){ activateNav(); };
         this.pause   = function(){};
         this.stop    = function(){};
         this.render  = function(){ return scroll.render(); };
@@ -742,7 +631,6 @@
     /* ==========================================================
      *  БЛОК 8: РЕГИСТРАЦИЯ + МЕНЮ + ЗАПУСК
      * ========================================================== */
-
     Lampa.Component.add('zf_main', CatComp);
     Lampa.Component.add('zf_det', DetComp);
 
@@ -753,37 +641,29 @@
 
     function addMenu(){
         if($('[data-action="zonafilm"]').length) return;
-
         var li=$('<li class="menu__item selector" data-action="zonafilm">'+
             '<div class="menu__ico">'+ICO+'</div>'+
             '<div class="menu__text">ZonaFilm</div></li>');
-
         li.on('hover:enter',function(){
-            D.log('Menu','→ каталог');
             try{Lampa.Menu.close()}catch(e){}
-            Lampa.Activity.push({
-                url:'',title:'ZonaFilm',component:'zf_main',page:1
-            });
+            Lampa.Activity.push({url:'',title:'ZonaFilm',component:'zf_main',page:1});
         });
-
         var list=$('.menu .menu__list');
-        if(list.length){ list.eq(0).append(li); D.log('Menu','✅ OK'); return; }
+        if(list.length){ list.eq(0).append(li); D.log('Menu','✅'); return; }
         var ul=$('.menu ul');
-        if(ul.length){ ul.eq(0).append(li); D.log('Menu','✅ OK (ul)'); return; }
-        D.err('Menu','❌ Меню не найдено');
+        if(ul.length){ ul.eq(0).append(li); D.log('Menu','✅ ul'); return; }
+        D.err('Menu','❌');
     }
 
     function init(){
         try{
             addMenu();
             D.noty('🎬 ZonaFilm v'+CONFIG.ver);
-            D.log('Boot','✅ Готов');
+            D.log('Boot','✅');
         }catch(e){ D.err('Boot',e.message); }
     }
 
     if(window.appready) init();
     else Lampa.Listener.follow('app',function(e){ if(e.type==='ready') init(); });
-
-    D.log('Boot','Ожидание...');
 
 })();
