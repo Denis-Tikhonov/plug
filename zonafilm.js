@@ -1,14 +1,13 @@
 /**
  * ============================================================
- *  LAMPA PLUGIN — Trahkino v1.3.0
+ *  LAMPA PLUGIN — Trahkino v1.3.1
  * ============================================================
  *
- *  ИСПРАВЛЕНИЯ v1.3:
- *    ✅ Постеры загружаются через прокси (фикс hotlink блокировки)
- *    ✅ Размер карточек увеличен в 2 раза
- *    ✅ Навигация (D-pad) переписана по стандартам Lampa API
- *       (используются: Controller.add, toggle, move, back, 
- *       collectionSet, collectionFocus, Scroll.update, destroy)
+ *  ИСПРАВЛЕНИЯ v1.3.1:
+ *    ✅ Постеры через специализированный прокси картинок (weserv.nl)
+ *    ✅ Размер карточек строго 21em x 12em
+ *    ✅ Навигация пультом исправлена (Controller.add в start, 
+ *       задержка фокуса для рендера DOM)
  *
  * ============================================================
  */
@@ -21,7 +20,7 @@
      * ========================================================== */
     var CONFIG = {
         debug: true,
-        ver: '1.3.0',
+        ver: '1.3.1',
         site: 'https://trahkino.me',
         proxy: [
             'https://api.codetabs.com/v1/proxy?quest={u}',
@@ -42,15 +41,9 @@
     };
 
     /* ==========================================================
-     *  БЛОК 3: СЕТЬ + ПРОКСИ ДЛЯ КАРТИНОК
+     *  БЛОК 3: СЕТЬ
      * ========================================================== */
     var Net = {
-        // Метод для прогоняния УРЛ картинок через прокси
-        proxyImg: function(url){
-            if(!url) return '';
-            // Используем текущий рабочий прокси
-            return CONFIG.proxy[CONFIG.pi].replace('{u}', encodeURIComponent(url));
-        },
         get: function(url, ok, fail, _i){
             var i = typeof _i === 'number' ? _i : CONFIG.pi;
             if(i >= CONFIG.proxy.length){
@@ -58,7 +51,6 @@
                 if(fail) fail(); return;
             }
             var pu = CONFIG.proxy[i].replace('{u}', encodeURIComponent(url));
-            D.log('Net','Прокси #'+i);
             $.ajax({ url: pu, timeout: CONFIG.timeout, success: function(data){
                 CONFIG.pi = i; if(ok) ok(data);
             }, error: function(){
@@ -129,19 +121,19 @@
     };
 
     /* ==========================================================
-     *  БЛОК 5: CSS (Увеличен в 2 раза)
+     *  БЛОК 5: CSS (Размер 21 x 12)
      * ========================================================== */
     var CSS = '\
         .zf-wrap{padding:1.5em}\
         .zf-grid{display:flex;flex-wrap:wrap;gap:1.2em}\
-        .zf-card{width:28em;position:relative;transition:transform .2s}\
+        .zf-card{width:21em;position:relative;transition:transform .2s}\
         .zf-card.focus{transform:scale(1.05)}\
-        .zf-poster{width:100%;height:16em;border-radius:.5em;overflow:hidden;background:#222; position:relative}\
+        .zf-poster{width:100%;height:12em;border-radius:.5em;overflow:hidden;background:#222; position:relative}\
         .zf-poster img{width:100%;height:100%;object-fit:cover}\
-        .zf-dur{position:absolute;bottom:.5em;right:.5em;background:rgba(0,0,0,.85);\
-            color:#fff;padding:.15em .5em;border-radius:.3em;font-size:1em;font-weight:700}\
-        .zf-name{color:#eee;font-size:1.2em;margin-top:.5em;overflow:hidden;\
-            text-overflow:ellipsis;white-space:nowrap; height: 1.4em;}\
+        .zf-dur{position:absolute;bottom:.4em;right:.4em;background:rgba(0,0,0,.85);\
+            color:#fff;padding:.1em .4em;border-radius:.3em;font-size:.9em;font-weight:700}\
+        .zf-name{color:#eee;font-size:1.1em;margin-top:.4em;overflow:hidden;\
+            text-overflow:ellipsis;white-space:nowrap; height: 1.3em;}\
         .zf-loading{display:flex;align-items:center;justify-content:center;\
             padding:4em;color:#888;font-size:1.3em}\
         .zf-spin{display:inline-block;width:2em;height:2em;border:3px solid #333;\
@@ -182,7 +174,7 @@
     }
 
     /* ==========================================================
-     *  БЛОК 7: КОМПОНЕНТ КАРТОЧЕК (Строго по API Lampa)
+     *  БЛОК 7: КОМПОНЕНТ КАРТОЧЕК
      * ========================================================== */
     function CardsComp(object){
         var self   = this;
@@ -208,8 +200,8 @@
             }
 
             items.forEach(function(m){
-                // Оборачиваем картинку в прокси для обхода блокировки хостинга
-                var proxiedPoster = Net.proxyImg(m.poster);
+                // Специализированный прокси для КАРТИНОК (обходит hotlink и CORS)
+                var proxiedPoster = 'https://images.weserv.nl/?url=' + encodeURIComponent(m.poster);
 
                 var card = $([
                     '<div class="zf-card selector">',
@@ -225,7 +217,6 @@
                     openInBrowser(m.url, m.title);
                 });
 
-                // Обязательный вызов Scroll.update при фокусе (из вашего списка методов)
                 card.on('hover:focus', function(){
                     scroll.update($(this));
                 });
@@ -233,36 +224,25 @@
                 grid.append(card);
             });
 
-            // --- СТАНДАРТНАЯ НАВИГАЦИЯ LAMPA ---
-            // Добавляем слой управления
-            Lampa.Controller.add('content', {
-                toggle: function(){},
-                left: function(){
-                    Lampa.Controller.move('left');
-                },
-                right: function(){
-                    Lampa.Controller.move('right');
-                },
-                up: function(){
-                    Lampa.Controller.move('up');
-                },
-                down: function(){
-                    Lampa.Controller.move('down');
-                },
-                back: function(){
-                    Lampa.Activity.backward();
-                }
-            });
-
-            // Привязываем DOM к контроллеру
-            Lampa.Controller.collectionSet(scroll.render());
-            // Фокусируемся на первом элементе
-            Lampa.Controller.collectionFocus(false, scroll.render());
+            // Задержка в 100мс обязательна, чтобы Scroll отрисовал новые блоки 
+            // и Lampa смогла привязать к ним фокус пульта
+            setTimeout(function(){
+                Lampa.Controller.collectionSet(scroll.render());
+                Lampa.Controller.collectionFocus(false, scroll.render());
+            }, 100);
         };
 
-        // Обязательные методы жизненного цикла компонента Lampa
+        // Стандартный паттерн управления компонентом в Lampa
         this.start = function(){
-            Lampa.Controller.toggle('content');
+            Lampa.Controller.add('content', {
+                toggle: function(){},
+                left: function(){ Lampa.Controller.move('left'); },
+                right: function(){ Lampa.Controller.move('right'); },
+                up: function(){ Lampa.Controller.move('up'); },
+                down: function(){ Lampa.Controller.move('down'); },
+                back: function(){ Lampa.Activity.backward(); }
+            });
+            Lampa.Controller.enable('content');
         };
         
         this.toggle = function(){
@@ -272,13 +252,11 @@
         this.pause = function(){};
         this.stop = function(){};
         
-        this.render = function(){ 
-            return scroll.render(); 
-        };
+        this.render = function(){ return scroll.render(); };
         
         this.destroy = function(){ 
             scroll.destroy();
-            Lampa.Controller.clear(); // Очистка контроллеров из вашего списка
+            Lampa.Controller.clear(); 
         };
     }
 
@@ -288,14 +266,12 @@
     function openInBrowser(url, title){
         D.log('Play','Открытие: '+url);
         D.noty('▶ Открываю: ' + title);
-
         try {
             if(typeof Lampa.Android !== 'undefined' && Lampa.Android.openUrl){
                 Lampa.Android.openUrl(url);
                 return;
             }
         } catch(e){}
-
         try { window.open(url,'_blank'); } catch(e){}
     }
 
