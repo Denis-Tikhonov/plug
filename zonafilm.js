@@ -1,13 +1,14 @@
 /**
  * ============================================================
- *  LAMPA PLUGIN — Trahkino v1.2.0
+ *  LAMPA PLUGIN — Trahkino v1.3.0
  * ============================================================
  *
- *  ЭТАП 2: Парсинг реального каталога + Внешнее воспроизведение
- *    ✅ Парсинг HTML через DOMParser (постеры 16:9, названия, время)
- *    ✅ Отображение каталога внутри Lampa (Cards Component)
- *    ✅ Воспроизведение через системный браузер (из-за динамической подписи .mp4)
- *    ✅ Настроен CSS под горизонтальные превью (402x226)
+ *  ИСПРАВЛЕНИЯ v1.3:
+ *    ✅ Постеры загружаются через прокси (фикс hotlink блокировки)
+ *    ✅ Размер карточек увеличен в 2 раза
+ *    ✅ Навигация (D-pad) переписана по стандартам Lampa API
+ *       (используются: Controller.add, toggle, move, back, 
+ *       collectionSet, collectionFocus, Scroll.update, destroy)
  *
  * ============================================================
  */
@@ -20,7 +21,7 @@
      * ========================================================== */
     var CONFIG = {
         debug: true,
-        ver: '1.2.0',
+        ver: '1.3.0',
         site: 'https://trahkino.me',
         proxy: [
             'https://api.codetabs.com/v1/proxy?quest={u}',
@@ -41,9 +42,15 @@
     };
 
     /* ==========================================================
-     *  БЛОК 3: СЕТЬ
+     *  БЛОК 3: СЕТЬ + ПРОКСИ ДЛЯ КАРТИНОК
      * ========================================================== */
     var Net = {
+        // Метод для прогоняния УРЛ картинок через прокси
+        proxyImg: function(url){
+            if(!url) return '';
+            // Используем текущий рабочий прокси
+            return CONFIG.proxy[CONFIG.pi].replace('{u}', encodeURIComponent(url));
+        },
         get: function(url, ok, fail, _i){
             var i = typeof _i === 'number' ? _i : CONFIG.pi;
             if(i >= CONFIG.proxy.length){
@@ -65,10 +72,9 @@
      * ========================================================== */
     var Src = {
         main: function(page, cb){
-            D.log('Src','Парсинг главной, страница: '+page);
+            D.log('Src','Парсинг, страница: '+page);
             D.noty('⏳ Загрузка каталога...');
 
-            // Формируем URL пагинации (обычно /page/2/ и т.д.)
             var url = CONFIG.site + (page > 1 ? '/page/'+page+'/' : '/');
             
             Net.get(url, function(html){
@@ -81,20 +87,16 @@
                     var items = [];
 
                     cards.forEach(function(a){
-                        // Берем ссылку
                         var href = a.getAttribute('href') || '';
                         if(!href) return;
                         if(href.indexOf('http') === -1) href = CONFIG.site + href;
 
-                        // Берем превью
                         var img = a.querySelector('img');
                         var poster = img ? (img.getAttribute('src') || img.getAttribute('data-webp') || '') : '';
 
-                        // Берем название
                         var titleEl = a.querySelector('.title, strong');
                         var title = titleEl ? titleEl.textContent.trim() : 'Без названия';
 
-                        // Берем длительность
                         var durEl = a.querySelector('.duration');
                         var duration = durEl ? durEl.textContent.trim() : '';
 
@@ -108,7 +110,7 @@
                         }
                     });
 
-                    D.log('Src','Найдено карточек: '+items.length);
+                    D.log('Src','Найдено: '+items.length);
                     if(items.length > 0) D.noty('✅ Загружено: '+items.length);
                     else D.noty('⚠ Карточки не найдены');
                     cb(items);
@@ -122,33 +124,31 @@
                 cb([]);
             });
         },
-
-        // Заглушки для следующих этапов
         search: function(q, cb){ D.noty('Поиск будет на этапе 3'); cb([]); },
         cats: function(){ return []; }
     };
 
     /* ==========================================================
-     *  БЛОК 5: CSS (Адаптирован под горизонтальные превью 16:9)
+     *  БЛОК 5: CSS (Увеличен в 2 раза)
      * ========================================================== */
     var CSS = '\
-        .zf-wrap{padding:1em}\
-        .zf-grid{display:flex;flex-wrap:wrap;gap:.8em}\
-        .zf-card{width:14em;position:relative;transition:transform .15s}\
+        .zf-wrap{padding:1.5em}\
+        .zf-grid{display:flex;flex-wrap:wrap;gap:1.2em}\
+        .zf-card{width:28em;position:relative;transition:transform .2s}\
         .zf-card.focus{transform:scale(1.05)}\
-        .zf-poster{width:100%;height:8em;border-radius:.4em;overflow:hidden;background:#111; position:relative}\
+        .zf-poster{width:100%;height:16em;border-radius:.5em;overflow:hidden;background:#222; position:relative}\
         .zf-poster img{width:100%;height:100%;object-fit:cover}\
-        .zf-dur{position:absolute;bottom:.3em;right:.3em;background:rgba(0,0,0,.8);\
-            color:#fff;padding:.1em .4em;border-radius:.2em;font-size:.75em;font-weight:700}\
-        .zf-name{color:#eee;font-size:.85em;margin-top:.4em;overflow:hidden;\
-            text-overflow:ellipsis;white-space:nowrap; height: 1.2em;}\
+        .zf-dur{position:absolute;bottom:.5em;right:.5em;background:rgba(0,0,0,.85);\
+            color:#fff;padding:.15em .5em;border-radius:.3em;font-size:1em;font-weight:700}\
+        .zf-name{color:#eee;font-size:1.2em;margin-top:.5em;overflow:hidden;\
+            text-overflow:ellipsis;white-space:nowrap; height: 1.4em;}\
         .zf-loading{display:flex;align-items:center;justify-content:center;\
-            padding:3em;color:#888;font-size:1.1em}\
-        .zf-spin{display:inline-block;width:1.5em;height:1.5em;border:3px solid #333;\
-            border-top-color:#4FC3F7;border-radius:50%;margin-right:.6em;\
+            padding:4em;color:#888;font-size:1.3em}\
+        .zf-spin{display:inline-block;width:2em;height:2em;border:3px solid #333;\
+            border-top-color:#4FC3F7;border-radius:50%;margin-right:.8em;\
             animation:zfspin .7s linear infinite}\
         @keyframes zfspin{to{transform:rotate(360deg)}}\
-        .zf-empty{text-align:center;padding:3em;color:#666;font-size:1.1em;width:100%}\
+        .zf-empty{text-align:center;padding:4em;color:#666;font-size:1.3em;width:100%}\
     ';
     $('#zf-css').remove();
     $('<style>').attr('id','zf-css').text(CSS).appendTo('head');
@@ -182,7 +182,7 @@
     }
 
     /* ==========================================================
-     *  БЛОК 7: КОМПОНЕНТ КАРТОЧЕК
+     *  БЛОК 7: КОМПОНЕНТ КАРТОЧЕК (Строго по API Lampa)
      * ========================================================== */
     function CardsComp(object){
         var self   = this;
@@ -202,63 +202,100 @@
             $('#zf-loader').remove();
             if(!items.length){
                 grid.html('<div class="zf-empty">📭 Пусто</div>');
-                this.activate(); return;
+                Lampa.Controller.collectionSet(scroll.render());
+                Lampa.Controller.collectionFocus(false, scroll.render());
+                return;
             }
 
             items.forEach(function(m){
+                // Оборачиваем картинку в прокси для обхода блокировки хостинга
+                var proxiedPoster = Net.proxyImg(m.poster);
+
                 var card = $([
                     '<div class="zf-card selector">',
                       '<div class="zf-poster">',
-                        '<img src="'+m.poster+'" loading="lazy"/>',
+                        '<img src="'+proxiedPoster+'" loading="lazy"/>',
                         m.duration ? '<div class="zf-dur">'+m.duration+'</div>' : '',
                       '</div>',
                       '<div class="zf-name">'+m.title+'</div>',
                     '</div>'
                 ].join(''));
 
-                // При нажатии открываем через системный браузер (из-за динамического .mp4)
                 card.on('hover:enter', function(){
                     openInBrowser(m.url, m.title);
                 });
 
-                card.on('hover:focus', function(){ scroll.update($(this)); });
+                // Обязательный вызов Scroll.update при фокусе (из вашего списка методов)
+                card.on('hover:focus', function(){
+                    scroll.update($(this));
+                });
+
                 grid.append(card);
             });
-            this.activate();
-        };
 
-        this.activate = function(){
+            // --- СТАНДАРТНАЯ НАВИГАЦИЯ LAMPA ---
+            // Добавляем слой управления
             Lampa.Controller.add('content', {
-                back: function(){ Lampa.Activity.backward(); setTimeout(showMainMenu, 300); }
+                toggle: function(){},
+                left: function(){
+                    Lampa.Controller.move('left');
+                },
+                right: function(){
+                    Lampa.Controller.move('right');
+                },
+                up: function(){
+                    Lampa.Controller.move('up');
+                },
+                down: function(){
+                    Lampa.Controller.move('down');
+                },
+                back: function(){
+                    Lampa.Activity.backward();
+                }
             });
-            Lampa.Controller.enable('content');
+
+            // Привязываем DOM к контроллеру
             Lampa.Controller.collectionSet(scroll.render());
+            // Фокусируемся на первом элементе
             Lampa.Controller.collectionFocus(false, scroll.render());
         };
 
-        this.start = function(){ this.activate(); };
+        // Обязательные методы жизненного цикла компонента Lampa
+        this.start = function(){
+            Lampa.Controller.toggle('content');
+        };
+        
+        this.toggle = function(){
+            Lampa.Controller.toggle('content');
+        };
+
         this.pause = function(){};
         this.stop = function(){};
-        this.render = function(){ return scroll.render(); };
-        this.destroy = function(){ scroll.destroy(); };
+        
+        this.render = function(){ 
+            return scroll.render(); 
+        };
+        
+        this.destroy = function(){ 
+            scroll.destroy();
+            Lampa.Controller.clear(); // Очистка контроллеров из вашего списка
+        };
     }
 
     /* ==========================================================
-     *  БЛОК 8: ВОСПРОИЗВЕДЕНИЕ (Внешний вызов)
+     *  БЛОК 8: ВОСПРОИЗВЕДЕНИЕ
      * ========================================================== */
     function openInBrowser(url, title){
-        D.log('Play','Открытие в браузере: '+url);
+        D.log('Play','Открытие: '+url);
         D.noty('▶ Открываю: ' + title);
 
         try {
-            // Стандартный метод Lampa для Android TV, чтобы открыть ссылку в системном браузере/WebView
             if(typeof Lampa.Android !== 'undefined' && Lampa.Android.openUrl){
                 Lampa.Android.openUrl(url);
                 return;
             }
         } catch(e){}
 
-        // Запасной вариант
         try { window.open(url,'_blank'); } catch(e){}
     }
 
