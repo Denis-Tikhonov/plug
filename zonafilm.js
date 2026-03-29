@@ -1784,4 +1784,150 @@
 
         /* ---------- openEmbed() ---------- */
         this.openEmbed = function (url, title) {
-            DebugModule.log('Detail', 'Открытие embed
+            DebugModule.log('Detail', 'Открытие embed: ' + url);
+
+            // Пытаемся открыть embed через webview/iframe
+            try {
+                // Метод 1: Lampa встроенный webview
+                if (Lampa.Platform && Lampa.Platform.is('android')) {
+                    // На Android можно использовать интент
+                    Lampa.Android.openUrl(url);
+                } else {
+                    // Метод 2: iframe overlay
+                    var overlay = $(
+                        '<div style="position:fixed; top:0; left:0; right:0; bottom:0; ' +
+                        'z-index:9999; background:#000;">' +
+                            '<iframe src="' + url + '" style="width:100%; height:100%; border:none;" ' +
+                            'allowfullscreen></iframe>' +
+                            '<div class="selector" style="position:absolute; top:1em; right:1em; ' +
+                            'background:rgba(0,0,0,0.7); color:white; padding:0.5em 1em; ' +
+                            'border-radius:0.5em; cursor:pointer; z-index:10000;">✕ Закрыть</div>' +
+                        '</div>'
+                    );
+
+                    overlay.find('.selector').on('hover:enter click', function () {
+                        overlay.remove();
+                    });
+
+                    $('body').append(overlay);
+                }
+            } catch (e) {
+                DebugModule.error('Detail', 'Ошибка открытия embed: ' + e.message);
+                Lampa.Noty.show('Не удалось открыть видео');
+            }
+        };
+
+
+        /* ---------- Стандартные методы ---------- */
+
+        this.activateNavigation = function () {
+            Lampa.Controller.add('content', {
+                toggle: [],
+                type: 'default',
+                link: _self,
+                target: 'zonafilm-detail'
+            });
+            Lampa.Controller.toggle('content');
+            if (_scroll) _scroll.toggle();
+        };
+
+        this.start = function () {
+            this.activateNavigation();
+        };
+
+        this.pause = function () { };
+        this.stop = function () { };
+
+        this.render = function () {
+            return _scroll ? _scroll.render() : $('<div></div>');
+        };
+
+        this.destroy = function () {
+            if (_scroll) _scroll.destroy();
+            _scroll = null;
+            _content = null;
+        };
+    }
+
+
+    /* ==========================================================
+     *  БЛОК 10: РЕГИСТРАЦИЯ КОМПОНЕНТОВ В LAMPA
+     * ========================================================== */
+
+    Lampa.Component.add('zonafilm_catalog', CatalogComponent);
+    Lampa.Component.add('zonafilm_detail', DetailComponent);
+
+    DebugModule.log('Init', 'Компоненты зарегистрированы: zonafilm_catalog, zonafilm_detail');
+
+
+    /* ==========================================================
+     *  БЛОК 11: КНОПКА В БОКОВОМ МЕНЮ
+     * ========================================================== */
+
+    var menuIcon = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24">' +
+        '<path d="M18 3v2h-2V3H8v2H6V3H4v18h2v-2h2v2h8v-2h2v2h2V3h-2zM8 17H6v-2h2v2zm0-4H6v-2h2v2zm0-4H6V7h2v2zm10 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2z"/>' +
+        '</svg>';
+
+    function addMenuButton() {
+        DebugModule.log('Menu', 'Добавление кнопки...');
+
+        var menuItem = $(
+            '<li class="menu__item selector" data-action="zonafilm">' +
+                '<div class="menu__ico">' + menuIcon + '</div>' +
+                '<div class="menu__text">ZonaFilm</div>' +
+            '</li>'
+        );
+
+        menuItem.on('hover:enter', function () {
+            DebugModule.log('Menu', '→ Открываем каталог');
+
+            Lampa.Activity.push({
+                url: '',
+                title: 'ZonaFilm',
+                component: 'zonafilm_catalog',
+                page: 1
+            });
+        });
+
+        // Вставляем в меню
+        var menuList = $('.menu .menu__list');
+        if (menuList.length) {
+            // Вставляем после "Настройки" или в конец
+            var settingsItem = menuList.find('[data-action="settings"]');
+            if (settingsItem.length) {
+                settingsItem.after(menuItem);
+            } else {
+                menuList.eq(0).append(menuItem);
+            }
+            DebugModule.log('Menu', '✅ Кнопка добавлена');
+        } else {
+            DebugModule.error('Menu', '❌ Меню не найдено, повтор через 2с...');
+            setTimeout(addMenuButton, 2000);
+        }
+    }
+
+
+    /* ==========================================================
+     *  БЛОК 12: ИНИЦИАЛИЗАЦИЯ
+     * ========================================================== */
+
+    function initPlugin() {
+        DebugModule.log('Init', '🚀 Инициализация плагина');
+        addMenuButton();
+        DebugModule.notify('🎬 ZonaFilm v' + CONFIG.version + ' загружен!');
+    }
+
+    // Ждём готовности Lampa
+    if (window.appready) {
+        initPlugin();
+    } else {
+        Lampa.Listener.follow('app', function (event) {
+            if (event.type === 'ready') {
+                initPlugin();
+            }
+        });
+    }
+
+    DebugModule.log('Init', '✅ Скрипт загружен, ожидание app:ready...');
+
+})();
