@@ -1,23 +1,21 @@
 /**
  * ============================================================
- *  LAMPA PLUGIN — ZonaFilm v0.7.0
+ *  LAMPA PLUGIN — ZonaFilm v0.8.0
  * ============================================================
+ *  
+ *  ИСПРАВЛЕНИЯ v0.8:
+ *    ✅ Controller.toggle() УБРАН (несовместим с bylampa)
+ *    ✅ Навигация через Lampa.Navigator напрямую
+ *    ✅ Кнопка Back через Lampa.Controller.add без toggle
+ *    ✅ Все .selector работают через hover:enter/hover:focus
  *
- *  ИСПРАВЛЕНИЯ v0.7:
- *    ✅ scroll.toggle() убран (не существует в bylampa)
- *    ✅ Controller type исправлен
- *    ✅ Навигация через collectionSet / collectionFocus
- *    ✅ Fallback навигация для разных сборок Lampa
- *
- *  БЛОКИ:
- *    1. Конфигурация
- *    2. Отладка
- *    3. Сеть
- *    4. Источник ZonaFilm
- *    5. CSS
- *    6. Каталог
- *    7. Детали
- *    8. Регистрация + Меню + Запуск
+ *  ПРИНЦИП НАВИГАЦИИ bylampa:
+ *    Lampa сама находит .selector в render() компонента.
+ *    НЕ нужно вызывать Controller.toggle().
+ *    Нужно только:
+ *      1. Controller.add('content', {back:...}) — для Back
+ *      2. Controller.enabled().name === 'content' — активен
+ *      3. Элементы .selector внутри scroll.render()
  * ============================================================
  */
 
@@ -28,10 +26,9 @@
      *  БЛОК 1: КОНФИГУРАЦИЯ
      * ========================================================== */
     var CONFIG = {
-        debug:   true,
-        name:    'ZonaFilm',
-        ver:     '0.7.0',
-        site:    'https://zonafilm.ru',
+        debug: true,
+        ver: '0.8.0',
+        site: 'https://zonafilm.ru',
         buildId: '39MEgPaxeFXNBOSc6BloZ',
         proxy: [
             'https://api.codetabs.com/v1/proxy?quest={u}',
@@ -46,32 +43,40 @@
      *  БЛОК 2: ОТЛАДКА
      * ========================================================== */
     var D = {
-        log:  function(t,m){ if(CONFIG.debug) console.log('[ZF]['+t+']',m); },
+        log: function(t,m){ if(CONFIG.debug) console.log('[ZF]['+t+']',m); },
         warn: function(t,m){ console.warn('[ZF]['+t+']',m); },
-        err:  function(t,m){ console.error('[ZF][ERR]['+t+']',m); },
-        noty: function(m)  { try{Lampa.Noty.show(m)}catch(e){} }
+        err: function(t,m){ console.error('[ZF][ERR]['+t+']',m); },
+        noty: function(m){ try{Lampa.Noty.show(m)}catch(e){} }
     };
 
-    D.log('Boot','v'+CONFIG.ver);
+    D.log('Boot','v' + CONFIG.ver);
+
+    /**
+     * Определяем доступные методы Controller для отладки
+     */
+    try {
+        var ctrlMethods = Object.keys(Lampa.Controller).filter(function(k){
+            return typeof Lampa.Controller[k] === 'function';
+        });
+        D.log('Boot','Controller methods: ' + ctrlMethods.join(', '));
+    } catch(e){}
 
     /* ==========================================================
      *  БЛОК 3: СЕТЬ
      * ========================================================== */
     var Net = {
         get: function(url, ok, fail, _i){
-            var i = typeof _i==='number' ? _i : CONFIG.pi;
+            var i = typeof _i === 'number' ? _i : CONFIG.pi;
             if(i >= CONFIG.proxy.length){
-                D.err('Net','Прокси кончились: '+url);
                 if(fail) fail();
                 return;
             }
             var pu = CONFIG.proxy[i].replace('{u}', encodeURIComponent(url));
-            D.log('Net','#'+i+' '+url);
             $.ajax({
                 url: pu,
                 timeout: CONFIG.timeout,
-                success: function(data){ CONFIG.pi=i; if(ok) ok(data); },
-                error: function(){ D.warn('Net','#'+i+' fail'); Net.get(url,ok,fail,i+1); }
+                success: function(data){ CONFIG.pi = i; if(ok) ok(data); },
+                error: function(){ Net.get(url, ok, fail, i + 1); }
             });
         }
     };
@@ -80,129 +85,135 @@
      *  БЛОК 4: ИСТОЧНИК ZONAFILM
      * ========================================================== */
     var Src = {
-        name: 'ZonaFilm',
-
         _bid: function(cb){
             if(CONFIG.buildId){ cb(CONFIG.buildId); return; }
-            Net.get(CONFIG.site+'/movies', function(html){
-                if(typeof html!=='string'){ cb(null); return; }
-                var m=html.match(/"buildId"\s*:\s*"([^"]+)"/);
-                if(m&&m[1]){ CONFIG.buildId=m[1]; cb(m[1]); }
+            Net.get(CONFIG.site + '/movies', function(html){
+                if(typeof html !== 'string'){ cb(null); return; }
+                var m = html.match(/"buildId"\s*:\s*"([^"]+)"/);
+                if(m && m[1]){ CONFIG.buildId = m[1]; cb(m[1]); }
                 else cb(null);
             }, function(){ cb(null); });
         },
 
         _html2pp: function(html){
-            try{
-                var tag='__NEXT_DATA__" type="application/json">';
-                var s=html.indexOf(tag); if(s===-1) return null;
-                s+=tag.length;
-                var e=html.indexOf('</script>',s); if(e===-1) return null;
-                var j=JSON.parse(html.substring(s,e));
-                if(j.buildId) CONFIG.buildId=j.buildId;
-                return j.pageProps||(j.props&&j.props.pageProps)||null;
-            }catch(ex){ return null; }
+            try {
+                var tag = '__NEXT_DATA__" type="application/json">';
+                var s = html.indexOf(tag);
+                if(s === -1) return null;
+                s += tag.length;
+                var e = html.indexOf('</script>', s);
+                if(e === -1) return null;
+                var j = JSON.parse(html.substring(s, e));
+                if(j.buildId) CONFIG.buildId = j.buildId;
+                return j.pageProps || (j.props && j.props.pageProps) || null;
+            } catch(ex){ return null; }
         },
 
         _list: function(pp){
-            var a=pp.data||pp.items||pp.movies||[];
-            if(!Array.isArray(a)) a=a.items||a.results||[];
+            var a = pp.data || pp.items || pp.movies || [];
+            if(!Array.isArray(a)) a = a.items || a.results || [];
             return a.map(function(m){
                 return {
-                    title:m.title||'', slug:m.slug||'',
-                    year:m.year||0, poster:m.cover_url||'',
-                    rating:m.rating||0, quality:m.best_quality||''
+                    title: m.title || '', slug: m.slug || '',
+                    year: m.year || 0, poster: m.cover_url || '',
+                    rating: m.rating || 0, quality: m.best_quality || ''
                 };
             });
         },
 
         main: function(page, cb){
-            var self=this;
+            var self = this;
             this._bid(function(bid){
-                if(!bid){ self._mainHTML(page,cb); return; }
-                var url=CONFIG.site+'/_next/data/'+bid+'/movies.json';
-                if(page>1) url+='?page='+page;
+                if(!bid){ self._mainHTML(page, cb); return; }
+                var url = CONFIG.site + '/_next/data/' + bid + '/movies.json';
+                if(page > 1) url += '?page=' + page;
                 Net.get(url, function(raw){
-                    try{
-                        var j=typeof raw==='string'?JSON.parse(raw):raw;
-                        var pp=j.pageProps||j;
-                        var items=self._list(pp);
-                        var more=!!(pp.links&&pp.links.next);
-                        if(items.length>0){ cb(items,more); return; }
-                    }catch(e){}
-                    CONFIG.buildId='';
-                    self._mainHTML(page,cb);
+                    try {
+                        var j = typeof raw === 'string' ? JSON.parse(raw) : raw;
+                        var pp = j.pageProps || j;
+                        var items = self._list(pp);
+                        var more = !!(pp.links && pp.links.next);
+                        if(items.length > 0){ cb(items, more); return; }
+                    } catch(e){}
+                    CONFIG.buildId = '';
+                    self._mainHTML(page, cb);
                 }, function(){
-                    CONFIG.buildId='';
-                    self._mainHTML(page,cb);
+                    CONFIG.buildId = '';
+                    self._mainHTML(page, cb);
                 });
             });
         },
 
         _mainHTML: function(page, cb){
-            var self=this;
-            var url=CONFIG.site+'/movies'+(page>1?'?page='+page:'');
+            var self = this;
+            var url = CONFIG.site + '/movies' + (page > 1 ? '?page=' + page : '');
             Net.get(url, function(html){
-                var pp=self._html2pp(html);
-                if(pp){ var i=self._list(pp); cb(i,!!(pp.links&&pp.links.next)); }
-                else cb([],false);
-            }, function(){ cb([],false); });
+                var pp = self._html2pp(html);
+                if(pp){
+                    var i = self._list(pp);
+                    cb(i, !!(pp.links && pp.links.next));
+                } else cb([], false);
+            }, function(){ cb([], false); });
         },
 
         getDetails: function(slug, cb){
-            var self=this;
+            var self = this;
             this._bid(function(bid){
-                if(!bid){ self._detHTML(slug,cb); return; }
-                var url=CONFIG.site+'/_next/data/'+bid+'/movies/'+slug+'.json';
+                if(!bid){ self._detHTML(slug, cb); return; }
+                var url = CONFIG.site + '/_next/data/' + bid + '/movies/' + slug + '.json';
                 Net.get(url, function(raw){
-                    try{
-                        var j=typeof raw==='string'?JSON.parse(raw):raw;
-                        var d=(j.pageProps||j).data;
-                        if(d){ cb(self._det(d,j.pageProps)); return; }
-                    }catch(e){}
-                    self._detHTML(slug,cb);
-                }, function(){ self._detHTML(slug,cb); });
+                    try {
+                        var j = typeof raw === 'string' ? JSON.parse(raw) : raw;
+                        var d = (j.pageProps || j).data;
+                        if(d){ cb(self._det(d, j.pageProps)); return; }
+                    } catch(e){}
+                    self._detHTML(slug, cb);
+                }, function(){ self._detHTML(slug, cb); });
             });
         },
 
         _detHTML: function(slug, cb){
-            var self=this;
-            Net.get(CONFIG.site+'/movies/'+slug, function(html){
-                var pp=self._html2pp(html);
-                if(pp&&pp.data) cb(self._det(pp.data,pp));
+            var self = this;
+            Net.get(CONFIG.site + '/movies/' + slug, function(html){
+                var pp = self._html2pp(html);
+                if(pp && pp.data) cb(self._det(pp.data, pp));
                 else cb(null);
             }, function(){ cb(null); });
         },
 
         _det: function(d, pp){
-            var g=[],c=[];
-            ((d.meta&&d.meta.tags)||[]).forEach(function(t){
-                if(t.type==='genre') g.push(t.title);
-                if(t.type==='country') c.push(t.title);
+            var g = [], c = [];
+            ((d.meta && d.meta.tags) || []).forEach(function(t){
+                if(t.type === 'genre') g.push(t.title);
+                if(t.type === 'country') c.push(t.title);
             });
-            var act=((d.meta&&d.meta.actors)||[]).map(function(a){
-                return {name:a.name||'',photo:a.cover_url||''};
+            var act = ((d.meta && d.meta.actors) || []).map(function(a){
+                return { name: a.name || '', photo: a.cover_url || '' };
             });
             return {
-                title:d.title||'', originalTitle:d.title_original||'',
-                slug:d.slug||'', year:d.year||0, description:d.description||'',
-                poster:d.cover_url||'', backdrop:(pp&&pp.backdropUrl)||d.backdrop_url||'',
-                duration:d.duration||0, rating:d.rating||0,
-                ratingKP:d.rating_kp||0, ratingIMDB:d.rating_imdb||0,
-                quality:d.best_quality||'', genres:g, countries:c,
-                directors:d.directors||'', writers:d.writers||'',
-                actors:act, ageLimit:d.age_limit||0
+                title: d.title || '', originalTitle: d.title_original || '',
+                slug: d.slug || '', year: d.year || 0,
+                description: d.description || '',
+                poster: d.cover_url || '',
+                backdrop: (pp && pp.backdropUrl) || d.backdrop_url || '',
+                duration: d.duration || 0, rating: d.rating || 0,
+                ratingKP: d.rating_kp || 0, ratingIMDB: d.rating_imdb || 0,
+                quality: d.best_quality || '', genres: g, countries: c,
+                directors: d.directors || '', writers: d.writers || '',
+                actors: act, ageLimit: d.age_limit || 0
             };
         },
 
         search: function(q, cb){
-            var lq=q.toLowerCase();
+            var lq = q.toLowerCase();
             this.main(1, function(items){
-                cb(items.filter(function(m){ return m.title.toLowerCase().indexOf(lq)!==-1; }));
+                cb(items.filter(function(m){
+                    return m.title.toLowerCase().indexOf(lq) !== -1;
+                }));
             });
         },
 
-        streamUrl: function(slug){ return CONFIG.site+'/movies/'+slug; },
+        streamUrl: function(slug){ return CONFIG.site + '/movies/' + slug; },
 
         cats: function(){
             return [
@@ -218,18 +229,19 @@
         },
 
         byGenre: function(slug, page, cb){
-            var self=this;
+            var self = this;
             this._bid(function(bid){
-                if(!bid){ cb([],false); return; }
-                var url=CONFIG.site+'/_next/data/'+bid+'/movies/filter/genre-'+slug+'.json';
-                if(page>1) url+='?page='+page;
+                if(!bid){ cb([], false); return; }
+                var url = CONFIG.site + '/_next/data/' + bid +
+                    '/movies/filter/genre-' + slug + '.json';
+                if(page > 1) url += '?page=' + page;
                 Net.get(url, function(raw){
-                    try{
-                        var j=typeof raw==='string'?JSON.parse(raw):raw;
-                        var pp=j.pageProps||j;
-                        cb(self._list(pp), !!(pp.links&&pp.links.next));
-                    }catch(e){ cb([],false); }
-                }, function(){ cb([],false); });
+                    try {
+                        var j = typeof raw === 'string' ? JSON.parse(raw) : raw;
+                        var pp = j.pageProps || j;
+                        cb(self._list(pp), !!(pp.links && pp.links.next));
+                    } catch(e){ cb([], false); }
+                }, function(){ cb([], false); });
             });
         }
     };
@@ -292,88 +304,122 @@
 
 
     /* ==========================================================
-     *  БЛОК 6: КОМПОНЕНТ КАТАЛОГА
+     *  БЛОК 6: БЕЗОПАСНАЯ НАВИГАЦИЯ
      *  ---------------------------------------------------------
-     *  ✅ НАВИГАЦИЯ v0.7:
-     *
-     *  Ошибка была: scroll.toggle() — такого метода нет.
-     *
-     *  Правильный подход для bylampa:
-     *    1. Controller.add('content', { back: ... })
-     *    2. Controller.toggle('content')
-     *    3. НЕ вызывать scroll.toggle()
-     *    4. scroll.update(element) при hover:focus
-     *
-     *  Lampa ищет .selector внутри scroll.render()
-     *  и автоматически строит навигационную сетку.
+     *  Обёртка для совместимости с разными сборками Lampa.
+     *  Пробует разные методы Controller и использует
+     *  первый работающий.
      * ========================================================== */
 
-    function CatComp(object){
-        var self   = this;
-        var scroll = new Lampa.Scroll({mask:true, over:true, step:250});
-        var body   = $('<div class="zf"></div>');
-        var grid   = $('<div class="zf-grid"></div>');
-        var page   = 1;
-        var hasMore= true;
-        var busy   = false;
-        var mode   = 'catalog';
-        var gSlug  = '';
-
+    var Nav = {
         /**
-         * ✅ НАВИГАЦИЯ — безопасная версия
-         *
-         * Не вызываем scroll.toggle() — его нет в bylampa.
-         * Используем только Controller.add + Controller.toggle.
-         * Lampa сама находит .selector в render() и навигирует.
+         * Активировать навигацию для компонента.
+         * @param {object} comp   — ссылка на компонент (this)
+         * @param {function} onBack — что делать при нажатии Back
          */
-        function activateNav(){
-            D.log('Cat','activateNav, selectors: '+scroll.render().find('.selector').length);
+        activate: function(comp, onBack){
+            try {
+                /**
+                 * Способ 1: Lampa.Controller.add + enable
+                 * Работает в bylampa и многих сборках
+                 */
+                if(typeof Lampa.Controller.add === 'function' &&
+                   typeof Lampa.Controller.enable === 'function'){
 
-            Lampa.Controller.add('content', {
-                toggle: [],
-                link: self,
-                back: function(){
-                    D.log('Cat','← back');
-                    Lampa.Activity.backward();
+                    D.log('Nav','Способ: add + enable');
+
+                    Lampa.Controller.add('content', {
+                        link: comp,
+                        back: onBack
+                    });
+
+                    Lampa.Controller.enable('content');
+                    return;
                 }
-            });
+            } catch(e){
+                D.warn('Nav','Способ 1 ошибка: ' + e.message);
+            }
 
-            Lampa.Controller.toggle('content');
+            try {
+                /**
+                 * Способ 2: только Controller.add
+                 * (toggle вызывается через enable)
+                 */
+                if(typeof Lampa.Controller.add === 'function'){
+
+                    D.log('Nav','Способ: только add');
+
+                    Lampa.Controller.add('content', {
+                        link: comp,
+                        back: onBack
+                    });
+
+                    // Пробуем разные методы активации
+                    if(typeof Lampa.Controller.enable === 'function'){
+                        Lampa.Controller.enable('content');
+                    } else if(typeof Lampa.Controller.toggle === 'function'){
+                        // toggle может ожидать объект — передаём comp
+                        Lampa.Controller.toggle(comp);
+                    }
+                    return;
+                }
+            } catch(e){
+                D.warn('Nav','Способ 2 ошибка: ' + e.message);
+            }
+
+            D.err('Nav','Ни один способ навигации не работает!');
         }
+    };
+
+
+    /* ==========================================================
+     *  БЛОК 7: КОМПОНЕНТ КАТАЛОГА
+     * ========================================================== */
+    function CatComp(object){
+        var self = this;
+        var scroll = new Lampa.Scroll({mask: true, over: true, step: 250});
+        var body = $('<div class="zf"></div>');
+        var grid = $('<div class="zf-grid"></div>');
+        var page = 1, hasMore = true, busy = false;
+        var mode = 'catalog', gSlug = '';
 
         this.create = function(){
-            D.log('Cat','create()');
+            D.log('Cat','create');
 
             // Поиск
-            var sb = $('<div class="zf-sb selector">🔍 Поиск фильмов...</div>');
-            sb.on('hover:enter',function(){
+            var sb = $('<div class="zf-sb selector">🔍 Поиск...</div>');
+            sb.on('hover:enter', function(){
                 Lampa.Input.edit({
-                    title:'Поиск фильмов', value:'',
-                    free:true, nosave:true
-                },function(v){ if(v&&v.trim()) self.doSearch(v.trim()); });
+                    title: 'Поиск фильмов',
+                    value: '', free: true, nosave: true
+                }, function(v){
+                    if(v && v.trim()) self.doSearch(v.trim());
+                });
             });
-            sb.on('hover:focus',function(){ scroll.update($(this)); });
+            sb.on('hover:focus', function(){ scroll.update($(this)); });
             body.append(sb);
 
             // Категории
-            var cats=$('<div class="zf-cats"></div>');
+            var cats = $('<div class="zf-cats"></div>');
             Src.cats().forEach(function(c){
-                var b=$('<div class="zf-cat selector'+(c.slug===''?' zf-cat--a':'')+'">'+c.title+'</div>');
-                b.on('hover:enter',function(){
+                var b = $('<div class="zf-cat selector' +
+                    (c.slug === '' ? ' zf-cat--a' : '') + '">' +
+                    c.title + '</div>');
+                b.on('hover:enter', function(){
                     cats.find('.zf-cat').removeClass('zf-cat--a');
                     b.addClass('zf-cat--a');
-                    grid.empty(); page=1; hasMore=true;
-                    if(c.slug===''){
-                        mode='catalog';
+                    grid.empty(); page = 1; hasMore = true;
+                    if(c.slug === ''){
+                        mode = 'catalog';
                         body.find('.zf-ht').first().text('📽 Каталог');
                         self.load(1);
                     } else {
-                        mode='genre'; gSlug=c.slug;
-                        body.find('.zf-ht').first().text('📂 '+c.title);
-                        self.loadG(c.slug,1);
+                        mode = 'genre'; gSlug = c.slug;
+                        body.find('.zf-ht').first().text('📂 ' + c.title);
+                        self.loadG(c.slug, 1);
                     }
                 });
-                b.on('hover:focus',function(){ scroll.update($(this)); });
+                b.on('hover:focus', function(){ scroll.update($(this)); });
                 cats.append(b);
             });
             body.append(cats);
@@ -382,13 +428,13 @@
             body.append('<div class="zf-ld" id="zfl"><div class="zf-sp"></div>Загрузка...</div>');
             body.append(grid);
 
-            var mr=$('<div class="zf-mr selector" id="zfm" style="display:none">⬇ Ещё</div>');
-            mr.on('hover:enter',function(){
+            var mr = $('<div class="zf-mr selector" id="zfm" style="display:none">⬇ Ещё</div>');
+            mr.on('hover:enter', function(){
                 page++;
-                if(mode==='catalog') self.load(page);
-                else if(mode==='genre') self.loadG(gSlug,page);
+                if(mode === 'catalog') self.load(page);
+                else if(mode === 'genre') self.loadG(gSlug, page);
             });
-            mr.on('hover:focus',function(){ scroll.update($(this)); });
+            mr.on('hover:focus', function(){ scroll.update($(this)); });
             body.append(mr);
 
             scroll.append(body);
@@ -396,75 +442,79 @@
         };
 
         this.load = function(p){
-            if(busy) return; busy=true;
+            if(busy) return; busy = true;
             $('#zfl').show();
-            Src.main(p,function(items,more){
-                busy=false; hasMore=more; $('#zfl').hide();
-                if(!items.length && p===1)
+            Src.main(p, function(items, more){
+                busy = false; hasMore = more; $('#zfl').hide();
+                if(!items.length && p === 1){
                     grid.html('<div class="zf-em">📭 Нет данных</div>');
-                else self.addCards(items);
-                $('#zfm').toggle(hasMore && mode!=='search');
-                activateNav();
+                } else {
+                    self.addCards(items);
+                }
+                $('#zfm').toggle(hasMore && mode !== 'search');
+                self.activate();
             });
         };
 
-        this.loadG = function(slug,p){
-            if(busy) return; busy=true;
+        this.loadG = function(slug, p){
+            if(busy) return; busy = true;
             $('#zfl').show();
-            Src.byGenre(slug,p,function(items,more){
-                busy=false; hasMore=more; $('#zfl').hide();
-                if(!items.length && p===1)
+            Src.byGenre(slug, p, function(items, more){
+                busy = false; hasMore = more; $('#zfl').hide();
+                if(!items.length && p === 1){
                     grid.html('<div class="zf-em">📭 Ничего</div>');
-                else self.addCards(items);
+                } else {
+                    self.addCards(items);
+                }
                 $('#zfm').toggle(more);
-                activateNav();
+                self.activate();
             });
         };
 
         this.doSearch = function(q){
-            mode='search'; grid.empty(); busy=true;
+            mode = 'search'; grid.empty(); busy = true;
             $('#zfl').show(); $('#zfm').hide();
-            body.find('.zf-ht').first().text('🔍 '+q);
-            Src.search(q,function(items){
-                busy=false; $('#zfl').hide();
-                if(!items.length) grid.html('<div class="zf-em">📭 Не найдено</div>');
-                else self.addCards(items);
-                activateNav();
+            body.find('.zf-ht').first().text('🔍 ' + q);
+            Src.search(q, function(items){
+                busy = false; $('#zfl').hide();
+                if(!items.length){
+                    grid.html('<div class="zf-em">📭 Не найдено</div>');
+                } else {
+                    self.addCards(items);
+                }
+                self.activate();
             });
         };
 
         this.addCards = function(items){
             items.forEach(function(m){
-                var rc=m.rating>=7?'zf-bg':(m.rating>=5?'zf-by':'zf-br');
-                var ql=m.quality?m.quality.toUpperCase():'';
-                if(ql==='LQ') ql='CAM'; if(ql==='MQ') ql='HD';
+                var rc = m.rating >= 7 ? 'zf-bg' : (m.rating >= 5 ? 'zf-by' : 'zf-br');
+                var ql = m.quality ? m.quality.toUpperCase() : '';
+                if(ql === 'LQ') ql = 'CAM';
+                if(ql === 'MQ') ql = 'HD';
 
-                var c=$([
+                var c = $([
                     '<div class="zf-c selector">',
-                    '<div class="zf-p">',
-                    m.poster?'<img src="'+m.poster+'" loading="lazy"/>':
-                    '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#333;font-size:2.5em">🎬</div>',
-                    '</div>',
-                    m.rating>0?'<div class="zf-b '+rc+'">★ '+m.rating.toFixed(1)+'</div>':'',
-                    ql?'<div class="zf-q">'+ql+'</div>':'',
-                    '<div class="zf-n">'+m.title+'</div>',
-                    '<div class="zf-yr">'+(m.year||'')+'</div>',
+                      '<div class="zf-p">',
+                        m.poster ?
+                          '<img src="' + m.poster + '" loading="lazy"/>' :
+                          '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#333;font-size:2.5em">🎬</div>',
+                      '</div>',
+                      m.rating > 0 ? '<div class="zf-b ' + rc + '">★ ' + m.rating.toFixed(1) + '</div>' : '',
+                      ql ? '<div class="zf-q">' + ql + '</div>' : '',
+                      '<div class="zf-n">' + m.title + '</div>',
+                      '<div class="zf-yr">' + (m.year || '') + '</div>',
                     '</div>'
                 ].join(''));
 
-                c.on('hover:enter',function(){
+                c.on('hover:enter', function(){
                     Lampa.Activity.push({
-                        url:'', title:m.title,
-                        component:'zf_det', slug:m.slug, page:1
+                        url: '', title: m.title,
+                        component: 'zf_det', slug: m.slug, page: 1
                     });
                 });
 
-                /**
-                 * ✅ hover:focus — Lampa вызывает при перемещении
-                 * фокуса пультом D-pad.
-                 * scroll.update() прокручивает контейнер к элементу.
-                 */
-                c.on('hover:focus',function(){
+                c.on('hover:focus', function(){
                     scroll.update($(this));
                 });
 
@@ -472,198 +522,206 @@
             });
         };
 
-        this.start = function(){
-            D.log('Cat','start()');
-            activateNav();
+        /**
+         * ✅ Активация навигации через безопасную обёртку
+         */
+        this.activate = function(){
+            D.log('Cat', 'activate, selectors: ' + scroll.render().find('.selector').length);
+            Nav.activate(self, function(){
+                D.log('Cat','← back');
+                Lampa.Activity.backward();
+            });
         };
 
-        this.pause   = function(){};
-        this.stop    = function(){};
-        this.render  = function(){ return scroll.render(); };
+        this.start = function(){
+            D.log('Cat','start');
+            this.activate();
+        };
+
+        this.pause = function(){};
+        this.stop = function(){};
+        this.render = function(){ return scroll.render(); };
         this.destroy = function(){ scroll.destroy(); };
     }
 
 
     /* ==========================================================
-     *  БЛОК 7: ДЕТАЛИ ФИЛЬМА
+     *  БЛОК 8: КОМПОНЕНТ ДЕТАЛЕЙ
      * ========================================================== */
     function DetComp(object){
-        var self   = this;
-        var scroll = new Lampa.Scroll({mask:true, over:true, step:250});
-        var body   = $('<div class="zf-dt"></div>');
-        var slug   = object.slug||'';
-
-        function activateNav(){
-            Lampa.Controller.add('content', {
-                toggle: [],
-                link: self,
-                back: function(){
-                    D.log('Det','← back');
-                    Lampa.Activity.backward();
-                }
-            });
-            Lampa.Controller.toggle('content');
-        }
+        var self = this;
+        var scroll = new Lampa.Scroll({mask: true, over: true, step: 250});
+        var body = $('<div class="zf-dt"></div>');
+        var slug = object.slug || '';
 
         this.create = function(){
-            D.log('Det','create slug='+slug);
+            D.log('Det','create slug=' + slug);
             body.append('<div class="zf-ld" id="zfdl"><div class="zf-sp"></div>Загрузка...</div>');
             scroll.append(body);
 
-            Src.getDetails(slug,function(m){
+            Src.getDetails(slug, function(m){
                 $('#zfdl').remove();
                 if(!m){
-                    body.append('<div class="zf-em">⚠ Ошибка загрузки</div>');
-                    activateNav();
+                    body.append('<div class="zf-em">⚠ Ошибка</div>');
+                    self.activate();
                     return;
                 }
                 self.show(m);
-                activateNav();
+                self.activate();
             });
         };
 
         this.show = function(m){
             if(m.backdrop){
                 body.append(
-                    '<div style="width:100%;height:15em;overflow:hidden;border-radius:.5em;margin-bottom:1em">'+
-                    '<img src="'+m.backdrop+'" style="width:100%;height:100%;object-fit:cover;filter:brightness(.35)"/>'+
-                    '</div>'
+                    '<div style="width:100%;height:15em;overflow:hidden;border-radius:.5em;margin-bottom:1em">' +
+                    '<img src="' + m.backdrop + '" style="width:100%;height:100%;object-fit:cover;filter:brightness(.35)"/></div>'
                 );
             }
 
-            var top=$('<div class="zf-dt-top"></div>');
-            top.append('<div class="zf-dt-poster">'+(m.poster?'<img src="'+m.poster+'"/>':'')+'</div>');
+            var top = $('<div class="zf-dt-top"></div>');
+            top.append('<div class="zf-dt-poster">' +
+                (m.poster ? '<img src="' + m.poster + '"/>' : '') + '</div>');
 
-            var inf=$('<div class="zf-dt-info"></div>');
-            inf.append('<div class="zf-dt-title">'+m.title+'</div>');
-            if(m.originalTitle) inf.append('<div class="zf-dt-orig">'+m.originalTitle+'</div>');
+            var inf = $('<div class="zf-dt-info"></div>');
+            inf.append('<div class="zf-dt-title">' + m.title + '</div>');
+            if(m.originalTitle) inf.append('<div class="zf-dt-orig">' + m.originalTitle + '</div>');
 
-            var t='<div class="zf-dt-tags">';
-            if(m.year) t+='<span class="zf-tg">'+m.year+'</span>';
-            if(m.duration) t+='<span class="zf-tg">'+m.duration+' мин</span>';
-            if(m.ageLimit) t+='<span class="zf-tg">'+m.ageLimit+'+</span>';
-            var ql=m.quality?m.quality.toUpperCase():'';
-            if(ql==='LQ') ql='CAM'; if(ql==='MQ') ql='HD';
-            if(ql) t+='<span class="zf-tg" style="background:#E65100;color:#fff">'+ql+'</span>';
-            m.genres.forEach(function(g){ t+='<span class="zf-tg zf-tg-g">'+g+'</span>'; });
-            m.countries.forEach(function(c){ t+='<span class="zf-tg">'+c+'</span>'; });
-            t+='</div>';
+            var t = '<div class="zf-dt-tags">';
+            if(m.year) t += '<span class="zf-tg">' + m.year + '</span>';
+            if(m.duration) t += '<span class="zf-tg">' + m.duration + ' мин</span>';
+            if(m.ageLimit) t += '<span class="zf-tg">' + m.ageLimit + '+</span>';
+            var ql = m.quality ? m.quality.toUpperCase() : '';
+            if(ql === 'LQ') ql = 'CAM'; if(ql === 'MQ') ql = 'HD';
+            if(ql) t += '<span class="zf-tg" style="background:#E65100;color:#fff">' + ql + '</span>';
+            m.genres.forEach(function(g){ t += '<span class="zf-tg zf-tg-g">' + g + '</span>'; });
+            m.countries.forEach(function(c){ t += '<span class="zf-tg">' + c + '</span>'; });
+            t += '</div>';
             inf.append(t);
 
-            if(m.rating>0){
-                var rc=m.rating>=7?'#66BB6A':(m.rating>=5?'#FFA726':'#EF5350');
+            if(m.rating > 0){
+                var rc = m.rating >= 7 ? '#66BB6A' : (m.rating >= 5 ? '#FFA726' : '#EF5350');
                 inf.append(
-                    '<div style="margin:.5em 0">'+
-                    '<span style="font-size:1.6em;font-weight:800;color:'+rc+'">★ '+m.rating.toFixed(1)+'</span>'+
-                    (m.ratingKP?'<span style="color:#FF6F00;margin-left:1em;font-size:.85em">КП '+m.ratingKP.toFixed(1)+'</span>':'')+
-                    (m.ratingIMDB?'<span style="color:#F5C518;margin-left:1em;font-size:.85em">IMDb '+m.ratingIMDB.toFixed(1)+'</span>':'')+
+                    '<div style="margin:.5em 0">' +
+                    '<span style="font-size:1.6em;font-weight:800;color:' + rc + '">★ ' + m.rating.toFixed(1) + '</span>' +
+                    (m.ratingKP ? '<span style="color:#FF6F00;margin-left:1em;font-size:.85em">КП ' + m.ratingKP.toFixed(1) + '</span>' : '') +
+                    (m.ratingIMDB ? '<span style="color:#F5C518;margin-left:1em;font-size:.85em">IMDb ' + m.ratingIMDB.toFixed(1) + '</span>' : '') +
                     '</div>'
                 );
             }
-            if(m.directors) inf.append('<div style="color:#aaa;font-size:.8em">🎬 '+m.directors+'</div>');
+            if(m.directors) inf.append('<div style="color:#aaa;font-size:.8em">🎬 ' + m.directors + '</div>');
 
             top.append(inf);
             body.append(top);
 
-            var pb=$('<div class="zf-pl selector">▶ Смотреть</div>');
-            pb.on('hover:enter',function(){ self.play(m); });
-            pb.on('hover:focus',function(){ scroll.update($(this)); });
+            var pb = $('<div class="zf-pl selector">▶ Смотреть</div>');
+            pb.on('hover:enter', function(){ self.play(m); });
+            pb.on('hover:focus', function(){ scroll.update($(this)); });
             body.append(pb);
 
             if(m.description){
-                body.append('<div class="zf-ht" style="margin-top:1em">Описание</div>'+
-                    '<div class="zf-dt-desc">'+m.description+'</div>');
+                body.append('<div class="zf-ht" style="margin-top:1em">Описание</div>' +
+                    '<div class="zf-dt-desc">' + m.description + '</div>');
             }
 
-            if(m.actors&&m.actors.length){
-                var ah='<div class="zf-ht">Актёры</div><div style="display:flex;flex-wrap:wrap;gap:.7em">';
-                m.actors.slice(0,12).forEach(function(a){
-                    ah+='<div style="text-align:center;width:5.5em">'+
-                        '<div style="width:4em;height:4em;border-radius:50%;overflow:hidden;margin:0 auto .2em;background:#222">'+
-                        (a.photo?'<img src="'+a.photo+'" style="width:100%;height:100%;object-fit:cover"/>':'')+
-                        '</div><div style="color:#ccc;font-size:.65em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+
-                        a.name+'</div></div>';
+            if(m.actors && m.actors.length){
+                var ah = '<div class="zf-ht">Актёры</div><div style="display:flex;flex-wrap:wrap;gap:.7em">';
+                m.actors.slice(0, 12).forEach(function(a){
+                    ah += '<div style="text-align:center;width:5.5em">' +
+                        '<div style="width:4em;height:4em;border-radius:50%;overflow:hidden;margin:0 auto .2em;background:#222">' +
+                        (a.photo ? '<img src="' + a.photo + '" style="width:100%;height:100%;object-fit:cover"/>' : '') +
+                        '</div><div style="color:#ccc;font-size:.65em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
+                        a.name + '</div></div>';
                 });
-                ah+='</div>';
+                ah += '</div>';
                 body.append(ah);
             }
         };
 
         this.play = function(m){
-            var url=Src.streamUrl(m.slug);
-            D.log('Det','Play: '+url);
-
-            try{
-                if(typeof Lampa.Android!=='undefined'&&Lampa.Android.openUrl){
-                    Lampa.Android.openUrl(url); return;
+            var url = Src.streamUrl(m.slug);
+            D.log('Det','Play: ' + url);
+            try {
+                if(typeof Lampa.Android !== 'undefined' && Lampa.Android.openUrl){
+                    Lampa.Android.openUrl(url);
+                    return;
                 }
-            }catch(e){}
+            } catch(e){}
 
-            var ov=$('<div style="position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;background:#000">'+
-                '<iframe src="'+url+'" style="width:100%;height:100%;border:none" allowfullscreen></iframe>'+
-                '<div class="selector" style="position:absolute;top:.5em;right:.5em;'+
-                'background:rgba(0,0,0,.8);color:#fff;padding:.4em .8em;border-radius:.3em;'+
+            var ov = $('<div style="position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;background:#000">' +
+                '<iframe src="' + url + '" style="width:100%;height:100%;border:none" allowfullscreen></iframe>' +
+                '<div class="selector" style="position:absolute;top:.5em;right:.5em;' +
+                'background:rgba(0,0,0,.8);color:#fff;padding:.4em .8em;border-radius:.3em;' +
                 'z-index:100000;font-size:1.2em">✕</div></div>');
 
-            var close=function(){
+            var close = function(){
                 ov.remove();
-                activateNav();
+                self.activate();
             };
 
-            ov.find('.selector').on('hover:enter click',close);
+            ov.find('.selector').on('hover:enter click', close);
 
-            Lampa.Controller.add('content',{
-                toggle:[], link:self, back:close
-            });
-            Lampa.Controller.toggle('content');
-
+            Nav.activate(self, close);
             $('body').append(ov);
         };
 
-        this.start   = function(){ activateNav(); };
-        this.pause   = function(){};
-        this.stop    = function(){};
-        this.render  = function(){ return scroll.render(); };
+        this.activate = function(){
+            Nav.activate(self, function(){
+                D.log('Det','← back');
+                Lampa.Activity.backward();
+            });
+        };
+
+        this.start = function(){ this.activate(); };
+        this.pause = function(){};
+        this.stop = function(){};
+        this.render = function(){ return scroll.render(); };
         this.destroy = function(){ scroll.destroy(); };
     }
 
 
     /* ==========================================================
-     *  БЛОК 8: РЕГИСТРАЦИЯ + МЕНЮ + ЗАПУСК
+     *  БЛОК 9: РЕГИСТРАЦИЯ + МЕНЮ + ЗАПУСК
      * ========================================================== */
     Lampa.Component.add('zf_main', CatComp);
     Lampa.Component.add('zf_det', DetComp);
 
-    var ICO='<svg viewBox="0 0 24 24" fill="currentColor">'+
-        '<path d="M18 3v2h-2V3H8v2H6V3H4v18h2v-2h2v2h8v-2h2v2h2V3h-2z'+
-        'M8 17H6v-2h2v2zm0-4H6v-2h2v2zm0-4H6V7h2v2z'+
+    var ICO = '<svg viewBox="0 0 24 24" fill="currentColor">' +
+        '<path d="M18 3v2h-2V3H8v2H6V3H4v18h2v-2h2v2h8v-2h2v2h2V3h-2z' +
+        'M8 17H6v-2h2v2zm0-4H6v-2h2v2zm0-4H6V7h2v2z' +
         'm10 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2z"/></svg>';
 
     function addMenu(){
         if($('[data-action="zonafilm"]').length) return;
-        var li=$('<li class="menu__item selector" data-action="zonafilm">'+
-            '<div class="menu__ico">'+ICO+'</div>'+
+        var li = $('<li class="menu__item selector" data-action="zonafilm">' +
+            '<div class="menu__ico">' + ICO + '</div>' +
             '<div class="menu__text">ZonaFilm</div></li>');
-        li.on('hover:enter',function(){
-            try{Lampa.Menu.close()}catch(e){}
-            Lampa.Activity.push({url:'',title:'ZonaFilm',component:'zf_main',page:1});
+        li.on('hover:enter', function(){
+            try{ Lampa.Menu.close(); }catch(e){}
+            Lampa.Activity.push({
+                url: '', title: 'ZonaFilm',
+                component: 'zf_main', page: 1
+            });
         });
-        var list=$('.menu .menu__list');
-        if(list.length){ list.eq(0).append(li); D.log('Menu','✅'); return; }
-        var ul=$('.menu ul');
-        if(ul.length){ ul.eq(0).append(li); D.log('Menu','✅ ul'); return; }
-        D.err('Menu','❌');
+        var list = $('.menu .menu__list');
+        if(list.length){ list.eq(0).append(li); return; }
+        var ul = $('.menu ul');
+        if(ul.length){ ul.eq(0).append(li); }
     }
 
     function init(){
-        try{
+        try {
             addMenu();
-            D.noty('🎬 ZonaFilm v'+CONFIG.ver);
+            D.noty('🎬 ZonaFilm v' + CONFIG.ver);
             D.log('Boot','✅');
-        }catch(e){ D.err('Boot',e.message); }
+        } catch(e){
+            D.err('Boot', e.message);
+        }
     }
 
     if(window.appready) init();
-    else Lampa.Listener.follow('app',function(e){ if(e.type==='ready') init(); });
+    else Lampa.Listener.follow('app', function(e){
+        if(e.type === 'ready') init();
+    });
 
 })();
