@@ -1,13 +1,14 @@
 /**
  * ============================================================
- *  LAMPA PLUGIN — Trahkino v1.9.0 (Точная подгонка фокуса)
+ *  LAMPA PLUGIN — Trahkino v2.1.0 (Пробуждение content)
  * ============================================================
  *
- *  ИСПРАВЛЕНИЯ v1.9.0:
- *    ✅ Использован метод Lampa.Controller.own() из вашего списка.
- *       Он вшивает команды стрелок в активный системный контроллер 
- *       без его замены. Ошибок нет, меню работает, стрелки заработают.
- *    ✅ Возвращена база версии 1.7.0 (чистые методы жизненного цикла).
+ *  ИСПРАВЛЕНИЯ v2.1.0:
+ *    ✅ Запуск Activity оставлен как в вашем рабочем примере.
+ *    ✅ В start() добавлено Lampa.Controller.enable('content') 
+ *       для принудительного включения навигации по стрелкам.
+ *    ✅ Упрощен DOM (убрана лишняя обертка) для точного 
+ *       расчета координат перемещения фокуса.
  *
  * ============================================================
  */
@@ -17,7 +18,7 @@
 
     var CONFIG = {
         debug: true,
-        ver: '1.9.0',
+        ver: '2.1.0',
         site: 'https://trahkino.me',
         proxy: [
             'https://api.codetabs.com/v1/proxy?quest={u}',
@@ -78,8 +79,7 @@
     };
 
     var CSS = '\
-        .zf-wrap{padding:1.5em}\
-        .zf-grid{display:flex;flex-wrap:wrap;gap:1.2em}\
+        .zf-grid{display:flex;flex-wrap:wrap;gap:1.2em;padding:1.5em}\
         .zf-card{width:28em;position:relative;transition:transform .2s}\
         .zf-card.focus{transform:scale(1.05)}\
         .zf-poster{width:100%;height:16em;border-radius:.5em;overflow:hidden;background:#333; position:relative}\
@@ -114,6 +114,7 @@
                     return;
                 }
                 if(item.action === 'all'){
+                    // Стандартный вызов компонента (как в вашем примере)
                     Lampa.Activity.push({ url: '', title: 'Последние видео', component: 'zf_cards', page: 1 });
                 }
             }
@@ -123,13 +124,12 @@
     function CardsComp(object){
         var self   = this;
         var scroll = new Lampa.Scroll({mask:true, over:true, step:250});
-        var body   = $('<div class="zf-wrap"></div>');
         var grid   = $('<div class="zf-grid"></div>');
 
         this.create = function(){
-            body.append('<div class="zf-loading" id="zf-loader"><div class="zf-spin"></div>Загрузка...</div>');
-            body.append(grid);
-            scroll.append(body);
+            // Убрали лишнюю обертку body. Grid кладем прямо в scroll
+            grid.append('<div class="zf-loading" id="zf-loader"><div class="zf-spin"></div>Загрузка...</div>');
+            scroll.append(grid);
             Src.main(object.page || 1, function(items){ self.onDataLoaded(items); });
         };
 
@@ -171,38 +171,17 @@
             }, 150);
         };
 
-        // --- ИСПОЛЬЗУЕМ МАГИЮ OWN() ---
-        
+        // --- ТЕСТ МЕТОДА ENABLE ---
         this.start = function(){
-            // own() внедряет наши команды прямо в текущий активный контроллер Lampa.
-            // Он не ломает иерархию и не отключает боковое меню!
-            Lampa.Controller.own({
-                toggle: function(){},
-                left: function(){ Lampa.Controller.move('left'); },
-                right: function(){ Lampa.Controller.move('right'); },
-                up: function(){ Lampa.Controller.move('up'); },
-                down: function(){ Lampa.Controller.move('down'); },
-                back: function(){ Lampa.Activity.backward(); }
-            });
+            // Принудительно включаем обработчик слоев контента
+            Lampa.Controller.enable('content');
         };
         
-        this.toggle = function(){
-            // Пусто. Система сама разберется.
-        };
-
+        this.toggle = function(){};
         this.pause = function(){};
-        
-        this.stop = function(){
-            // Пусто. Очищаем только при уничтожении.
-        };
-        
+        this.stop = function(){};
         this.render = function(){ return scroll.render(); };
-        
-        this.destroy = function(){ 
-            Lampa.Controller.clear(); // Безопасная очистка
-            scroll.destroy(); 
-            body.remove(); 
-        };
+        this.destroy = function(){ scroll.destroy(); grid.remove(); };
     }
 
     function openInBrowser(url, title){
