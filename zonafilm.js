@@ -1,13 +1,13 @@
 /**
  * ============================================================
- *  LAMPA PLUGIN — Trahkino v2.4.0 (Свойство render найдено!)
+ *  LAMPA PLUGIN — Trahkino v2.7.0 (Точное попадание в контейнер)
  * ============================================================
  *
- *  РЕШЕНИЕ v2.4.0:
- *    ✅ Откат от InteractionMain к стабильному Lampa.Scroll.
- *    ✅ В объект контроллера добавлено свойство render: scroll.render().
- *       Теперь Lampa.Controller.move() ЗНАЕТ, где искать карточки.
- *    ✅ Добавлена логика выхода в меню при достижении края сетки.
+ *  ИЗМЕНЕНИЯ v2.7.0:
+ *    ✅ Взят идеальный базовый код версии 1.9.0 (0 ошибок).
+ *    ✅ ИЗМЕНЕНА 1 СТРОКА: Lampa.Controller.collectionSet() теперь 
+ *       получает напрямую 'grid', а не 'scroll.render()'.
+ *       Теперь алгоритм move() точно видит карточки.
  *
  * ============================================================
  */
@@ -17,7 +17,7 @@
 
     var CONFIG = {
         debug: true,
-        ver: '2.4.0',
+        ver: '2.7.0',
         site: 'https://trahkino.me',
         proxy: [
             'https://api.codetabs.com/v1/proxy?quest={u}',
@@ -163,46 +163,33 @@
 
         this.bindFocus = function(){
             setTimeout(function(){
-                Lampa.Controller.collectionSet(scroll.render());
-                Lampa.Controller.collectionFocus(false, scroll.render());
+                // --- ГЛАВНОЕ ИЗМЕНЕНИЕ: Передаем напрямую grid ---
+                Lampa.Controller.collectionSet(grid);
+                Lampa.Controller.collectionFocus(false, grid);
             }, 150);
         };
 
-        // --- КОНТРОЛЛЕР С ПЕРЕДАЧЕЙ DOM КОРНЯ ---
+        // --- БЕЗОПАСНАЯ ПРОПИСКА КОМАНД (Как в 1.9.0) ---
         this.start = function(){
-            // Создаем выделенный контроллер и ОБЯЗАТЕЛЬНО передаем ему 
-            // корневой DOM элемент через свойство render!
-            Lampa.Controller.add('zf_grid', {
-                render: scroll.render(), 
+            Lampa.Controller.own({
                 toggle: function(){},
-                left: function(){ 
-                    if(!Lampa.Controller.move('left')) Lampa.Controller.toggle('menu'); 
-                },
+                left: function(){ Lampa.Controller.move('left'); },
                 right: function(){ Lampa.Controller.move('right'); },
-                up: function(){ 
-                    if(!Lampa.Controller.move('up')) Lampa.Controller.toggle('menu'); 
-                },
+                up: function(){ Lampa.Controller.move('up'); },
                 down: function(){ Lampa.Controller.move('down'); },
                 back: function(){ Lampa.Activity.backward(); }
             });
-            
-            // Активируем именно его
-            Lampa.Controller.toggle('zf_grid');
         };
         
         this.toggle = function(){
-            Lampa.Controller.collectionSet(scroll.render());
-            Lampa.Controller.collectionFocus(false, scroll.render());
+            // --- И ЗДЕСЬ ТОЖЕ grid ---
+            Lampa.Controller.collectionSet(grid);
+            Lampa.Controller.collectionFocus(false, grid);
         };
 
         this.pause = function(){};
-        
-        this.stop = function(){
-            Lampa.Controller.clear();
-        };
-        
+        this.stop = function(){};
         this.render = function(){ return scroll.render(); };
-        
         this.destroy = function(){ 
             Lampa.Controller.clear();
             scroll.destroy(); 
