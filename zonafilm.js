@@ -1,332 +1,248 @@
 /**
- * TrahKino v0.2-diag — Детальный анализ структуры
+ * ============================================================
+ *  LAMPA PLUGIN — Trahkino v1.6.1
+ * ============================================================
+ *
+ *  ИСПРАВЛЕНИЯ v1.6.1:
+ *    ✅ Убрана ошибка: заменен несуществующий Controller.remove() 
+ *       на Controller.clear() (из вашего списка методов).
+ *    ✅ Контроллер активируется через enable() вместо toggle().
+ *    ✅ Постеры: временно заменены на чистый серый фон (плейсхолдер), 
+ *       чтобы не мешать отладке навигации.
+ *
+ * ============================================================
  */
-(function(){
+
+(function () {
     'use strict';
 
-    var WORKER = 'https://zonaproxy.777b737.workers.dev';
-    var SITE = 'https://trahkino.me';
+    var CONFIG = {
+        debug: true,
+        ver: '1.6.1',
+        site: 'https://trahkino.me',
+        proxy: [
+            'https://api.codetabs.com/v1/proxy?quest={u}',
+            'https://corsproxy.io/?{u}',
+            'https://api.allorigins.win/raw?url={u}'
+        ],
+        pi: 0,
+        timeout: 15000
+    };
 
-    var ICO = '<svg viewBox="0 0 24 24" fill="currentColor">' +
-        '<path d="M18 3v2h-2V3H8v2H6V3H4v18h2v-2h2v2h8v-2h2v2h2V3h-2z' +
-        'M8 17H6v-2h2v2zm0-4H6v-2h2v2zm0-4H6V7h2v2z' +
-        'm10 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2z"/></svg>';
+    var D = {
+        log: function(t,m){ if(CONFIG.debug) console.log('[TRK]['+t+']',m); },
+        err: function(t,m){ console.error('[TRK][ERR]['+t+']',m); },
+        noty: function(m){ try{ Lampa.Noty.show(m); }catch(e){} }
+    };
 
-    function get(url, cb){
-        $.ajax({
-            url: WORKER + '/?url=' + encodeURIComponent(url),
-            timeout: 20000,
-            success: function(data){ cb(null, data); },
-            error: function(xhr, st, err){ cb(st+' '+err, null); }
+    var Net = {
+        get: function(url, ok, fail, _i){
+            var i = typeof _i === 'number' ? _i : CONFIG.pi;
+            if(i >= CONFIG.proxy.length){ if(fail) fail(); return; }
+            var pu = CONFIG.proxy[i].replace('{u}', encodeURIComponent(url));
+            $.ajax({ url: pu, timeout: CONFIG.timeout, success: function(data){
+                CONFIG.pi = i; if(ok) ok(data);
+            }, error: function(){ Net.get(url, ok, fail, i+1); }});
+        }
+    };
+
+    var Src = {
+        main: function(page, cb){
+            D.noty('⏳ Загрузка каталога...');
+            var url = CONFIG.site + (page > 1 ? '/page/'+page+'/' : '/');
+            Net.get(url, function(html){
+                if(typeof html !== 'string'){ cb([]); return; }
+                try {
+                    var doc = new DOMParser().parseFromString(html, 'text/html');
+                    var cards = doc.querySelectorAll('a[href*="/video/"]');
+                    var items = [];
+                    cards.forEach(function(a){
+                        var href = a.getAttribute('href') || '';
+                        if(!href) return;
+                        if(href.indexOf('http') === -1) href = CONFIG.site + href;
+                        var img = a.querySelector('img');
+                        var poster = img ? (img.getAttribute('src') || '') : '';
+                        var titleEl = a.querySelector('.title, strong');
+                        var title = titleEl ? titleEl.textContent.trim() : 'Без названия';
+                        var durEl = a.querySelector('.duration');
+                        var duration = durEl ? durEl.textContent.trim() : '';
+                        if(title && poster) items.push({ title: title, url: href, poster: poster, duration: duration });
+                    });
+                    if(items.length > 0) D.noty('✅ Загружено: '+items.length);
+                    else D.noty('⚠ Пусто');
+                    cb(items);
+                } catch(e){ cb([]); }
+            }, function(){ D.noty('⚠ Ошибка сети'); cb([]); });
+        },
+        search: function(q, cb){ D.noty('Поиск на этапе 3'); cb([]); },
+        cats: function(){ return []; }
+    };
+
+    var CSS = '\
+        .zf-wrap{padding:1.5em}\
+        .zf-grid{display:flex;flex-wrap:wrap;gap:1.2em}\
+        .zf-card{width:28em;position:relative;transition:transform .2s}\
+        .zf-card.focus{transform:scale(1.05)}\
+        .zf-poster{width:100%;height:16em;border-radius:.5em;overflow:hidden;background:#333; position:relative}\
+        .zf-poster img{width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0}\
+        .zf-dur{position:absolute;bottom:.5em;right:.5em;background:rgba(0,0,0,.85);\
+            color:#fff;padding:.15em .5em;border-radius:.3em;font-size:1.1em;font-weight:700}\
+        .zf-name{color:#eee;font-size:1.3em;margin-top:.5em;overflow:hidden;\
+            text-overflow:ellipsis;white-space:nowrap; height: 1.5em;}\
+        .zf-loading{display:flex;align-items:center;justify-content:center;\
+            padding:4em;color:#888;font-size:1.3em}\
+        .zf-spin{display:inline-block;width:2em;height:2em;border:3px solid #333;\
+            border-top-color:#4FC3F7;border-radius:50%;margin-right:.8em;\
+            animation:zfspin .7s linear infinite}\
+        @keyframes zfspin{to{transform:rotate(360deg)}}\
+        .zf-empty{text-align:center;padding:4em;color:#666;font-size:1.3em;width:100%}\
+    ';
+    $('#zf-css').remove();
+    $('<style>').attr('id','zf-css').text(CSS).appendTo('head');
+
+    function showMainMenu(){
+        Lampa.Select.show({
+            title: '🎬 Trahkino',
+            items: [
+                { title: '🔍 Поиск', subtitle: '(Этап 3)', action: 'search' },
+                { title: '📽 Последние видео', subtitle: 'Каталог', action: 'all' },
+                { title: '← Назад', subtitle: '', action: 'back' }
+            ],
+            onBack: function(){ Lampa.Controller.toggle('content'); },
+            onSelect: function(item){
+                if(item.action === 'back' || item.action === 'search'){
+                    if(item.action === 'back') Lampa.Controller.toggle('content');
+                    return;
+                }
+                if(item.action === 'all'){
+                    Lampa.Activity.push({ url: '', title: 'Последние видео', component: 'zf_cards', page: 1 });
+                }
+            }
         });
     }
 
-    function runDiag(){
-        Lampa.Noty.show('⏳ Анализ структуры...');
+    function CardsComp(object){
+        var self   = this;
+        var scroll = new Lampa.Scroll({mask:true, over:true, step:250});
+        var body   = $('<div class="zf-wrap"></div>');
+        var grid   = $('<div class="zf-grid"></div>');
 
-        get(SITE, function(err, data){
-            if(err){
-                Lampa.Noty.show('❌ ' + err);
+        this.create = function(){
+            body.append('<div class="zf-loading" id="zf-loader"><div class="zf-spin"></div>Загрузка...</div>');
+            body.append(grid);
+            scroll.append(body);
+            Src.main(object.page || 1, function(items){ self.onDataLoaded(items); });
+        };
+
+        this.onDataLoaded = function(items){
+            $('#zf-loader').remove();
+            if(!items.length){
+                grid.html('<div class="zf-empty">📭 Пусто</div>');
+                self.bindFocus();
                 return;
             }
 
-            var html = typeof data === 'string' ? data : '';
-            var items = [];
+            items.forEach(function(m){
+                // ВРЕМЕННО: Пустой плейсхолдер, чтобы отвязаться от проблем с прокси картинок
+                var card = $([
+                    '<div class="zf-card selector">',
+                      '<div class="zf-poster"></div>',
+                      m.duration ? '<div class="zf-dur">'+m.duration+'</div>' : '',
+                      '<div class="zf-name">'+m.title+'</div>',
+                    '</div>'
+                ].join(''));
 
-            items.push({ title: '✅ HTML: ' + html.length + ' симв', subtitle: '' });
+                card.on('hover:enter', function(){
+                    openInBrowser(m.url, m.title);
+                });
 
-            /* ============================================
-             * 1. Все ссылки на категории
-             * ============================================ */
-            var catLinks = [];
-            var re1 = /<a[^>]+href="([^"]*\/categories\/[^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
-            var m;
-            while((m = re1.exec(html)) !== null){
-                var text = m[2].replace(/<[^>]+>/g, '').trim();
-                if(text) catLinks.push({ href: m[1], title: text });
-            }
+                card.on('hover:focus', function(){
+                    scroll.update($(this));
+                });
 
-            items.push({ title: '━━ КАТЕГОРИИ: ' + catLinks.length + ' ━━', subtitle: '' });
-            catLinks.forEach(function(c){
-                items.push({ title: '📂 ' + c.title, subtitle: c.href });
+                grid.append(card);
             });
 
-            /* ============================================
-             * 2. Ищем карточки видео — разные паттерны
-             * ============================================ */
-            items.push({ title: '━━ ВИДЕО КАРТОЧКИ ━━', subtitle: '' });
+            self.bindFocus();
+        };
 
-            /* Паттерн 1: div с классом содержащим thumb/item/video */
-            var cardClasses = [];
-            var re2 = /class="([^"]*(?:thumb|item|video|card|post|content)[^"]*)"/gi;
-            var seen = {};
-            while((m = re2.exec(html)) !== null){
-                if(!seen[m[1]]){ seen[m[1]] = true; cardClasses.push(m[1]); }
-            }
-            items.push({ title: 'CSS классы:', subtitle: cardClasses.slice(0,10).join(' | ') });
+        this.bindFocus = function(){
+            setTimeout(function(){
+                Lampa.Controller.collectionSet(scroll.render());
+                Lampa.Controller.collectionFocus(0, scroll.render());
+            }, 100);
+        };
 
-            /* Паттерн 2: img с src (превью) */
-            var images = [];
-            var re3 = /<img[^>]+src="([^"]*)"[^>]*>/gi;
-            var seenImg = {};
-            while((m = re3.exec(html)) !== null){
-                var src = m[1];
-                if(src.length > 20 && !seenImg[src] &&
-                   (src.indexOf('.jpg') !== -1 || src.indexOf('.png') !== -1 ||
-                    src.indexOf('.webp') !== -1 || src.indexOf('thumb') !== -1)){
-                    seenImg[src] = true;
-                    images.push(src);
-                }
-            }
-            items.push({ title: '🖼 Превью: ' + images.length, subtitle: '' });
-            images.slice(0, 3).forEach(function(s){
-                items.push({ title: '', subtitle: s.substring(0, 120) });
+        // --- НАВИГАЦИЯ (Строго по вашему списку методов) ---
+        this.start = function(){
+            // Добавляем наш выделенный контроллер
+            Lampa.Controller.add('zf_scroll', {
+                toggle: function(){},
+                left: function(){ Lampa.Controller.move('left'); },
+                right: function(){ Lampa.Controller.move('right'); },
+                up: function(){ Lampa.Controller.move('up'); },
+                down: function(){ Lampa.Controller.move('down'); },
+                back: function(){ Lampa.Activity.backward(); }
             });
+            // Включаем его (используем enable из вашего списка)
+            Lampa.Controller.enable('zf_scroll');
+        };
+        
+        this.toggle = function(){
+            Lampa.Controller.toggle('zf_scroll');
+        };
 
-            /* Паттерн 3: ссылки на /video/ */
-            var vidLinks = [];
-            var re4 = /<a[^>]+href="([^"]*\/video\/[^"]*)"[^>]*>/gi;
-            while((m = re4.exec(html)) !== null){
-                if(vidLinks.indexOf(m[1]) === -1) vidLinks.push(m[1]);
-            }
-
-            if(vidLinks.length === 0){
-                /* Пробуем другие паттерны */
-                var re4b = /<a[^>]+href="(\/[^"]*\d+[^"]*\.html)"[^>]*>/gi;
-                while((m = re4b.exec(html)) !== null){
-                    if(vidLinks.indexOf(m[1]) === -1) vidLinks.push(m[1]);
-                }
-            }
-
-            if(vidLinks.length === 0){
-                var re4c = /<a[^>]+href="([^"]*)"[^>]*>[\s\S]*?<img/gi;
-                while((m = re4c.exec(html)) !== null){
-                    var h = m[1];
-                    if(h.indexOf(SITE) !== -1 || (h.indexOf('/') === 0 && h.length > 5)){
-                        if(vidLinks.indexOf(h) === -1) vidLinks.push(h);
-                    }
-                }
-            }
-
-            items.push({ title: '🎬 Видео ссылок: ' + vidLinks.length, subtitle: '' });
-            vidLinks.slice(0, 5).forEach(function(v){
-                items.push({ title: '', subtitle: v.substring(0, 120) });
-            });
-
-            /* ============================================
-             * 3. Пробуем извлечь полную карточку
-             * ============================================ */
-            items.push({ title: '━━ СТРУКТУРА КАРТОЧКИ ━━', subtitle: '' });
-
-            /* Ищем блок вокруг первого img+a */
-            var cardPatterns = [
-                /<div[^>]*class="[^"]*(?:thumb|item|video-item|card)[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi,
-                /<article[^>]*>([\s\S]*?)<\/article>/gi,
-                /<li[^>]*class="[^"]*(?:thumb|item|video)[^"]*"[^>]*>([\s\S]*?)<\/li>/gi,
-                /<div[^>]*class="[^"]*(?:col|grid)[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi
-            ];
-
-            var sampleCard = '';
-            for(var p = 0; p < cardPatterns.length; p++){
-                var rm = cardPatterns[p].exec(html);
-                if(rm && rm[1] && rm[1].indexOf('<img') !== -1 && rm[1].indexOf('href') !== -1){
-                    sampleCard = rm[1];
-                    items.push({ title: 'Паттерн #' + (p+1) + ' ✅', subtitle: '' });
-                    break;
-                }
-            }
-
-            if(sampleCard){
-                /* Показываем карточку по частям */
-                var cardChunks = sampleCard.match(/.{1,120}/g) || [];
-                cardChunks.slice(0, 8).forEach(function(chunk){
-                    items.push({ title: '', subtitle: chunk });
-                });
-            } else {
-                items.push({ title: '⚠ Карточка не найдена стандартным паттерном', subtitle: '' });
-
-                /* Показываем кусок HTML где есть первый img */
-                var imgPos = html.indexOf('<img');
-                if(imgPos > 0){
-                    var start = Math.max(0, imgPos - 200);
-                    var sample = html.substring(start, imgPos + 300);
-                    items.push({ title: 'HTML вокруг первого img:', subtitle: '' });
-                    var chunks = sample.match(/.{1,120}/g) || [];
-                    chunks.slice(0, 6).forEach(function(c){
-                        items.push({ title: '', subtitle: c });
-                    });
-                }
-            }
-
-            /* ============================================
-             * 4. Пагинация
-             * ============================================ */
-            items.push({ title: '━━ ПАГИНАЦИЯ ━━', subtitle: '' });
-            var pageRe = /href="([^"]*(?:\?page=|\/page\/|\/\d+\/?)[^"]*)"/gi;
-            var pages = [];
-            while((m = pageRe.exec(html)) !== null){
-                if(pages.indexOf(m[1]) === -1) pages.push(m[1]);
-            }
-            if(pages.length > 0){
-                pages.slice(0, 5).forEach(function(p){
-                    items.push({ title: '📄 ' + p, subtitle: '' });
-                });
-            } else {
-                items.push({ title: 'Не найдена', subtitle: '' });
-            }
-
-            /* ============================================
-             * 5. Тест страницы видео
-             * ============================================ */
-            if(vidLinks.length > 0){
-                items.push({ title: '━━━━━━━━━━━', subtitle: '' });
-                items.push({
-                    title: '🔍 Открыть страницу видео',
-                    subtitle: vidLinks[0],
-                    action: 'video',
-                    url: vidLinks[0]
-                });
-            }
-
-            if(catLinks.length > 0){
-                items.push({
-                    title: '🔍 Открыть категорию',
-                    subtitle: catLinks[0].href,
-                    action: 'category',
-                    url: catLinks[0].href
-                });
-            }
-
-            items.push({ title: '━━━━━━━━━━━', subtitle: '' });
-            items.push({ title: '← Назад', subtitle: '', action: 'back' });
-
-            Lampa.Select.show({
-                title: '🔧 Структура ' + SITE,
-                items: items,
-                onBack: function(){ Lampa.Controller.toggle('content'); },
-                onSelect: function(item){
-                    if(item.action === 'back'){
-                        Lampa.Controller.toggle('content');
-                        return;
-                    }
-                    if(item.action === 'video' || item.action === 'category'){
-                        analyzeSubPage(item.url, item.action);
-                    }
-                }
-            });
-        });
+        this.pause = function(){};
+        
+        this.stop = function(){
+            // Очищаем контроллер (из вашего списка методов)
+            Lampa.Controller.clear();
+        };
+        
+        this.render = function(){ return scroll.render(); };
+        
+        this.destroy = function(){ 
+            Lampa.Controller.clear();
+            scroll.destroy(); 
+            body.remove(); 
+        };
     }
 
-    /**
-     * Анализ подстраницы (видео или категория)
-     */
-    function analyzeSubPage(url, type){
-        /* Делаем абсолютный URL */
-        if(url.indexOf('http') !== 0){
-            url = SITE + (url.indexOf('/') === 0 ? '' : '/') + url;
-        }
-
-        Lampa.Noty.show('⏳ Загрузка ' + type + '...');
-
-        get(url, function(err, data){
-            var items = [];
-
-            if(err){
-                items.push({ title: '❌ Ошибка: ' + err, subtitle: '' });
-            } else {
-                var html = typeof data === 'string' ? data : '';
-                items.push({ title: '✅ ' + html.length + ' символов', subtitle: url });
-
-                if(type === 'video'){
-                    /* Ищем video/iframe/source теги */
-                    var sources = [];
-                    var re = /<(?:source|video|iframe)[^>]+(?:src|data-src)="([^"]+)"/gi;
-                    var m;
-                    while((m = re.exec(html)) !== null){
-                        sources.push(m[1]);
-                    }
-
-                    items.push({ title: '🎥 Источники видео: ' + sources.length, subtitle: '' });
-                    sources.forEach(function(s){
-                        items.push({ title: '', subtitle: s.substring(0, 120) });
-                    });
-
-                    /* Ищем JS-переменные с URL видео */
-                    var jsVars = html.match(/(?:video_url|file|source|mp4|stream)['":\s]*['"]([^'"]+\.(?:mp4|m3u8|webm))['"]/gi) || [];
-                    if(jsVars.length > 0){
-                        items.push({ title: '📎 JS видео:', subtitle: '' });
-                        jsVars.slice(0, 5).forEach(function(v){
-                            items.push({ title: '', subtitle: v.substring(0, 120) });
-                        });
-                    }
-
-                    /* Показываем кусок HTML с player */
-                    var playerPos = html.search(/player|video|iframe/i);
-                    if(playerPos > 0){
-                        var sample = html.substring(Math.max(0, playerPos - 100), playerPos + 500);
-                        items.push({ title: '━━ HTML плеера: ━━', subtitle: '' });
-                        var chunks = sample.match(/.{1,120}/g) || [];
-                        chunks.slice(0, 8).forEach(function(c){
-                            items.push({ title: '', subtitle: c });
-                        });
-                    }
-                }
-
-                if(type === 'category'){
-                    /* Считаем видео на странице категории */
-                    var vids = [];
-                    var re2 = /<a[^>]+href="([^"]*\/video\/[^"]*)"[^>]*>/gi;
-                    var m2;
-                    while((m2 = re2.exec(html)) !== null){
-                        if(vids.indexOf(m2[1]) === -1) vids.push(m2[1]);
-                    }
-
-                    if(vids.length === 0){
-                        var re2b = /<a[^>]+href="([^"]*)"[^>]*>[\s\S]*?<img/gi;
-                        while((m2 = re2b.exec(html)) !== null){
-                            if(vids.indexOf(m2[1]) === -1) vids.push(m2[1]);
-                        }
-                    }
-
-                    items.push({ title: '🎬 Видео в категории: ' + vids.length, subtitle: '' });
-                    vids.slice(0, 5).forEach(function(v){
-                        items.push({ title: '', subtitle: v.substring(0, 120) });
-                    });
-                }
+    function openInBrowser(url, title){
+        D.noty('▶ Открываю: ' + title);
+        try {
+            if(typeof Lampa.Android !== 'undefined' && Lampa.Android.openUrl){
+                Lampa.Android.openUrl(url);
+                return;
             }
-
-            items.push({ title: '━━━━━━━━━━━', subtitle: '' });
-            items.push({ title: '← Назад', subtitle: '', action: 'back' });
-
-            Lampa.Select.show({
-                title: '🔧 ' + type + ' анализ',
-                items: items,
-                onBack: function(){ Lampa.Controller.toggle('content'); },
-                onSelect: function(item){
-                    if(item.action === 'back') Lampa.Controller.toggle('content');
-                }
-            });
-        });
+        } catch(e){}
+        try { window.open(url,'_blank'); } catch(e){}
     }
+
+    Lampa.Component.add('zf_cards', CardsComp);
+
+    var ICO = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>';
 
     function addMenu(){
-        if($('[data-action="tkdiag"]').length) return;
-        var li = $('<li class="menu__item selector" data-action="tkdiag">'+
+        if($('[data-action="trahkino"]').length) return;
+        var li = $('<li class="menu__item selector" data-action="trahkino">'+
             '<div class="menu__ico">'+ICO+'</div>'+
-            '<div class="menu__text">TK Анализ</div></li>');
-        li.on('hover:enter', function(){ runDiag(); });
+            '<div class="menu__text">Trahkino</div></li>');
+        li.on('hover:enter', function(){ showMainMenu(); });
         var list = $('.menu .menu__list');
-        if(list.length) list.eq(0).append(li);
-        else { var ul = $('.menu ul'); if(ul.length) ul.eq(0).append(li); }
+        if(list.length){ list.eq(0).append(li); return; }
+        var ul = $('.menu ul');
+        if(ul.length) ul.eq(0).append(li);
     }
 
     function init(){
-        addMenu();
-        Lampa.Noty.show('🔧 TK Анализ v0.2');
+        try {
+            addMenu();
+            D.noty('🎬 Trahkino v'+CONFIG.ver);
+        } catch(e){ D.err('Boot',e.message); }
     }
 
     if(window.appready) init();
-    else Lampa.Listener.follow('app', function(e){
-        if(e.type === 'ready') init();
-    });
+    else Lampa.Listener.follow('app', function(e){ if(e.type === 'ready') init(); });
+
 })();
