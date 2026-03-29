@@ -1,11 +1,13 @@
 /**
  * ============================================================
- *  LAMPA PLUGIN — Trahkino v2.2.1
+ *  LAMPA PLUGIN — Trahkino v2.3.0 (Подключен InteractionMain)
  * ============================================================
  *
- *  ИЗМЕНЕНИЯ v2.2.1:
- *    ✅ Версия плагина добавлена в заголовок главного меню.
- *    ✅ Уведомление о загрузке выведено в виде галочки.
+ *  РЕШЕНИЕ v2.3.0:
+ *    ✅ Внедрен Lampa.InteractionMain — встроенный менеджер сеток.
+ *       Именно он слушает пульт и перемещает фокус по координатам.
+ *    ✅ Карточки добавляются через interaction.append(card).
+ *    ✅ Удалены все костыли с own/add. Навигация делегирована ядру.
  *
  * ============================================================
  */
@@ -15,7 +17,7 @@
 
     var CONFIG = {
         debug: true,
-        ver: '2.2.1',
+        ver: '2.3.0',
         site: 'https://trahkino.me',
         proxy: [
             'https://api.codetabs.com/v1/proxy?quest={u}',
@@ -76,8 +78,8 @@
     };
 
     var CSS = '\
-        .cards-grid{display:flex;flex-wrap:wrap;gap:1.2em;padding:1.5em}\
-        .card{width:28em;position:relative;transition:transform .2s}\
+        .cards-grid{padding:1.5em}\
+        .card{width:28em;position:relative;transition:transform .2s;margin-bottom:1.5em}\
         .card.focus{transform:scale(1.05)}\
         .card__img{width:100%;height:16em;border-radius:.5em;overflow:hidden;background:#333; position:relative}\
         .card__img img{width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0}\
@@ -91,14 +93,13 @@
             border-top-color:#4FC3F7;border-radius:50%;margin-right:.8em;\
             animation:zfspin .7s linear infinite}\
         @keyframes zfspin{to{transform:rotate(360deg)}}\
-        .zf-empty{text-align:center;padding:4em;color:#666;font-size:1.3em;width:100%}\
+        .zf-empty{text-align:center;padding:4em;color:#666;font-size:1.3em}\
     ';
     $('#zf-css').remove();
     $('<style>').attr('id','zf-css').text(CSS).appendTo('head');
 
     function showMainMenu(){
         Lampa.Select.show({
-            // --- ВЫВОД ВЕРСИИ В ЗАГОЛОВОК МЕНЮ ---
             title: '🎬 Trahkino v' + CONFIG.ver,
             items: [
                 { title: '🔍 Поиск', subtitle: '(Этап 3)', action: 'search' },
@@ -121,22 +122,33 @@
     function CardsComp(object){
         var self   = this;
         var scroll = new Lampa.Scroll({mask:true, over:true, step:250});
-        var grid   = $('<div class="cards-grid"></div>');
+
+        // --- СОЗДАЕМ НАТИВНЫЙ МЕНЕДЖЕР СЕТКИ LAMPA ---
+        var interaction = new Lampa.InteractionMain({
+            wrap: true
+        });
 
         this.create = function(){
-            grid.append('<div class="zf-loading" id="zf-loader"><div class="zf-spin"></div>Загрузка...</div>');
-            scroll.append(grid);
+            // Добавляем лоадер внутрь interaction
+            var loader = $('<div class="zf-loading" id="zf-loader"><div class="zf-spin"></div>Загрузка...</div>');
+            interaction.append(loader);
+            
+            // Помещаем interaction в scroll
+            scroll.append(interaction.render());
+
             Src.main(object.page || 1, function(items){ self.onDataLoaded(items); });
         };
 
         this.onDataLoaded = function(items){
             $('#zf-loader').remove();
+            
             if(!items.length){
-                grid.html('<div class="zf-empty">📭 Пусто</div>');
+                interaction.append('<div class="zf-empty">📭 Пусто</div>');
                 self.bindFocus();
                 return;
             }
 
+            // Добавляем карточки через метод interaction.append()
             items.forEach(function(m){
                 var card = $([
                     '<div class="card selector">',
@@ -154,7 +166,8 @@
                     scroll.update($(this));
                 });
 
-                grid.append(card);
+                // Скармливаем карточку менеджеру сетки!
+                interaction.append(card);
             });
 
             self.bindFocus();
@@ -162,22 +175,28 @@
 
         this.bindFocus = function(){
             setTimeout(function(){
-                Lampa.Controller.collectionSet(scroll.render());
-                Lampa.Controller.collectionFocus(false, scroll.render());
+                // Говорим контроллеру следить за фокусом внутри interaction
+                Lampa.Controller.collectionSet(interaction.render());
+                Lampa.Controller.collectionFocus(false, interaction.render());
             }, 150);
         };
 
+        // --- ИДЕАЛЬНО ЧИСТЫЙ ЖИЗНЕННЫЙ ЦИКЛ ---
         this.start = function(){};
         
         this.toggle = function(){
-            Lampa.Controller.collectionSet(scroll.render());
-            Lampa.Controller.collectionFocus(false, scroll.render());
+            Lampa.Controller.collectionSet(interaction.render());
+            Lampa.Controller.collectionFocus(false, interaction.render());
         };
 
         this.pause = function(){};
         this.stop = function(){};
         this.render = function(){ return scroll.render(); };
-        this.destroy = function(){ scroll.destroy(); grid.remove(); };
+        
+        this.destroy = function(){ 
+            scroll.destroy(); 
+            interaction.destroy(); // Обязательно уничтожаем менеджер
+        };
     }
 
     function openInBrowser(url, title){
@@ -210,7 +229,6 @@
     function init(){
         try {
             addMenu();
-            // --- ВЫВОД ВЕРСИИ ПРИ ЗАГРУЗКЕ ПЛАГЕНА ---
             D.noty('✅ Trahkino v'+CONFIG.ver+' загружен');
         } catch(e){ D.err('Boot',e.message); }
     }
