@@ -1,13 +1,15 @@
 /**
  * ============================================================
- *  LAMPA PLUGIN — Trahkino v3.0.0 (Нативная сетка Lampa)
+ *  LAMPA PLUGIN — Trahkino v3.1.0 (Точная передача DOM)
  * ============================================================
  *
- *  ИСПРАВЛЕНИЯ v3.0.0:
- *    ✅ Удален ВЕСЬ кастомный CSS карточек (он ломал верстку шаблона).
- *    ✅ Контейнеру задан стандартный display:flex (создает сетку).
- *    ✅ Карточки используют 100% родные стили Lampa.
- *    ✅ Алгоритм навигации Lampa теперь видит правильные координаты.
+ *  ИСПРАВЛЕНИЯ v3.1.0:
+ *    ✅ В start() зарегистрирован системный контроллер 'items'.
+ *    ✅ В свойство render передан wrap[0] (чистый DOM, а не jQuery объект).
+ *    ✅ Методы left/right/up/down НЕ прописаны. 
+ *       Ядро Lampa должно подставить свои стандартные методы 
+ *       для перемещения по имени 'items'.
+ *    ✅ Из bindFocus убран collectionSet (оставлен только в toggle).
  *
  * ============================================================
  */
@@ -17,7 +19,7 @@
 
     var CONFIG = {
         debug: true,
-        ver: '3.0.0',
+        ver: '3.1.0',
         site: 'https://trahkino.me',
         proxy: [
             'https://api.codetabs.com/v1/proxy?quest={u}',
@@ -77,7 +79,6 @@
         cats: function(){ return []; }
     };
 
-    // Только базовая обертка для сетки и спиннер. Больше никакого CSS!
     var CSS = '\
         .zf-wrap{display:flex;flex-wrap:wrap;gap:1em;padding:1.5em}\
         .zf-loading{display:flex;align-items:center;justify-content:center;\
@@ -127,13 +128,13 @@
             $('#zf-loader').remove();
             if(!items.length){
                 wrap.html('<div class="zf-empty">📭 Пусто</div>');
-                self.bindFocus();
+                // Если пусто, вызываем toggle вручную, чтобы поставить фокус на надпись
+                Lampa.Controller.toggle('items'); 
                 return;
             }
 
             items.forEach(function(m, index){
                 try {
-                    // Используем нативный шаблон Lampa (без нашего CSS)
                     var card = Lampa.Template.get('card', {
                         title: m.title + (m.duration ? ' ('+m.duration+')' : ''),
                         poster: m.poster,
@@ -154,25 +155,35 @@
                 }
             });
 
-            self.bindFocus();
+            // Как только карточки отрисованы, переключаем на наш контроллер
+            Lampa.Controller.toggle('items');
         };
 
-        this.bindFocus = function(){
-            setTimeout(function(){
-                Lampa.Controller.collectionSet(wrap);
-                Lampa.Controller.collectionFocus(false, wrap);
-            }, 150);
+        // --- РЕГИСТРАЦИЯ КОНТРОЛЛЕРА ИМЕННО В START ---
+        this.start = function(){
+            // Регистрируем системный контроллер 'items'
+            // ВАЖНО: передаем wrap[0] (чистый DOM элемент, без обертки jQuery)
+            // Методы стрелок НЕ прописываем - ядро должно использовать свои
+            Lampa.Controller.add('items', {
+                render: wrap[0], 
+                toggle: function(){
+                    Lampa.Controller.collectionSet(wrap);
+                    Lampa.Controller.collectionFocus(false, wrap);
+                }
+            });
         };
-
-        // Идеально чистая база
-        this.start = function(){};
+        
         this.toggle = function(){
-            Lampa.Controller.collectionSet(wrap);
-            Lampa.Controller.collectionFocus(false, wrap);
+            Lampa.Controller.toggle('items');
         };
+
         this.pause = function(){};
-        this.stop = function(){};
+        
+        // ВАЖНО: Не используем clear(), чтобы не сломать другие плагины!
+        this.stop = function(){}; 
+        
         this.render = function(){ return scroll.render(); };
+        
         this.destroy = function(){ 
             scroll.destroy(); 
             wrap.remove(); 
