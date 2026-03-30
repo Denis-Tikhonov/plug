@@ -1,153 +1,189 @@
 // ============================================================
-//  LAMPA PLUGIN — Grid Navigation (Guaranteed Working)
-//  Версия с максимальной совместимостью и отладкой
+//  LAMPA PLUGIN — Grid Navigation (Emergency Fix)
+//  Принудительная активация контроллера
 // ============================================================
 
 (function() {
     'use strict';
 
-    // ======== ОТЛАДКА ========
+    // ======== ОТЛАДКА НА ЭКРАНЕ ========
     var DEBUG = true;
-    function log(msg, data) {
+    var debugLines = [];
+    
+    function log(msg) {
         if (!DEBUG) return;
-        console.log('[GRID-NAV]', msg, data || '');
-        // Визуальный лог на экране
-        var debugBox = document.getElementById('grid-nav-debug');
-        if (!debugBox) {
-            debugBox = document.createElement('div');
-            debugBox.id = 'grid-nav-debug';
-            debugBox.style.cssText = 'position:fixed;top:10px;left:10px;background:rgba(0,0,0,0.9);color:#0f0;padding:10px;font-family:monospace;font-size:12px;z-index:99999;max-width:400px;max-height:150px;overflow:auto;border:2px solid #0f0;pointer-events:none;';
-            document.body.appendChild(debugBox);
+        console.log('[GRID]', msg);
+        debugLines.push(msg);
+        if (debugLines.length > 10) debugLines.shift();
+        updateDebugScreen();
+    }
+    
+    function updateDebugScreen() {
+        var box = document.getElementById('grid-debug');
+        if (!box) {
+            box = document.createElement('div');
+            box.id = 'grid-debug';
+            box.style.cssText = 'position:fixed;top:10px;left:10px;right:10px;background:rgba(0,0,0,0.95);color:#0f0;padding:15px;font-family:monospace;font-size:14px;z-index:99999;min-height:100px;border:3px solid #0f0;white-space:pre-wrap;pointer-events:none;';
+            document.body.appendChild(box);
         }
-        var line = document.createElement('div');
-        line.textContent = new Date().toLocaleTimeString() + ' ' + msg;
-        debugBox.appendChild(line);
-        if (debugBox.children.length > 8) debugBox.removeChild(debugBox.firstChild);
+        box.textContent = debugLines.join('\n');
     }
 
-    log('Plugin loading started');
+    log('=== PLUGIN START ===');
 
-    // ======== ПРОВЕРКА ОКРУЖЕНИЯ ========
+    // ======== ПРОВЕРКА LAMPA ========
     if (typeof Lampa === 'undefined') {
-        log('ERROR: Lampa not found!');
+        log('FATAL: Lampa undefined');
         return;
     }
-    log('Lampa found, version:', Lampa.Manifest?.app_digital);
+    
+    log('Lampa OK');
+    log('Controller exists: ' + (typeof Lampa.Controller !== 'undefined'));
+    log('Controller.add exists: ' + (typeof Lampa.Controller?.add !== 'undefined'));
+    log('Controller.enable exists: ' + (typeof Lampa.Controller?.enable !== 'undefined'));
 
     // ======== СТИЛИ ========
     var STYLE = [
-        '.gn-wrap{position:absolute;top:0;left:0;width:100%;height:100%;overflow:hidden}',
-        '.gn-grid{display:flex;flex-wrap:wrap;gap:20px;padding:30px}',
-        '.gn-card{width:22%;height:200px;background:#2a2a2a;border-radius:10px;position:relative;transition:all 0.2s;overflow:hidden;border:3px solid transparent}',
-        '.gn-card.focus{background:#4FC3F7;border-color:#fff;transform:scale(1.05);box-shadow:0 0 30px rgba(79,195,247,0.8);z-index:100}',
-        '.gn-num{position:absolute;top:8px;left:8px;background:#000;color:#0f0;padding:4px 8px;border-radius:4px;font-size:14px;font-weight:bold}',
-        '.gn-card.focus .gn-num{background:#4FC3F7;color:#000}',
-        '.gn-title{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,0.9));color:#fff;padding:15px 10px 10px;font-size:16px;text-align:center}'
+        '.gx-wrap{position:absolute;top:0;left:0;width:100%;height:100%;overflow:hidden;background:#1a1a1a}',
+        '.gx-grid{display:flex;flex-wrap:wrap;gap:20px;padding:40px;justify-content:flex-start}',
+        '.gx-card{width:20%;height:180px;background:#333;border-radius:12px;position:relative;transition:all 0.2s;border:4px solid #555;cursor:pointer}',
+        '.gx-card.focus{background:#4FC3F7;border-color:#fff;transform:scale(1.1);box-shadow:0 0 40px rgba(79,195,247,0.9);z-index:1000}',
+        '.gx-num{position:absolute;top:10px;left:10px;background:#000;color:#0f0;padding:6px 12px;border-radius:6px;font-size:18px;font-weight:bold}',
+        '.gx-card.focus .gx-num{background:#fff;color:#000}',
+        '.gx-title{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.8);color:#fff;padding:15px;text-align:center;font-size:16px}'
     ].join('');
-    
     $('<style>').text(STYLE).appendTo('head');
 
     // ======== КОМПОНЕНТ ========
-    function GridNavComponent(object) {
-        log('Component constructor called');
+    function GridXComponent(object) {
+        log('=== COMPONENT CONSTRUCTOR ===');
         
         var self = this;
         this.activity = object;
-        
-        // Создаем Scroll через Lampa
-        this.scroll = new Lampa.Scroll({ mask: true, over: true, step: 200 });
-        
-        // Создаем grid как jQuery-объект
-        this.grid = $('<div class="gn-grid"></div>');
-        
-        // Флаг инициализации
-        this.initialized = false;
+        this.scroll = new Lampa.Scroll({ mask: true, over: true, step: 250 });
+        this.grid = $('<div class="gx-grid"></div>');
+        this.cards = [];
 
-        // ======== КОНТРОЛЛЕР (КЛЮЧЕВОЙ БЛОК) ========
-        // Удаляем старый контроллер если есть
+        // ======== УДАЛЕНИЕ СТАРОГО КОНТРОЛЛЕРА ========
         try {
             Lampa.Controller.remove('content');
             log('Old controller removed');
-        } catch(e) {}
+        } catch(e) {
+            log('No old controller: ' + e.message);
+        }
 
-        // Создаем новый контроллер
-        this.controller = Lampa.Controller.add('content', {
+        // ======== СОЗДАНИЕ КОНТРОЛЛЕРА ========
+        log('Creating controller...');
+        
+        // Пробуем разные способы создания
+        var controllerMethods = {
             toggle: function() {
-                log('Controller: toggle() called');
-                // Устанавливаем коллекцию
-                Lampa.Controller.collectionSet(self.grid);
-                // Фокус на первый элемент
-                var firstCard = self.grid.find('.selector').first();
-                Lampa.Controller.collectionFocus(firstCard, self.grid);
-                log('Controller: focus set to first card');
+                log('CTRL: toggle()');
+                log('Setting collection...');
+                try {
+                    Lampa.Controller.collectionSet(self.grid);
+                    log('Collection set OK');
+                } catch(e) {
+                    log('CollectionSet ERROR: ' + e.message);
+                }
+                
+                log('Setting focus...');
+                try {
+                    var first = self.grid.find('.selector').first();
+                    log('First card found: ' + first.length);
+                    Lampa.Controller.collectionFocus(first, self.grid);
+                    log('Focus set OK');
+                } catch(e) {
+                    log('Focus ERROR: ' + e.message);
+                }
             },
             
             up: function() {
-                log('Key: UP');
-                Lampa.Controller.collectionMove('up');
-                self.showFocusInfo();
+                log('KEY: UP');
+                self.move('up');
             },
             down: function() {
-                log('Key: DOWN');
-                Lampa.Controller.collectionMove('down');
-                self.showFocusInfo();
+                log('KEY: DOWN');
+                self.move('down');
             },
             left: function() {
-                log('Key: LEFT');
-                Lampa.Controller.collectionMove('left');
-                self.showFocusInfo();
+                log('KEY: LEFT');
+                self.move('left');
             },
             right: function() {
-                log('Key: RIGHT');
-                Lampa.Controller.collectionMove('right');
-                self.showFocusInfo();
+                log('KEY: RIGHT');
+                self.move('right');
             },
             
             back: function() {
-                log('Key: BACK');
+                log('KEY: BACK');
                 Lampa.Activity.backward();
             }
-        });
-        
-        log('Controller registered:', this.controller ? 'OK' : 'FAIL');
-
-        // ======== МЕТОДЫ ========
-        
-        // Показать информацию о фокусе
-        this.showFocusInfo = function() {
-            var focused = this.grid.find('.focus');
-            var num = focused.find('.gn-num').text() || 'none';
-            log('Focus on card:', num);
         };
 
-        // Создание карточки
-        this.createCard = function(index) {
-            var card = $([
-                '<div class="gn-card card selector" data-index="' + index + '">',
-                    '<div class="gn-num">#' + index + '</div>',
-                    '<div class="gn-title">Видео ' + index + '</div>',
-                '</div>'
-            ].join(''));
+        // Регистрируем
+        try {
+            this.controller = Lampa.Controller.add('content', controllerMethods);
+            log('Controller registered: ' + (this.controller ? 'SUCCESS' : 'NULL'));
+        } catch(e) {
+            log('Controller registration FAILED: ' + e.message);
+            // Пробуем альтернативный способ
+            log('Trying alternative registration...');
+            Lampa.Controller.list = Lampa.Controller.list || {};
+            Lampa.Controller.list['content'] = controllerMethods;
+            this.controller = controllerMethods;
+        }
 
-            // hover:focus — когда карточка получает фокус (стрелками)
-            card.on('hover:focus', function(e) {
+        // ======== РУЧНАЯ НАВИГАЦИЯ (запасной вариант) ========
+        this.move = function(dir) {
+            log('Manual move: ' + dir);
+            
+            var cards = this.grid.find('.selector');
+            var current = this.grid.find('.focus');
+            var idx = cards.index(current);
+            var cols = 4;
+            var total = cards.length;
+            
+            log('Current index: ' + idx + ', total: ' + total);
+            
+            var newIdx;
+            switch(dir) {
+                case 'up': newIdx = idx - cols; break;
+                case 'down': newIdx = idx + cols; break;
+                case 'left': newIdx = idx - 1; break;
+                case 'right': newIdx = idx + 1; break;
+            }
+            
+            if (newIdx >= 0 && newIdx < total) {
+                current.removeClass('focus');
+                var next = cards.eq(newIdx);
+                next.addClass('focus');
+                this.scroll.update(next);
+                log('Moved to: ' + newIdx);
+            } else {
+                log('Move blocked: out of bounds');
+            }
+        };
+
+        // ======== СОЗДАНИЕ КАРТОЧЕК ========
+        this.createCard = function(i) {
+            var card = $('<div class="gx-card card selector" data-idx="' + i + '">' +
+                '<div class="gx-num">#' + i + '</div>' +
+                '<div class="gx-title">Video ' + i + '</div>' +
+            '</div>');
+
+            card.on('hover:focus', function() {
                 $(this).addClass('focus');
                 self.scroll.update($(this));
-                log('Event: focus on #' + index);
             });
 
-            // hover:blur — когда фокус уходит
-            card.on('hover:blur', function(e) {
+            card.on('hover:blur', function() {
                 $(this).removeClass('focus');
             });
 
-            // hover:enter — когда нажали OK/Enter
-            card.on('hover:enter', function(e) {
-                log('Event: ENTER on #' + index);
-                // Показываем уведомление
-                try {
-                    Lampa.Noty.show('Выбрано видео #' + index);
-                } catch(e) {}
+            card.on('hover:enter', function() {
+                log('ENTER on #' + i);
+                try { Lampa.Noty.show('Selected #' + i); } catch(e) {}
             });
 
             return card;
@@ -156,105 +192,156 @@
         // ======== ЖИЗНЕННЫЙ ЦИКЛ ========
         
         this.create = function() {
-            log('create() called');
+            log('=== CREATE ===');
             
-            // Создаем обертку
-            var wrap = $('<div class="gn-wrap"></div>');
-            wrap.append(this.grid);
-
+            var wrap = $('<div class="gx-wrap"></div>');
+            
             // Создаем карточки
             for (var i = 1; i <= 12; i++) {
-                this.grid.append(this.createCard(i));
+                var c = this.createCard(i);
+                this.grid.append(c);
+                this.cards.push(c);
             }
-            log('Created 12 cards');
-
-            // Добавляем grid в scroll
-            var scrollContent = this.scroll.render();
-            scrollContent.append(wrap);
+            log('Cards created: ' + this.cards.length);
             
-            // Возвращаем для Activity
-            this.initialized = true;
-            log('create() finished');
+            wrap.append(this.grid);
             
-            return scrollContent;
+            // Добавляем в scroll
+            var scrollEl = this.scroll.render();
+            scrollEl.append(wrap);
+            
+            log('Create finished');
+            return scrollEl;
         };
 
         this.start = function() {
-            log('start() called');
-            // Активируем контроллер!
-            var enabled = Lampa.Controller.enabled();
-            log('Current controller:', enabled ? enabled.name : 'none');
+            log('=== START ===');
             
-            Lampa.Controller.enable('content');
+            // Проверяем текущее состояние
+            var before = 'undefined';
+            try {
+                var enabled = Lampa.Controller.enabled();
+                before = enabled ? enabled.name : 'null';
+            } catch(e) {
+                before = 'error: ' + e.message;
+            }
+            log('Before enable: ' + before);
             
-            var newEnabled = Lampa.Controller.enabled();
-            log('New controller:', newEnabled ? newEnabled.name : 'none');
+            // Пробуем включить контроллер
+            log('Calling enable(content)...');
+            try {
+                Lampa.Controller.enable('content');
+                log('Enable called without error');
+            } catch(e) {
+                log('Enable ERROR: ' + e.message);
+            }
+            
+            // Проверяем после
+            var after = 'undefined';
+            try {
+                var enabled2 = Lampa.Controller.enabled();
+                after = enabled2 ? enabled2.name : 'null';
+            } catch(e) {
+                after = 'error: ' + e.message;
+            }
+            log('After enable: ' + after);
+            
+            // Принудительная активация toggle с задержкой
+            setTimeout(function() {
+                log('Delayed activation...');
+                try {
+                    if (self.controller && self.controller.toggle) {
+                        self.controller.toggle();
+                        log('Toggle called directly');
+                    } else {
+                        log('No controller.toggle available');
+                    }
+                } catch(e) {
+                    log('Toggle ERROR: ' + e.message);
+                }
+                
+                // Устанавливаем фокус вручную если нужно
+                if (self.grid.find('.focus').length === 0) {
+                    log('No focus found, setting manually');
+                    var first = self.grid.find('.selector').first();
+                    first.addClass('focus');
+                    self.scroll.update(first);
+                }
+            }, 200);
         };
 
         this.pause = function() {
-            log('pause() called');
-            Lampa.Controller.disable('content');
+            log('PAUSE');
+            try { Lampa.Controller.disable('content'); } catch(e) {}
         };
 
         this.stop = function() {
-            log('stop() called');
-            Lampa.Controller.disable('content');
+            log('STOP');
+            try { Lampa.Controller.disable('content'); } catch(e) {}
         };
 
         this.toggle = function() {
-            log('toggle() called');
-            // Восстанавливаем фокус при возврате
-            Lampa.Controller.collectionSet(this.grid);
-            var lastFocus = this.grid.find('.focus');
-            Lampa.Controller.collectionFocus(lastFocus.length ? lastFocus : false, this.grid);
+            log('TOGGLE');
+            try {
+                Lampa.Controller.collectionSet(this.grid);
+                var focused = this.grid.find('.focus');
+                Lampa.Controller.collectionFocus(focused.length ? focused : false, this.grid);
+            } catch(e) {
+                log('Toggle ERROR: ' + e.message);
+            }
         };
 
         this.render = function() {
-            log('render() called');
+            log('RENDER');
             return this.scroll.render();
         };
 
         this.destroy = function() {
-            log('destroy() called');
-            Lampa.Controller.remove('content');
+            log('DESTROY');
+            try { Lampa.Controller.remove('content'); } catch(e) {}
             this.scroll.destroy();
-            $('#grid-nav-debug').remove();
         };
     }
 
     // ======== РЕГИСТРАЦИЯ ========
-    Lampa.Component.add('grid_nav', GridNavComponent);
+    log('Registering component...');
+    Lampa.Component.add('grid_x', GridXComponent);
     log('Component registered');
 
     // ======== МЕНЮ ========
     function addMenu() {
-        var item = $('<li class="menu__item selector" data-action="grid_nav">' +
-            '<div class="menu__ico">🎯</div>' +
-            '<div class="menu__text">Grid Navigation Test</div>' +
+        log('Adding menu...');
+        
+        var item = $('<li class="menu__item selector" data-action="grid_x">' +
+            '<div class="menu__ico">🎮</div>' +
+            '<div class="menu__text">GRID TEST</div>' +
         '</li>');
 
         item.on('hover:enter', function() {
-            log('Menu clicked, pushing activity');
+            log('Menu clicked!');
             Lampa.Activity.push({
                 url: '',
-                title: 'Grid Navigation',
-                component: 'grid_nav',
+                title: 'Grid Test',
+                component: 'grid_x',
                 page: 1
             });
         });
 
         $('.menu .menu__list').eq(0).append(item);
-        log('Menu item added');
+        log('Menu added');
     }
 
     // ======== ЗАПУСК ========
     if (window.appready) {
+        log('App already ready');
         addMenu();
     } else {
+        log('Waiting for app ready...');
         Lampa.Listener.follow('app', function(e) {
+            log('App event: ' + e.type);
             if (e.type === 'ready') addMenu();
         });
     }
 
-    log('Plugin loaded');
+    log('=== PLUGIN LOADED ===');
 })();
