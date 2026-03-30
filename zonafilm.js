@@ -6154,6 +6154,29 @@ enable:!0,displayname:"TrahKino",host:"https://trahkino.me",menu:{route:{sort:"{
               playlist_url: "nexthub://".concat(t.displayname, "?mode=list"),
             });
           }),
+            // [ВСТАВЬТЕ СЮДА КНОПКУ ЛОГА]
+      e.push({
+        title: "📝 Показать лог",
+        onSelect: function() {
+          const logs = logger.getLogs();
+          if (logs.length === 0) {
+            Lampa.Noty.show("Лог пуст");
+            return;
+          }
+          Lampa.Dialog.show({
+            title: "Лог работы плагина",
+            html: `<pre style="white-space: pre-wrap; font-family: monospace;">${logs.map(log => `[${log.timestamp}] ${log.message}${log.data ? `\n${log.data}` : ''}`).join('\n\n')}</pre>`,
+            buttons: [
+              {title: "Очистить лог", onClick: () => {
+                logger.clearLogs();
+                Lampa.Noty.show("Лог очищен");
+              }},
+              {title: "Закрыть", onClick: () => Lampa.Dialog.close()}
+            ]
+          });
+        }
+      }),
+      // [КОНЕЦ ВСТАВКИ]
           e
         );
       },
