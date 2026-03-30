@@ -1,241 +1,226 @@
 /**
  * ============================================================
- *  LAMPA PLUGIN — Trahkino v2.8.0 (Золотой ключ)
- * ============================================================
- *
- *  РЕШЕНИЕ v2.8.0:
- *    ✅ Убран Lampa.Controller.clear() (больше не ломает другие плагины).
- *    ✅ В add('content') передано ТОЛЬКО свойство render: grid.
- *    ✅ Методы up/down/left/right НЕ переопределены. Lampa использует 
- *       свои родные методы для Lampa.Controller.move().
- *    ✅ Идеальная совместимость с системой ByLampa.
- *
+ *  LAMPA PLUGIN — Grid Navigation Test (Debug Version)
+ *  Простой тест навигации по карточкам с визуальной отладкой
  * ============================================================
  */
 
-(function () {
+(function() {
     'use strict';
 
     var CONFIG = {
         debug: true,
-        ver: '2.8.0',
-        site: 'https://trahkino.me',
-        proxy: [
-            'https://api.codetabs.com/v1/proxy?quest={u}',
-            'https://corsproxy.io/?{u}',
-            'https://api.allorigins.win/raw?url={u}'
-        ],
-        pi: 0,
-        timeout: 15000
+        cardsCount: 12,      // Количество тестовых карточек
+        cols: 4,             // Количество колонок
+        title: 'Test Grid'
     };
 
-    var D = {
-        log: function(t,m){ if(CONFIG.debug) console.log('[TRK]['+t+']',m); },
-        err: function(t,m){ console.error('[TRK][ERR]['+t+']',m); },
-        noty: function(m){ try{ Lampa.Noty.show(m); }catch(e){} }
-    };
-
-    var Net = {
-        get: function(url, ok, fail, _i){
-            var i = typeof _i === 'number' ? _i : CONFIG.pi;
-            if(i >= CONFIG.proxy.length){ if(fail) fail(); return; }
-            var pu = CONFIG.proxy[i].replace('{u}', encodeURIComponent(url));
-            $.ajax({ url: pu, timeout: CONFIG.timeout, success: function(data){
-                CONFIG.pi = i; if(ok) ok(data);
-            }, error: function(){ Net.get(url, ok, fail, i+1); }});
+    // ======== ВИЗУАЛЬНАЯ ОТЛАДКА ========
+    function log(type, msg, data) {
+        if (!CONFIG.debug) return;
+        var prefix = '[GRID-TEST][' + type + ']';
+        console.log(prefix, msg, data || '');
+        
+        // Визуальный лог на экране (для TV)
+        var debugEl = document.getElementById('grid-debug');
+        if (!debugEl) {
+            debugEl = document.createElement('div');
+            debugEl.id = 'grid-debug';
+            debugEl.style.cssText = 'position:fixed;top:10px;right:10px;background:rgba(0,0,0,0.9);color:#0f0;padding:10px;font-family:monospace;font-size:14px;z-index:9999;max-width:300px;max-height:200px;overflow:auto;border:2px solid #0f0;';
+            document.body.appendChild(debugEl);
         }
-    };
+        var entry = document.createElement('div');
+        entry.style.cssText = 'margin:2px 0;border-bottom:1px solid #333;';
+        entry.textContent = type + ': ' + msg;
+        debugEl.appendChild(entry);
+        // Ограничиваем количество записей
+        while (debugEl.children.length > 10) {
+            debugEl.removeChild(debugEl.firstChild);
+        }
+    }
 
-    var Src = {
-        main: function(page, cb){
-            D.noty('⏳ Загрузка каталога...');
-            var url = CONFIG.site + (page > 1 ? '/page/'+page+'/' : '/');
-            Net.get(url, function(html){
-                if(typeof html !== 'string'){ cb([]); return; }
-                try {
-                    var doc = new DOMParser().parseFromString(html, 'text/html');
-                    var cards = doc.querySelectorAll('a[href*="/video/"]');
-                    var items = [];
-                    cards.forEach(function(a){
-                        var href = a.getAttribute('href') || '';
-                        if(!href) return;
-                        if(href.indexOf('http') === -1) href = CONFIG.site + href;
-                        var img = a.querySelector('img');
-                        var poster = img ? (img.getAttribute('src') || '') : '';
-                        var titleEl = a.querySelector('.title, strong');
-                        var title = titleEl ? titleEl.textContent.trim() : 'Без названия';
-                        var durEl = a.querySelector('.duration');
-                        var duration = durEl ? durEl.textContent.trim() : '';
-                        if(title && poster) items.push({ title: title, url: href, poster: poster, duration: duration });
-                    });
-                    if(items.length > 0) D.noty('✅ Загружено: '+items.length);
-                    else D.noty('⚠ Пусто');
-                    cb(items);
-                } catch(e){ cb([]); }
-            }, function(){ D.noty('⚠ Ошибка сети'); cb([]); });
-        },
-        search: function(q, cb){ D.noty('Поиск на этапе 3'); cb([]); },
-        cats: function(){ return []; }
-    };
-
+    // ======== СТИЛИ ========
     var CSS = '\
-        .cards-grid{display:flex;flex-wrap:wrap;gap:1.2em;padding:1.5em}\
-        .card{width:28em;position:relative;transition:transform .2s}\
-        .card.focus{transform:scale(1.05)}\
-        .card__img{width:100%;height:16em;border-radius:.5em;overflow:hidden;background:#333; position:relative}\
-        .card__img img{width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0}\
-        .card__title{color:#eee;font-size:1.3em;margin-top:.5em;overflow:hidden;\
-            text-overflow:ellipsis;white-space:nowrap; height: 1.5em;}\
-        .zf-dur{position:absolute;bottom:.5em;right:.5em;background:rgba(0,0,0,.85);\
-            color:#fff;padding:.15em .5em;border-radius:.3em;font-size:1.1em;font-weight:700;z-index:2}\
-        .zf-loading{display:flex;align-items:center;justify-content:center;\
-            padding:4em;color:#888;font-size:1.3em}\
-        .zf-spin{display:inline-block;width:2em;height:2em;border:3px solid #333;\
-            border-top-color:#4FC3F7;border-radius:50%;margin-right:.8em;\
-            animation:zfspin .7s linear infinite}\
-        @keyframes zfspin{to{transform:rotate(360deg)}}\
-        .zf-empty{text-align:center;padding:4em;color:#666;font-size:1.3em}\
+        .test-grid-wrap{position:relative;height:100%;overflow:hidden}\
+        .test-grid{display:flex;flex-wrap:wrap;gap:20px;padding:40px;align-content:flex-start}\
+        .test-card{width:22%;height:180px;background:#333;border-radius:12px;position:relative;transition:all 0.2s;overflow:hidden}\
+        .test-card.focus{background:#4FC3F7;transform:scale(1.08);box-shadow:0 0 20px rgba(79,195,247,0.6);z-index:10}\
+        .test-card.focus .test-num{color:#000;font-weight:bold}\
+        .test-card:hover{background:#555}\
+        .test-poster{width:100%;height:120px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;align-items:center;justify-content:center;font-size:48px;color:rgba(255,255,255,0.3)}\
+        .test-info{padding:10px;color:#fff}\
+        .test-num{position:absolute;top:10px;left:10px;background:rgba(0,0,0,0.7);color:#fff;padding:4px 8px;border-radius:4px;font-size:12px}\
+        .test-title{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\
+        .test-status{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.9);color:#4FC3F7;padding:15px 30px;border-radius:8px;font-size:16px;z-index:100;display:none}\
+        .test-status.active{display:block}\
+        .test-legend{position:fixed;bottom:80px;left:20px;background:rgba(0,0,0,0.8);color:#aaa;padding:15px;border-radius:8px;font-size:12px;line-height:1.6}\
+        .test-legend span{color:#4FC3F7}\
     ';
-    $('#zf-css').remove();
-    $('<style>').attr('id','zf-css').text(CSS).appendTo('head');
+    
+    $('<style>').text(CSS).appendTo('head');
 
-    function showMainMenu(){
-        Lampa.Select.show({
-            title: '🎬 Trahkino v' + CONFIG.ver,
-            items: [
-                { title: '🔍 Поиск', subtitle: '(Этап 3)', action: 'search' },
-                { title: '📽 Последние видео', subtitle: 'Каталог', action: 'all' },
-                { title: '← Назад', subtitle: '', action: 'back' }
-            ],
-            onBack: function(){ Lampa.Controller.toggle('content'); },
-            onSelect: function(item){
-                if(item.action === 'back' || item.action === 'search'){
-                    if(item.action === 'back') Lampa.Controller.toggle('content');
-                    return;
-                }
-                if(item.action === 'all'){
-                    Lampa.Activity.push({ url: '', title: 'Последние видео', component: 'zf_cards', page: 1 });
-                }
+    // ======== КОМПОНЕНТ СЕТКИ ========
+    function GridComponent(object) {
+        var self = this;
+        var scroll = new Lampa.Scroll({ mask: true, over: true, step: 250 });
+        var grid = $('<div class="test-grid"></div>');
+        var status = $('<div class="test-status"></div>');
+        var legend = $('<div class="test-legend">' +
+            '<span>Управление:</span><br>' +
+            '↑↓←→ — перемещение<br>' +
+            'OK/Enter — выбор<br>' +
+            'Назад — выход' +
+        '</div>');
+
+        // ======== РЕГИСТРАЦИЯ КОНТРОЛЛЕРА НАВИГАЦИИ ========
+        // ЭТО КЛЮЧЕВОЙ БЛОК — без него стрелки не работают!
+        var controller = Lampa.Controller.add('content', {
+            // Включение контроллера (вызывается при toggle)
+            toggle: function() {
+                log('CTRL', 'toggle() вызван');
+                // Устанавливаем коллекцию элементов
+                Lampa.Controller.collectionSet(grid);
+                // Устанавливаем фокус (false = первый элемент, или конкретный элемент)
+                Lampa.Controller.collectionFocus(false, grid);
+                self.updateStatus('Навигация активна');
+            },
+            
+            // Обработчики стрелок — они вызывают collectionMove
+            up: function() {
+                log('NAV', '↑ вверх');
+                Lampa.Controller.collectionMove('up');
+                self.showFocused();
+            },
+            down: function() {
+                log('NAV', '↓ вниз');
+                Lampa.Controller.collectionMove('down');
+                self.showFocused();
+            },
+            left: function() {
+                log('NAV', '← влево');
+                Lampa.Controller.collectionMove('left');
+                self.showFocused();
+            },
+            right: function() {
+                log('NAV', '→ вправо');
+                Lampa.Controller.collectionMove('right');
+                self.showFocused();
+            },
+            
+            // Назад — выход из активности
+            back: function() {
+                log('CTRL', 'back() — выход');
+                Lampa.Activity.backward();
             }
         });
-    }
 
-    function CardsComp(object){
-        var self   = this;
-        var scroll = new Lampa.Scroll({mask:true, over:true, step:250});
-        var grid   = $('<div class="cards-grid"></div>');
-
-        this.create = function(){
-            grid.append('<div class="zf-loading" id="zf-loader"><div class="zf-spin"></div>Загрузка...</div>');
-            scroll.append(grid);
-            Src.main(object.page || 1, function(items){ self.onDataLoaded(items); });
-        };
-
-        this.onDataLoaded = function(items){
-            $('#zf-loader').remove();
-            if(!items.length){
-                grid.html('<div class="zf-empty">📭 Пусто</div>');
-                self.bindFocus();
-                return;
-            }
-
-            items.forEach(function(m){
-                var card = $([
-                    '<div class="card selector">',
-                      '<div class="card__img"></div>',
-                      m.duration ? '<div class="zf-dur">'+m.duration+'</div>' : '',
-                      '<div class="card__title">'+m.title+'</div>',
-                    '</div>'
-                ].join(''));
-
-                card.on('hover:enter', function(){
-                    openInBrowser(m.url, m.title);
-                });
-
-                card.on('hover:focus', function(){
-                    scroll.update($(this));
-                });
-
+        // ======== СОЗДАНИЕ КАРТОЧЕК ========
+        this.create = function() {
+            log('LIFE', 'create() — создание сетки');
+            
+            var wrap = $('<div class="test-grid-wrap"></div>');
+            wrap.append(grid);
+            scroll.append(wrap);
+            
+            // Создаем тестовые карточки
+            for (var i = 1; i <= CONFIG.cardsCount; i++) {
+                var card = this.createCard(i);
                 grid.append(card);
-            });
-
-            self.bindFocus();
-        };
-
-        this.bindFocus = function(){
-            setTimeout(function(){
-                Lampa.Controller.collectionSet(grid);
-                Lampa.Controller.collectionFocus(false, grid);
-            }, 150);
-        };
-
-        // --- МАГИЯ БЕЗ НАВЯЗЫВАНИЯ ---
-        this.start = function(){
-            // Расширяем системный 'content', но НЕ трогаем его стрелки!
-            Lampa.Controller.add('content', {
-                render: grid, // Говорим встроенному move() где искать карточки
-                toggle: function(){
-                    Lampa.Controller.collectionSet(grid);
-                    Lampa.Controller.collectionFocus(false, grid);
-                }
-            });
-            Lampa.Controller.toggle('content');
-        };
-        
-        this.toggle = function(){
-            Lampa.Controller.collectionSet(grid);
-            Lampa.Controller.collectionFocus(false, grid);
-        };
-
-        this.pause = function(){};
-        this.stop = function(){
-            // НИКАКОГО clear()! Пусть система сама восстанавливает контроллеры
-        };
-        
-        this.render = function(){ return scroll.render(); };
-        
-        this.destroy = function(){ 
-            // Только чистим свой DOM
-            scroll.destroy(); 
-            grid.remove(); 
-        };
-    }
-
-    function openInBrowser(url, title){
-        D.noty('▶ Открываю: ' + title);
-        try {
-            if(typeof Lampa.Android !== 'undefined' && Lampa.Android.openUrl){
-                Lampa.Android.openUrl(url);
-                return;
             }
-        } catch(e){}
-        try { window.open(url,'_blank'); } catch(e){}
-    }
+            
+            // Добавляем в DOM
+            $('body').append(scroll.render());
+            $('body').append(status);
+            $('body').append(legend);
+            
+            log('GRID', 'Создано карточек: ' + CONFIG.cardsCount);
+        };
 
-    Lampa.Component.add('zf_cards', CardsComp);
+        // ======== СОЗДАНИЕ ОДНОЙ КАРТОЧКИ ========
+        this.createCard = function(index) {
+            // ВАЖНО: класс 'card' нужен для правильного расчета размеров
+            // класс 'selector' — для поиска Lampa
+            var card = $('<div class="test-card card selector">' +
+                '<div class="test-num">#' + index + '</div>' +
+                '<div class="test-poster">🎬</div>' +
+                '<div class="test-info">' +
+                    '<div class="test-title">Видео ' + index + '</div>' +
+                '</div>' +
+            '</div>');
+            
+            // События Lampa (не стандартные DOM!)
+            card.on('hover:focus', function(e) {
+                // Фокус перемещен на эту карточку
+                $(this).addClass('focus');
+                scroll.update($(this)); // Прокрутка к элементу
+                log('FOCUS', 'Карточка #' + index);
+            });
+            
+            card.on('hover:blur', function(e) {
+                // Фокус ушел с карточки
+                $(this).removeClass('focus');
+            });
+            
+            card.on('hover:enter', function(e) {
+                // Нажатие OK/Enter
+                log('ACTION', 'Выбрана карточка #' + index);
+                self.updateStatus('Выбрано: #' + index);
+                // Здесь можно открыть плеер или детали
+                // Lampa.Activity.push({...});
+            });
+            
+            return card;
+        };
 
-    var ICO = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>';
+        // ======== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ========
+        this.showFocused = function() {
+            var focused = grid.find('.focus');
+            var num = focused.find('.test-num').text() || 'none';
+            this.updateStatus('Фокус: ' + num);
+        };
 
-    function addMenu(){
-        if($('[data-action="trahkino"]').length) return;
-        var li = $('<li class="menu__item selector" data-action="trahkino">'+
-            '<div class="menu__ico">'+ICO+'</div>'+
-            '<div class="menu__text">Trahkino</div></li>');
-        li.on('hover:enter', function(){ showMainMenu(); });
-        var list = $('.menu .menu__list');
-        if(list.length){ list.eq(0).append(li); return; }
-        var ul = $('.menu ul');
-        if(ul.length) ul.eq(0).append(li);
-    }
+        this.updateStatus = function(text) {
+            status.text(text).addClass('active');
+            clearTimeout(this.statusTimer);
+            this.statusTimer = setTimeout(function() {
+                status.removeClass('active');
+            }, 2000);
+        };
 
-    function init(){
-        try {
-            addMenu();
-            D.noty('✅ Trahkino v'+CONFIG.ver+' загружен');
-        } catch(e){ D.err('Boot',e.message); }
-    }
+        // ======== ЖИЗНЕННЫЙ ЦИКЛ ========
+        this.start = function() {
+            log('LIFE', 'start() — активация');
+            // Включаем наш контроллер 'content'
+            Lampa.Controller.enable('content');
+        };
 
-    if(window.appready) init();
-    else Lampa.Listener.follow('app', function(e){ if(e.type === 'ready') init(); });
+        this.pause = function() {
+            log('LIFE', 'pause()');
+            Lampa.Controller.disable('content');
+        };
 
-})();
+        this.stop = function() {
+            log('LIFE', 'stop()');
+            Lampa.Controller.disable('content');
+        };
+
+        this.toggle = function() {
+            log('LIFE', 'toggle() — восстановление');
+            // При возврате к этому экрану восстанавливаем фокус
+            Lampa.Controller.collectionSet(grid);
+            // Ищем последнюю активную карточку или берем первую
+            var lastFocus = grid.find('.focus');
+            Lampa.Controller.collectionFocus(lastFocus.length ? lastFocus : false, grid);
+        };
+
+        this.render = function() {
+            return scroll.render();
+        };
+
+        this.destroy = function() {
+            log('LIFE', 'destroy() — очистка');
+            // Удаляем контроллер при уничтожении!
+            Lampa.Controller.remove('content');
+            scroll.destroy();
+            grid.remove();
+           
