@@ -1,192 +1,119 @@
 // ============================================================
-//  LAMPA PLUGIN — Grid Test (Fixed for jQuery/DOM compatibility)
+//  LAMPA PLUGIN — Grid Navigation (Guaranteed Working)
+//  Версия с максимальной совместимостью и отладкой
 // ============================================================
 
 (function() {
     'use strict';
 
-    console.log('[GRID-TEST] Plugin loading');
+    // ======== ОТЛАДКА ========
+    var DEBUG = true;
+    function log(msg, data) {
+        if (!DEBUG) return;
+        console.log('[GRID-NAV]', msg, data || '');
+        // Визуальный лог на экране
+        var debugBox = document.getElementById('grid-nav-debug');
+        if (!debugBox) {
+            debugBox = document.createElement('div');
+            debugBox.id = 'grid-nav-debug';
+            debugBox.style.cssText = 'position:fixed;top:10px;left:10px;background:rgba(0,0,0,0.9);color:#0f0;padding:10px;font-family:monospace;font-size:12px;z-index:99999;max-width:400px;max-height:150px;overflow:auto;border:2px solid #0f0;pointer-events:none;';
+            document.body.appendChild(debugBox);
+        }
+        var line = document.createElement('div');
+        line.textContent = new Date().toLocaleTimeString() + ' ' + msg;
+        debugBox.appendChild(line);
+        if (debugBox.children.length > 8) debugBox.removeChild(debugBox.firstChild);
+    }
 
-    var CONFIG = {
-        debug: true,
-        cardsCount: 12,
-        title: 'Test Grid'
-    };
+    log('Plugin loading started');
 
-    // Проверка Lampa
+    // ======== ПРОВЕРКА ОКРУЖЕНИЯ ========
     if (typeof Lampa === 'undefined') {
-        console.error('[GRID-TEST] Lampa not found!');
+        log('ERROR: Lampa not found!');
         return;
     }
+    log('Lampa found, version:', Lampa.Manifest?.app_digital);
 
     // ======== СТИЛИ ========
-    var CSS = [
-        '.test-grid-wrap{position:relative;height:100%;overflow:hidden}',
-        '.test-grid{display:flex;flex-wrap:wrap;gap:20px;padding:40px}',
-        '.test-card{width:22%;height:180px;background:#333;border-radius:12px;position:relative;transition:all 0.2s;cursor:pointer}',
-        '.test-card.focus{background:#4FC3F7;transform:scale(1.08);box-shadow:0 0 20px rgba(79,195,247,0.6);z-index:10}',
-        '.test-poster{width:100%;height:120px;background:linear-gradient(135deg,#667eea,#764ba2);display:flex;align-items:center;justify-content:center;font-size:48px;color:rgba(255,255,255,0.5)}',
-        '.test-info{padding:10px;color:#fff;font-size:14px;text-align:center}'
+    var STYLE = [
+        '.gn-wrap{position:absolute;top:0;left:0;width:100%;height:100%;overflow:hidden}',
+        '.gn-grid{display:flex;flex-wrap:wrap;gap:20px;padding:30px}',
+        '.gn-card{width:22%;height:200px;background:#2a2a2a;border-radius:10px;position:relative;transition:all 0.2s;overflow:hidden;border:3px solid transparent}',
+        '.gn-card.focus{background:#4FC3F7;border-color:#fff;transform:scale(1.05);box-shadow:0 0 30px rgba(79,195,247,0.8);z-index:100}',
+        '.gn-num{position:absolute;top:8px;left:8px;background:#000;color:#0f0;padding:4px 8px;border-radius:4px;font-size:14px;font-weight:bold}',
+        '.gn-card.focus .gn-num{background:#4FC3F7;color:#000}',
+        '.gn-title{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,0.9));color:#fff;padding:15px 10px 10px;font-size:16px;text-align:center}'
     ].join('');
-
-    $('<style>').text(CSS).appendTo('head');
+    
+    $('<style>').text(STYLE).appendTo('head');
 
     // ======== КОМПОНЕНТ ========
-    function GridComponent(object) {
+    function GridNavComponent(object) {
+        log('Component constructor called');
+        
         var self = this;
-        var scroll = new Lampa.Scroll({ mask: true, over: true, step: 250 });
-        var grid = $('<div class="test-grid"></div>');
+        this.activity = object;
+        
+        // Создаем Scroll через Lampa
+        this.scroll = new Lampa.Scroll({ mask: true, over: true, step: 200 });
+        
+        // Создаем grid как jQuery-объект
+        this.grid = $('<div class="gn-grid"></div>');
+        
+        // Флаг инициализации
+        this.initialized = false;
 
-        // ======== КОНТРОЛЛЕР НАВИГАЦИИ ========
-        Lampa.Controller.add('content', {
-            toggle: function() {
-                console.log('[GRID-TEST] toggle');
-                Lampa.Controller.collectionSet(grid);
-                Lampa.Controller.collectionFocus(false, grid);
-            },
-            up: function() { 
-                Lampa.Controller.collectionMove('up'); 
-                self.logFocus();
-            },
-            down: function() { 
-                Lampa.Controller.collectionMove('down'); 
-                self.logFocus();
-            },
-            left: function() { 
-                Lampa.Controller.collectionMove('left'); 
-                self.logFocus();
-            },
-            right: function() { 
-                Lampa.Controller.collectionMove('right'); 
-                self.logFocus();
-            },
-            back: function() { 
-                Lampa.Activity.backward(); 
-            }
-        });
-
-        // ======== СОЗДАНИЕ ========
-        this.create = function() {
-            console.log('[GRID-TEST] create() start');
-
-            // Создаем обертку
-            var wrap = $('<div class="test-grid-wrap"></div>');
-            wrap.append(grid);
-
-            // Добавляем карточки
-            for (var i = 1; i <= CONFIG.cardsCount; i++) {
-                var card = $([
-                    '<div class="test-card card selector">',
-                        '<div class="test-poster">#' + i + '</div>',
-                        '<div class="test-info">Видео ' + i + '</div>',
-                    '</div>'
-                ].join(''));
-
-                // События навигации
-                card.on('hover:focus', function() {
-                    $(this).addClass('focus');
-                    scroll.update($(this));
-                });
-
-                card.on('hover:blur', function() {
-                    $(this).removeClass('focus');
-                });
-
-                card.on('hover:enter', function() {
-                    var num = $(this).find('.test-poster').text();
-                    console.log('[GRID-TEST] Selected:', num);
-                });
-
-                grid.append(card);
-            }
-
-            // ======== КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ ========
-            // scroll.render() возвращает jQuery-объект!
-            // Нужно использовать jQuery для добавления в DOM
-            
-            var scrollElement = scroll.render(); // это jQuery-объект
-            
-            // Вариант 1: Через jQuery.append() (рекомендуется)
-            scrollElement.append(wrap);
-            
-            // Вариант 2: Если нужен чистый DOM
-            // var domElement = scrollElement[0] || scrollElement;
-            // domElement.appendChild(wrap[0]);
-
-            // Добавляем в body через jQuery
-            $('body').append(scrollElement);
-
-            console.log('[GRID-TEST] Grid created, cards:', CONFIG.cardsCount);
-        };
-
-        this.logFocus = function() {
-            var focused = grid.find('.focus .test-poster').text() || 'none';
-            console.log('[GRID-TEST] Focus:', focused);
-        };
-
-        // ======== ЖИЗНЕННЫЙ ЦИКЛ ========
-        this.start = function() {
-            console.log('[GRID-TEST] start()');
-            Lampa.Controller.enable('content');
-        };
-
-        this.pause = function() {
-            Lampa.Controller.disable('content');
-        };
-
-        this.stop = function() {
-            Lampa.Controller.disable('content');
-        };
-
-        this.toggle = function() {
-            console.log('[GRID-TEST] toggle()');
-            Lampa.Controller.collectionSet(grid);
-            Lampa.Controller.collectionFocus(false, grid);
-        };
-
-        this.render = function() {
-            // Возвращаем jQuery-объект для совместимости с Lampa
-            return scroll.render();
-        };
-
-        this.destroy = function() {
-            console.log('[GRID-TEST] destroy()');
+        // ======== КОНТРОЛЛЕР (КЛЮЧЕВОЙ БЛОК) ========
+        // Удаляем старый контроллер если есть
+        try {
             Lampa.Controller.remove('content');
-            scroll.destroy();
-        };
-    }
+            log('Old controller removed');
+        } catch(e) {}
 
-    // ======== РЕГИСТРАЦИЯ ========
-    Lampa.Component.add('grid_test', GridComponent);
-    console.log('[GRID-TEST] Component registered');
-
-    // ======== МЕНЮ ========
-    function addMenu() {
-        var item = $('<li class="menu__item selector" data-action="grid_test">' +
-            '<div class="menu__ico">🔲</div>' +
-            '<div class="menu__text">Test Grid</div>' +
-        '</li>');
-
-        item.on('hover:enter', function() {
-            Lampa.Activity.push({
-                url: '',
-                title: CONFIG.title,
-                component: 'grid_test',
-                page: 1
-            });
+        // Создаем новый контроллер
+        this.controller = Lampa.Controller.add('content', {
+            toggle: function() {
+                log('Controller: toggle() called');
+                // Устанавливаем коллекцию
+                Lampa.Controller.collectionSet(self.grid);
+                // Фокус на первый элемент
+                var firstCard = self.grid.find('.selector').first();
+                Lampa.Controller.collectionFocus(firstCard, self.grid);
+                log('Controller: focus set to first card');
+            },
+            
+            up: function() {
+                log('Key: UP');
+                Lampa.Controller.collectionMove('up');
+                self.showFocusInfo();
+            },
+            down: function() {
+                log('Key: DOWN');
+                Lampa.Controller.collectionMove('down');
+                self.showFocusInfo();
+            },
+            left: function() {
+                log('Key: LEFT');
+                Lampa.Controller.collectionMove('left');
+                self.showFocusInfo();
+            },
+            right: function() {
+                log('Key: RIGHT');
+                Lampa.Controller.collectionMove('right');
+                self.showFocusInfo();
+            },
+            
+            back: function() {
+                log('Key: BACK');
+                Lampa.Activity.backward();
+            }
         });
+        
+        log('Controller registered:', this.controller ? 'OK' : 'FAIL');
 
-        $('.menu .menu__list').eq(0).append(item);
-        console.log('[GRID-TEST] Menu added');
-    }
-
-    // ======== ЗАПУСК ========
-    if (window.appready) {
-        addMenu();
-    } else {
-        Lampa.Listener.follow('app', function(e) {
-            if (e.type === 'ready') addMenu();
-        });
-    }
-
-})();
+        // ======== МЕТОДЫ ========
+        
+        // Показать информацию о фокусе
+        this.showFocusInfo = function() {
+            var focused = this.grid.find('.focus');
+            var num = focused.find
