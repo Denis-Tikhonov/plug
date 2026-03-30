@@ -1,15 +1,13 @@
 /**
  * ============================================================
- *  LAMPA PLUGIN — Trahkino v3.1.0 (Точная передача DOM)
+ *  LAMPA PLUGIN — Trahkino v3.2.1 (Тест нативного класса)
  * ============================================================
  *
- *  ИСПРАВЛЕНИЯ v3.1.0:
- *    ✅ В start() зарегистрирован системный контроллер 'items'.
- *    ✅ В свойство render передан wrap[0] (чистый DOM, а не jQuery объект).
- *    ✅ Методы left/right/up/down НЕ прописаны. 
- *       Ядро Lampa должно подставить свои стандартные методы 
- *       для перемещения по имени 'items'.
- *    ✅ Из bindFocus убран collectionSet (оставлен только в toggle).
+ *  ИЗМЕНЕНИЯ v3.2.1:
+ *    ✅ Обертка карточек переименована из .zf-wrap в .items-cards.
+ *    ✅ Это стандартный класс Lampa, который ожидает встроенный 
+ *       алгоритм D-pad навигации для включения стрелок.
+ *    ✅ База кода — стабильная версия 3.0.0 (0 ошибок).
  *
  * ============================================================
  */
@@ -19,7 +17,7 @@
 
     var CONFIG = {
         debug: true,
-        ver: '3.1.0',
+        ver: '3.2.1',
         site: 'https://trahkino.me',
         proxy: [
             'https://api.codetabs.com/v1/proxy?quest={u}',
@@ -79,8 +77,9 @@
         cats: function(){ return []; }
     };
 
+    // ИЗМЕНЕНО: Класс .zf-wrap заменен на стандартный .items-cards
     var CSS = '\
-        .zf-wrap{display:flex;flex-wrap:wrap;gap:1em;padding:1.5em}\
+        .items-cards{display:flex;flex-wrap:wrap;gap:1em;padding:1.5em}\
         .zf-loading{display:flex;align-items:center;justify-content:center;\
             padding:4em;color:#888;font-size:1.3em;width:100%}\
         .zf-spin{display:inline-block;width:2em;height:2em;border:3px solid #333;\
@@ -116,7 +115,9 @@
     function CardsComp(object){
         var self   = this;
         var scroll = new Lampa.Scroll({mask:true, over:true, step:250});
-        var wrap   = $('<div class="zf-wrap"></div>');
+        
+        // ИЗМЕНЕНО: Создаем контейнер с классом .items-cards
+        var wrap   = $('<div class="items-cards"></div>');
 
         this.create = function(){
             wrap.append('<div class="zf-loading" id="zf-loader"><div class="zf-spin"></div>Загрузка...</div>');
@@ -128,8 +129,7 @@
             $('#zf-loader').remove();
             if(!items.length){
                 wrap.html('<div class="zf-empty">📭 Пусто</div>');
-                // Если пусто, вызываем toggle вручную, чтобы поставить фокус на надпись
-                Lampa.Controller.toggle('items'); 
+                self.bindFocus();
                 return;
             }
 
@@ -155,35 +155,24 @@
                 }
             });
 
-            // Как только карточки отрисованы, переключаем на наш контроллер
-            Lampa.Controller.toggle('items');
+            self.bindFocus();
         };
 
-        // --- РЕГИСТРАЦИЯ КОНТРОЛЛЕРА ИМЕННО В START ---
-        this.start = function(){
-            // Регистрируем системный контроллер 'items'
-            // ВАЖНО: передаем wrap[0] (чистый DOM элемент, без обертки jQuery)
-            // Методы стрелок НЕ прописываем - ядро должно использовать свои
-            Lampa.Controller.add('items', {
-                render: wrap[0], 
-                toggle: function(){
-                    Lampa.Controller.collectionSet(wrap);
-                    Lampa.Controller.collectionFocus(false, wrap);
-                }
-            });
+        this.bindFocus = function(){
+            setTimeout(function(){
+                Lampa.Controller.collectionSet(wrap);
+                Lampa.Controller.collectionFocus(false, wrap);
+            }, 150);
         };
-        
+
+        this.start = function(){};
         this.toggle = function(){
-            Lampa.Controller.toggle('items');
+            Lampa.Controller.collectionSet(wrap);
+            Lampa.Controller.collectionFocus(false, wrap);
         };
-
         this.pause = function(){};
-        
-        // ВАЖНО: Не используем clear(), чтобы не сломать другие плагины!
-        this.stop = function(){}; 
-        
+        this.stop = function(){};
         this.render = function(){ return scroll.render(); };
-        
         this.destroy = function(){ 
             scroll.destroy(); 
             wrap.remove(); 
