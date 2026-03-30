@@ -1,14 +1,13 @@
 /**
  * ============================================================
- *  LAMPA PLUGIN — Trahkino v2.9.0 (Нативные карточки Lampa)
+ *  LAMPA PLUGIN — Trahkino v3.0.0 (Нативная сетка Lampa)
  * ============================================================
  *
- *  РЕШЕНИЕ v2.9.0:
- *    ✅ Карточки создаются через Lampa.Template.get('card', ...).
- *       Это генерирует ТОЧНЫЙ HTML, который ждет встроенный пульт Lampa.
- *    ✅ Удален весь кастомный CSS для карточек (Lampa использует свой).
- *    ✅ Методы start/stop/toggle возвращены к идеальной базе 1.7.0.
- *    ✅ Навигация должна заработать автоматически, без костылей.
+ *  ИСПРАВЛЕНИЯ v3.0.0:
+ *    ✅ Удален ВЕСЬ кастомный CSS карточек (он ломал верстку шаблона).
+ *    ✅ Контейнеру задан стандартный display:flex (создает сетку).
+ *    ✅ Карточки используют 100% родные стили Lampa.
+ *    ✅ Алгоритм навигации Lampa теперь видит правильные координаты.
  *
  * ============================================================
  */
@@ -18,7 +17,7 @@
 
     var CONFIG = {
         debug: true,
-        ver: '2.9.0',
+        ver: '3.0.0',
         site: 'https://trahkino.me',
         proxy: [
             'https://api.codetabs.com/v1/proxy?quest={u}',
@@ -78,17 +77,16 @@
         cats: function(){ return []; }
     };
 
-    // Оставляем только стили для лоадера. 
-    // Стили карточек удаляем — Lampa применяет свои!
+    // Только базовая обертка для сетки и спиннер. Больше никакого CSS!
     var CSS = '\
-        .zf-wrap{padding:1.5em}\
+        .zf-wrap{display:flex;flex-wrap:wrap;gap:1em;padding:1.5em}\
         .zf-loading{display:flex;align-items:center;justify-content:center;\
-            padding:4em;color:#888;font-size:1.3em}\
+            padding:4em;color:#888;font-size:1.3em;width:100%}\
         .zf-spin{display:inline-block;width:2em;height:2em;border:3px solid #333;\
             border-top-color:#4FC3F7;border-radius:50%;margin-right:.8em;\
             animation:zfspin .7s linear infinite}\
         @keyframes zfspin{to{transform:rotate(360deg)}}\
-        .zf-empty{text-align:center;padding:4em;color:#666;font-size:1.3em}\
+        .zf-empty{text-align:center;padding:4em;color:#666;font-size:1.3em;width:100%}\
     ';
     $('#zf-css').remove();
     $('<style>').attr('id','zf-css').text(CSS).appendTo('head');
@@ -135,14 +133,13 @@
 
             items.forEach(function(m, index){
                 try {
-                    // --- МАГИЯ: Просим Lampa создать правильную карточку ---
+                    // Используем нативный шаблон Lampa (без нашего CSS)
                     var card = Lampa.Template.get('card', {
                         title: m.title + (m.duration ? ' ('+m.duration+')' : ''),
                         poster: m.poster,
                         id: index
                     });
 
-                    // Навешиваем события на ту структуру, что создала Lampa
                     card.on('hover:enter', function(){
                         openInBrowser(m.url, m.title);
                     });
@@ -151,7 +148,6 @@
                         scroll.update($(this));
                     });
 
-                    // Добавляем готовую нативную карточку на экран
                     wrap.append(card);
                 } catch(e) {
                     D.err('Template', e.message);
@@ -168,7 +164,7 @@
             }, 150);
         };
 
-        // --- ИДЕАЛЬНО ЧИСТАЯ БАЗА (v1.7.0) ---
+        // Идеально чистая база
         this.start = function(){};
         this.toggle = function(){
             Lampa.Controller.collectionSet(wrap);
