@@ -1,13 +1,14 @@
 /**
  * ============================================================
- *  LAMPA PLUGIN — Trahkino v3.6.0 (Нативный скролл Lampa)
+ *  LAMPA PLUGIN — Trahkino v3.6.1 (Эталонная интеграция скролла)
  * ============================================================
  *
- *  ИСПРАВЛЕНИЯ v3.6.0:
- *    ✅ Удалена кастомная обертка wrap.
- *    ✅ Карточки вставляются напрямую в ядро Lampa Scroll.
- *    ✅ CSS-сетка навешивается прямо на контейнер скролла.
- *    ✅ setFocus делегирует прокрутку методу scroll.position().
+ *  ИЗМЕНЕНИЯ v3.6.1:
+ *    ✅ Структура DOM: карточки теперь строго внутри .scroll__content.
+ *    ✅ Tabindex и классы добавлены корректно для навигации.
+ *    ✅ setFocus использует card[0].focus() и расчет колонок по первой строке.
+ *    ✅ initNavigation переписан с математическим расчетом колонок.
+ *    ✅ Визуальный CSS фокуса привязан к классу .focus (без reliance на hover).
  *
  * ============================================================
  */
@@ -17,7 +18,7 @@
 
     var CONFIG = {
         debug: true,
-        ver: '3.6.0',
+        ver: '3.6.1',
         site: 'https://trahkino.me',
         proxy: [
             'https://api.codetabs.com/v1/proxy?quest={u}',
@@ -78,10 +79,14 @@
     };
 
     /* ==========================================================
-     *  СТИЛИ: Навешиваем сетку на контейнер скролла Lampa
+     *  СТИЛИ (Интеграция визуального фокуса из плана)
      * ========================================================== */
     var CSS = '\
         .items-cards .items-cards__inner{display:flex;flex-wrap:wrap;gap:1em;padding:1.5em}\
+        .items-cards .card{transition:all 0.2s ease;cursor:pointer;outline:none}\
+        .items-cards .card.focus,\
+        .items-cards .card:focus{transform:scale(1.05);border:2px solid #ff9800 !important;\
+            box-shadow:0 0 20px rgba(255,152,0,0.5);z-index:10}\
         .items-cards .zf-empty{text-align:center;padding:4em;color:#666;font-size:1.3em;width:100%}\
         .items-cards .zf-loading{display:flex;align-items:center;justify-content:center;\
             padding:4em;color:#888;font-size:1.3em;width:100%}\
@@ -98,7 +103,7 @@
     $('<style>').attr('id','zf-css').text(CSS).appendTo('head');
 
     /* ==========================================================
-     *  КОМПОНЕНТ ГЛАВНОГО МЕНЮ
+     *  КОМПОНЕНТ ГЛАВНОГО МЕНЮ (Без изменений, работает отлично)
      * ========================================================== */
     function MenuComp(){
         var self   = this;
@@ -181,132 +186,183 @@
     }
 
     /* ==========================================================
-     *  КОМПОНЕНТ КАРТОЧЕК (Интеграция с ядром Scroll)
+     *  КОМПОНЕНТ КАРТОЧЕК (Эталонная интеграция)
      * ========================================================== */
     function CardsComp(object){
         var self   = this;
         
-        // Инициализация по эталону из документации
+        // Инициализация по эталону
         var scroll = new Lampa.Scroll({mask:true, over:true, scroll_by_item: true, end_ratio: 2});
         
-        // Внутренняя обертка для нашего лоадера и пустых сообщений
+        // Внутренняя обертка для нашего лоадера
         var inner  = $('<div class="items-cards__inner"></div>');
-        
+
         var isActive = false;
         var lastBrowserOpenTime = 0;
+        var navHandler = null; // Сохраняем для точного удаления
 
+        // --- ШАГ 3: Улучшенный setFocus ---
         this.setFocus = function(card) {
-            if(!card || !card.length) return;
+            if(!card || !card.length || !isActive) return;
             
-            // Ищем карточки внутри контейнера скролла Lampa
+            // Убираем фокус у всех карточек внутри скролла
             scroll.render().find('.card').removeClass('focus');
-            card.addClass('focus');
-            card.trigger('hover:focus');
             
-            // Передаем управление прокруткой полностью встроенному алгоритму Lampa.
-            // Он сам вычислит translateY и сдвинет экран.
-            try { 
-                scroll.position(card[0]); 
-            } catch(e){}
+            // Добавляем класс текущей
+            card.addClass('focus');
+            
+            // Программный фокус для надежности
+            try { card[0].focus(); } catch(e){}
+            
+            // Вычисляем контейнер скролла
+            var container = scroll.render().find('.scroll__content')[0] || scroll.render()[0];
+            var cardElement = card[0];
+            
+            // Если карточка не видна на экране - прокручиваем к ней
+            if(container && cardElement) {
+                var containerRect = container.getBoundingClientRect();
+                var cardRect = cardElement.getBoundingClientRect();
+                
+                if(cardRect.top < containerRect.top || cardRect.bottom > containerRect.bottom) {
+                    cardElement.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'center',
+                        inline: 'center'
+                    });
+                }
+            }
+            
+            // Передаем позицию в нативный скролл Lampa
+            try { scroll.position(card[0]); } catch(e) {
+                D.log('Focus', 'scroll.position error: ' + e.message);
+            }
         };
 
+        // --- ШАГ 4: Навигация с расчетом колонок ---
         this.initNavigation = function(e) {
             if (!isActive) return;
+            
             var key = e.key;
             
-            if (key === 'Escape' || key === 'Backspace') {
-                if (Date.now() - lastBrowserOpenTime < 1500) {
-                    e.preventDefault(); e.stopPropagation(); return; 
-                }
-                scroll.render().find('.card').removeClass('focus'); return; 
+            if (key === 'Backspace' || key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                Lampa.Activity.backward();
+                return;
             }
-
-            if (!['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'Enter'].includes(key)) return;
-
-            var current = scroll.render().find('.card.focus');
+            
+            if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(key)) {
+                return; // Пусть Lampa обрабатывает обычные кнопки
+            }
+            
+            e.preventDefault();
+            e.stopPropagation();
+            
+            var allCards = scroll.render().find('.card');
+            var current = allCards.filter('.focus');
+            
+            // Если нет фокуса, ставим на первую
             if(!current.length) {
-                e.preventDefault(); e.stopPropagation();
-                self.setFocus(scroll.render().find('.card').first()); return;
+                var firstCard = allCards.first();
+                if(firstCard.length) {
+                    self.setFocus(firstCard);
+                }
+                return;
             }
-
+            
             var target = null;
+            var currentIndex = allCards.index(current);
+            
             switch(key) {
-                case 'ArrowRight': target = current.next('.card'); break;
-                case 'ArrowLeft': if(current.index() > 0) target = current.prev('.card'); break;
+                case 'ArrowRight':
+                    if(currentIndex + 1 < allCards.length) {
+                        target = allCards.eq(currentIndex + 1);
+                    }
+                    break;
+                    
+                case 'ArrowLeft':
+                    if(currentIndex - 1 >= 0) {
+                        target = allCards.eq(currentIndex - 1);
+                    }
+                    break;
+                    
                 case 'ArrowDown': {
-                    var curTop = current.offset().top;
-                    var nextRowTop = null;
-                    current.nextAll('.card').each(function(){
-                        var t = $(this).offset().top;
-                        if (t > curTop + 5) { nextRowTop = t; return false; }
+                    // Считаем количество колонок по первой строке
+                    var firstRowCards = [];
+                    var firstCardTop = allCards.first().offset().top;
+                    
+                    allCards.each(function() {
+                        if(Math.abs($(this).offset().top - firstCardTop) < 10) {
+                            firstRowCards.push($(this));
+                        }
                     });
-                    if (nextRowTop !== null) {
-                        var curLeft = current.offset().left;
-                        var minDist = Infinity;
-                        current.nextAll('.card').each(function(){
-                            if (Math.abs($(this).offset().top - nextRowTop) < 5) {
-                                var dist = Math.abs($(this).offset().left - curLeft);
-                                if (dist < minDist) { minDist = dist; target = $(this); }
-                            }
-                        });
+                    
+                    var columns = firstRowCards.length;
+                    if(columns > 0 && currentIndex + columns < allCards.length) {
+                        target = allCards.eq(currentIndex + columns);
                     }
                     break;
                 }
+                    
                 case 'ArrowUp': {
-                    var curTop = current.offset().top;
-                    var prevRowTop = null;
-                    current.prevAll('.card').each(function(){
-                        var t = $(this).offset().top;
-                        if (t < curTop - 5) { prevRowTop = t; return false; }
+                    // Считаем количество колонок по первой строке
+                    var firstRowCards = [];
+                    var firstCardTop = allCards.first().offset().top;
+                    
+                    allCards.each(function() {
+                        if(Math.abs($(this).offset().top - firstCardTop) < 10) {
+                            firstRowCards.push($(this));
+                        }
                     });
-                    if (prevRowTop !== null) {
-                        var curLeft = current.offset().left;
-                        var minDist = Infinity;
-                        current.prevAll('.card').each(function(){
-                            if (Math.abs($(this).offset().top - prevRowTop) < 5) {
-                                var dist = Math.abs($(this).offset().left - curLeft);
-                                if (dist < minDist) { minDist = dist; target = $(this); }
-                            }
-                        });
+                    
+                    var columns = firstRowCards.length;
+                    if(columns > 0 && currentIndex - columns >= 0) {
+                        target = allCards.eq(currentIndex - columns);
                     }
                     break;
                 }
-                case 'Enter':
-                    e.preventDefault(); e.stopPropagation();
-                    current.trigger('hover:enter'); return;
             }
-
-            if(!target || !target.length) {
-                e.preventDefault(); e.stopPropagation();
+            
+            if(target && target.length) {
+                self.setFocus(target);
+            } else {
+                // На границе сетки — выходим из плагина
                 isActive = false;
-                window.removeEventListener('keydown', self.initNavigation, true);
-                Lampa.Activity.backward(); return; 
+                Lampa.Activity.backward();
             }
-
-            e.preventDefault(); e.stopPropagation();
-            self.setFocus(target);
         };
 
+        // --- ШАГ 1: Правильная структура DOM ---
         this.create = function(){
             isActive = false;
             
-            // Вставляем нашу обертку во внутренний контент скролла Lampa
-            scroll.render().find('.scroll__content').addClass('items-cards').append(inner);
+            // Получаем внутренний контейнер скролла
+            var scrollContainer = scroll.render();
+            var content = scrollContainer.find('.scroll__content');
+            
+            // Если контент не найден, используем body (для совместимости)
+            if(!content.length) content = scrollContainer.find('.scroll__body');
+            
+            content.addClass('items-cards');
+            content.append(inner);
             
             inner.append('<div class="zf-loading" id="zf-loader"><div class="zf-spin"></div>Загрузка...</div>');
             
             Src.main(object.page || 1, function(items){ self.onDataLoaded(items); });
         };
 
+        // --- ШАГ 2: Добавление данных и Tabindex ---
         this.onDataLoaded = function(items){
             $('#zf-loader').remove();
+            
             if(!items.length){
                 inner.html('<div class="zf-empty">📭 Пусто</div>');
-                // Сообщаем Lampa об изменении высоты
                 try { Lampa.Layer.visible(scroll.render()); } catch(e){}
                 return;
             }
-
+            
+            inner.empty();
+            
             items.forEach(function(m, index){
                 try {
                     var card = Lampa.Template.get('card', {
@@ -315,33 +371,46 @@
                         id: index
                     });
                     
-                    card.data('card-url', m.url);
-                    card.data('card-title', m.title);
+                    // Критические атрибуты для фокуса
+                    card.attr('tabindex', '0');
+                    card.addClass('card');
                     
+                    card.data('card-url', m.url);
+                    card.data('title', m.title);
+                    
+                    // Обработчики
                     card.on('hover:enter', function(){
-                        openInBrowser($(this).data('card-url'), $(this).data('card-title'));
+                        openInBrowser($(this).data('card-url'), $(this).data('title'));
                     });
-
+                    
+                    // Фокус просто делегируем нашему методу setFocus
                     card.on('hover:focus', function(){
-                        scroll.update($(this));
+                        self.setFocus($(this));
                     });
-
-                    // Вставляем карточку в наш внутренний контейнер
-                    // (что физически означает вставку в .scroll__content)
+                    
                     inner.append(card);
                 } catch(e) {
                     D.err('Template', e.message);
                 }
             });
             
-            // КРИТИЧЕСКИ ВАЖНО: Сообщаем Lampa, что контент обновлен
+            // Сообщаем Lampa об обновлении контента для активации скролла
             try { Lampa.Layer.visible(scroll.render()); } catch(e){}
             
-            window.addEventListener('keydown', self.initNavigation, true);
+            // Корректная установка обработчика
+            if(navHandler) {
+                window.removeEventListener('keydown', navHandler, true);
+            }
+            navHandler = function(e) { self.initNavigation(e); };
+            window.addEventListener('keydown', navHandler, true);
+            
             setTimeout(function(){
                 isActive = true;
-                self.setFocus(scroll.render().find('.card').first());
-            }, 300);
+                var firstCard = inner.find('.card').first();
+                if(firstCard.length) {
+                    self.setFocus(firstCard);
+                }
+            }, 200);
         };
 
         this.start = function(){ isActive = true; };
@@ -349,13 +418,21 @@
         this.pause = function(){ isActive = false; };
         this.stop = function(){ isActive = false; };
         this.render = function(){ return scroll.render(); };
+        
+        // --- ШАГ 6: Правильное уничтожение ---
         this.destroy = function(){ 
             isActive = false;
-            window.removeEventListener('keydown', self.initNavigation, true); 
+            if(navHandler) {
+                window.removeEventListener('keydown', navHandler, true);
+                navHandler = null;
+            }
             scroll.destroy(); 
         };
     }
 
+    /* ==========================================================
+     *  БЕЗОПАСНОЕ ВОСПРОИЗВЕДЕНИЕ (Без изменений)
+     * ========================================================== */
     function openInBrowser(url, title){
         D.noty('▶ Открываю: ' + title);
         lastBrowserOpenTime = Date.now(); 
@@ -372,6 +449,9 @@
         }, 100);
     }
 
+    /* ==========================================================
+     *  РЕГИСТРАЦИЯ И ЗАПУСК
+     * ========================================================== */
     Lampa.Component.add('zf_menu', MenuComp);
     Lampa.Component.add('zf_cards', CardsComp);
 
@@ -387,7 +467,7 @@
             Lampa.Activity.push({ 
                 url: '', 
                 title: 'Trahkino v' + CONFIG.ver, 
-                component: 'zf_menu' 
+                component: 'zf_cards' 
             });
         });
         
