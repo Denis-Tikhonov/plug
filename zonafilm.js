@@ -1,15 +1,13 @@
 /**
  * ============================================================
- *  LAMPA PLUGIN — Trahkino v3.5.4 (Нативный скролл Lampa)
+ *  LAMPA PLUGIN — Trahkino v3.6.0 (Нативный скролл Lampa)
  * ============================================================
  *
- *  ИСПРАВЛЕНИЯ v3.5.4:
- *    ✅ Scroll инициализирован по эталону из документации 
- *       (добавлены scroll_by_item: true, end_ratio: 2).
- *    ✅ В конце отрисовки карточек вызывается Lampa.Layer.visible(), 
- *       чтобы ядро пересчитало высоту и включило прокрутку.
- *    ✅ setFocus использует scroll.position() вместо ручного 
- *       калькулятора scrollTop (работает в паре со scroll_by_item).
+ *  ИСПРАВЛЕНИЯ v3.6.0:
+ *    ✅ Удалена кастомная обертка wrap.
+ *    ✅ Карточки вставляются напрямую в ядро Lampa Scroll.
+ *    ✅ CSS-сетка навешивается прямо на контейнер скролла.
+ *    ✅ setFocus делегирует прокрутку методу scroll.position().
  *
  * ============================================================
  */
@@ -19,7 +17,7 @@
 
     var CONFIG = {
         debug: true,
-        ver: '3.5.4',
+        ver: '3.6.0',
         site: 'https://trahkino.me',
         proxy: [
             'https://api.codetabs.com/v1/proxy?quest={u}',
@@ -79,15 +77,18 @@
         cats: function(){ return []; }
     };
 
+    /* ==========================================================
+     *  СТИЛИ: Навешиваем сетку на контейнер скролла Lampa
+     * ========================================================== */
     var CSS = '\
-        .items-cards{display:flex;flex-wrap:wrap;gap:1em;padding:1.5em}\
-        .zf-loading{display:flex;align-items:center;justify-content:center;\
+        .items-cards .items-cards__inner{display:flex;flex-wrap:wrap;gap:1em;padding:1.5em}\
+        .items-cards .zf-empty{text-align:center;padding:4em;color:#666;font-size:1.3em;width:100%}\
+        .items-cards .zf-loading{display:flex;align-items:center;justify-content:center;\
             padding:4em;color:#888;font-size:1.3em;width:100%}\
-        .zf-spin{display:inline-block;width:2em;height:2em;border:3px solid #333;\
+        .items-cards .zf-spin{display:inline-block;width:2em;height:2em;border:3px solid #333;\
             border-top-color:#4FC3F7;border-radius:50%;margin-right:.8em;\
             animation:zfspin .7s linear infinite}\
         @keyframes zfspin{to{transform:rotate(360deg)}}\
-        .zf-empty{text-align:center;padding:4em;color:#666;font-size:1.3em;width:100%}\
         .zf-menu-wrap{padding:2em 0}\
         .zf-menu-item{padding:1.4em 1.5em;color:#eee;font-size:1.5em;margin:0.5em 1em;\
             background:#222;border-radius:0.5em;cursor:pointer;transition:background .2s}\
@@ -101,7 +102,6 @@
      * ========================================================== */
     function MenuComp(){
         var self   = this;
-        // ИЗМЕНЕНО: Добавлен scroll_by_item
         var scroll = new Lampa.Scroll({mask:true, over:true, scroll_by_item: true, end_ratio: 2});
         var wrap   = $('<div class="zf-menu-wrap"></div>');
         var list   = $('<div></div>');
@@ -181,25 +181,30 @@
     }
 
     /* ==========================================================
-     *  КОМПОНЕНТ КАРТОЧЕК
+     *  КОМПОНЕНТ КАРТОЧЕК (Интеграция с ядром Scroll)
      * ========================================================== */
     function CardsComp(object){
         var self   = this;
-        // ИЗМЕНЕНО: Добавлен scroll_by_item и end_ratio по документации
+        
+        // Инициализация по эталону из документации
         var scroll = new Lampa.Scroll({mask:true, over:true, scroll_by_item: true, end_ratio: 2});
-        var wrap   = $('<div class="items-cards"></div>');
+        
+        // Внутренняя обертка для нашего лоадера и пустых сообщений
+        var inner  = $('<div class="items-cards__inner"></div>');
         
         var isActive = false;
         var lastBrowserOpenTime = 0;
 
         this.setFocus = function(card) {
             if(!card || !card.length) return;
-            wrap.find('.card').removeClass('focus');
+            
+            // Ищем карточки внутри контейнера скролла Lampa
+            scroll.render().find('.card').removeClass('focus');
             card.addClass('focus');
             card.trigger('hover:focus');
             
-            // ИЗМЕНЕНО: Используем нативный метод Lampa для позиционирования
-            // (работает корректно только при включенном scroll_by_item)
+            // Передаем управление прокруткой полностью встроенному алгоритму Lampa.
+            // Он сам вычислит translateY и сдвинет экран.
             try { 
                 scroll.position(card[0]); 
             } catch(e){}
@@ -213,15 +218,15 @@
                 if (Date.now() - lastBrowserOpenTime < 1500) {
                     e.preventDefault(); e.stopPropagation(); return; 
                 }
-                wrap.find('.card').removeClass('focus'); return; 
+                scroll.render().find('.card').removeClass('focus'); return; 
             }
 
             if (!['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'Enter'].includes(key)) return;
 
-            var current = wrap.find('.card.focus');
+            var current = scroll.render().find('.card.focus');
             if(!current.length) {
                 e.preventDefault(); e.stopPropagation();
-                self.setFocus(wrap.find('.card').first()); return;
+                self.setFocus(scroll.render().find('.card').first()); return;
             }
 
             var target = null;
@@ -284,15 +289,21 @@
 
         this.create = function(){
             isActive = false;
-            wrap.append('<div class="zf-loading" id="zf-loader"><div class="zf-spin"></div>Загрузка...</div>');
-            scroll.append(wrap);
+            
+            // Вставляем нашу обертку во внутренний контент скролла Lampa
+            scroll.render().find('.scroll__content').addClass('items-cards').append(inner);
+            
+            inner.append('<div class="zf-loading" id="zf-loader"><div class="zf-spin"></div>Загрузка...</div>');
+            
             Src.main(object.page || 1, function(items){ self.onDataLoaded(items); });
         };
 
         this.onDataLoaded = function(items){
             $('#zf-loader').remove();
             if(!items.length){
-                wrap.html('<div class="zf-empty">📭 Пусто</div>');
+                inner.html('<div class="zf-empty">📭 Пусто</div>');
+                // Сообщаем Lampa об изменении высоты
+                try { Lampa.Layer.visible(scroll.render()); } catch(e){}
                 return;
             }
 
@@ -315,19 +326,21 @@
                         scroll.update($(this));
                     });
 
-                    wrap.append(card);
+                    // Вставляем карточку в наш внутренний контейнер
+                    // (что физически означает вставку в .scroll__content)
+                    inner.append(card);
                 } catch(e) {
                     D.err('Template', e.message);
                 }
             });
             
-            // ИЗМЕНЕНО: Сообщаем Lampa, что контент обновлен, чтобы активировать скролл
+            // КРИТИЧЕСКИ ВАЖНО: Сообщаем Lampa, что контент обновлен
             try { Lampa.Layer.visible(scroll.render()); } catch(e){}
             
             window.addEventListener('keydown', self.initNavigation, true);
             setTimeout(function(){
                 isActive = true;
-                self.setFocus(wrap.find('.card').first());
+                self.setFocus(scroll.render().find('.card').first());
             }, 300);
         };
 
@@ -339,7 +352,7 @@
         this.destroy = function(){ 
             isActive = false;
             window.removeEventListener('keydown', self.initNavigation, true); 
-            scroll.destroy(); wrap.remove(); 
+            scroll.destroy(); 
         };
     }
 
