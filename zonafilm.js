@@ -1,4 +1,38 @@
 "use strict";
+// [ВСТАВЬТЕ СЮДА МОДУЛЬ ЛОГИРОВАНИЯ]
+class PluginLogger {
+  constructor() {
+    this.logs = [];
+    this.maxLogs = 100;
+  }
+
+  log(message, data = null) {
+    const timestamp = new Date().toISOString();
+    const logEntry = {
+      timestamp,
+      message,
+      data: data ? JSON.stringify(data, null, 2) : null
+    };
+    this.logs.push(logEntry);
+    if (this.logs.length > this.maxLogs) {
+      this.logs.shift();
+    }
+    console.log(`[AdultJS] ${message}`, data);
+  }
+
+  getLogs() {
+    return this.logs;
+  }
+
+  clearLogs() {
+    this.logs = [];
+  }
+}
+
+const logger = new PluginLogger();
+// [КОНЕЦ ВСТАВКИ]
+
+
 function _toConsumableArray(e) {
   return (
     _arrayWithoutHoles(e) ||
