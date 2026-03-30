@@ -1,13 +1,14 @@
 /**
  * ============================================================
- *  LAMPA PLUGIN — Trahkino v3.3.0 (Прямой перехват D-pad)
+ *  LAMPA PLUGIN — Trahkino v3.4.0 (Идеальная навигация)
  * ============================================================
  *
- *  РЕШЕНИЕ v3.3.0:
- *    ✅ Обход сломанного контроллера Lampa.
- *    ✅ Перехват нажатий стрелок на уровне окна (capture phase).
- *    ✅ Точное перемещение по строкам через сравнение координат offset().top.
- *    ✅ Использование родного класса .focus и события hover:focus.
+ *  ИСПРАВЛЕНИЯ v3.4.0:
+ *    ✅ Вертикальная навигация: точное попадание на карточку 
+ *       строго над/под текущей (сравнение координат X и Y).
+ *    ✅ Скролл: работает родной scroll.update() из ядра Lampa.
+ *    ✅ Защита от выхода: при возврате из браузера кнопка "Назад" 
+ *       игнорируется (debounce 1.5 сек), вы остаетесь на сетке.
  *
  * ============================================================
  */
@@ -17,7 +18,7 @@
 
     var CONFIG = {
         debug: true,
-        ver: '3.3.0',
+        ver: '3.4.0',
         site: 'https://trahkino.me',
         proxy: [
             'https://api.codetabs.com/v1/proxy?quest={u}',
@@ -116,37 +117,41 @@
         var scroll = new Lampa.Scroll({mask:true, over:true, step:250});
         var wrap   = $('<div class="items-cards"></div>');
         
-        // Флаг активности компонента
         var isActive = false;
+        var lastBrowserOpenTime = 0; // Для защиты от двойного нажатия "Назад"
 
-        // --- ШАГ 3: Метод установки фокуса ---
         this.setFocus = function(card) {
             if(!card || !card.length) return;
-            
-            // Убираем фокус у всех
             wrap.find('.card').removeClass('focus');
-            
-            // Добавляем целевой карточке
             card.addClass('focus');
-            
-            // Имитируем событие Lampa, чтобы сработал наш hover:focus для скролла
             card.trigger('hover:focus');
             
-            // Плавный скролл к элементу
-            card[0].scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+            // Вызываем скролл Lampa к карточке (без scrollIntoView)
+            scroll.update(card); 
         };
 
-        // --- ШАГ 2: Перехватчик D-pad ---
         this.initNavigation = function(e) {
-            // Проверяем, активен ли наш экран
             if (!isActive) return;
 
             var key = e.key;
             
-            // Если нажали не стрелки и не Enter - выходим
-            if (!['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'Enter'].includes(key)) return;
+            if (!['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'Enter', 'Escape', 'Backspace'].includes(key)) return;
 
-            // Проверяем, находится ли фокус в нашей сетке
+            // --- ЗАЩИТА ОТ ВЫХОДА ИЗ БРАУЗЕРА ---
+            if (key === 'Escape' || key === 'Backspace') {
+                if (Date.now() - lastBrowserOpenTime < 1500) {
+                    // Если прошло меньше 1.5 сек после открытия видео - блокируем "Назад"
+                    e.preventDefault();
+                    e.stopPropagation();
+                    wrap.find('.card').removeClass('focus');
+                    setTimeout(function(){ self.setFocus(wrap.find('.card.focus').length ? wrap.find('.card.focus') : wrap.find('.card').first()); }, 100);
+                    return;
+                }
+                // Иначе - обычный выход (отдаем событие Lampa)
+                wrap.find('.card').removeClass('focus');
+                return; 
+            }
+
             var current = wrap.find('.card.focus');
             if(!current.length) {
                 e.preventDefault();
@@ -155,30 +160,68 @@
                 return;
             }
 
-            var allCards = wrap.find('.card');
-            var curIdx = allCards.index(current);
             var target = null;
 
             switch(key) {
                 case 'ArrowRight':
-                    target = allCards.eq(curIdx + 1);
+                    target = current.next('.card');
                     break;
                 case 'ArrowLeft':
-                    if(curIdx > 0) target = allCards.eq(curIdx - 1);
+                    if(current.index() > 0) target = current.prev('.card');
                     break;
-                case 'ArrowDown':
-                    // Точное определение следующей строки по координатам
+                    
+                case 'ArrowDown': {
                     var curTop = current.offset().top;
-                    target = current.nextAll('.card').filter(function(){
-                        return $(this).offset().top > curTop + 5; // +5 погрешность на субпиксели
-                    }).first();
+                    var nextRowTop = null;
+                    // 1. Ищем координату Y следующей строки
+                    current.nextAll('.card').each(function(){
+                        var t = $(this).offset().top;
+                        if (t > curTop + 5) { nextRowTop = t; return false; } // break
+                    });
+                    
+                    // 2. Если нашли строку, ищем в ней карточку с ближайшей координатой X
+                    if (nextRowTop !== null) {
+                        var curLeft = current.offset().left;
+                        var minDist = Infinity;
+                        current.nextAll('.card').each(function(){
+                            if (Math.abs($(this).offset().top - nextRowTop) < 5) {
+                                var dist = Math.abs($(this).offset().left - curLeft);
+                                if (dist < minDist) {
+                                    minDist = dist;
+                                    target = $(this);
+                                }
+                            }
+                        });
+                    }
                     break;
-                case 'ArrowUp':
+                }
+                    
+                case 'ArrowUp': {
                     var curTop = current.offset().top;
-                    target = current.prevAll('.card').filter(function(){
-                        return $(this).offset().top < curTop - 5;
-                    }).last();
+                    var prevRowTop = null;
+                    // 1. Ищем координату Y верхней строки (prevAll идет снизу вверх)
+                    current.prevAll('.card').each(function(){
+                        var t = $(this).offset().top;
+                        if (t < curTop - 5) { prevRowTop = t; return false; } // break
+                    });
+                    
+                    // 2. Ищем карточку с ближайшим X
+                    if (prevRowTop !== null) {
+                        var curLeft = current.offset().left;
+                        var minDist = Infinity;
+                        current.prevAll('.card').each(function(){
+                            if (Math.abs($(this).offset().top - prevRowTop) < 5) {
+                                var dist = Math.abs($(this).offset().left - curLeft);
+                                if (dist < minDist) {
+                                    minDist = dist;
+                                    target = $(this);
+                                }
+                            }
+                        });
+                    }
                     break;
+                }
+
                 case 'Enter':
                     e.preventDefault();
                     e.stopPropagation();
@@ -187,12 +230,10 @@
             }
 
             if(target && target.length) {
-                // ВАЖНО: Останавливаем всплытие события, чтобы Lampa не перехватила стрелку
                 e.preventDefault();
                 e.stopPropagation();
                 self.setFocus(target);
             } else if (!target || !target.length) {
-                // Если вышли за границы сетки (вверх/влево), отпускаем событие для Lampa (вернет в меню)
                 wrap.find('.card').removeClass('focus');
             }
         };
@@ -204,7 +245,6 @@
             Src.main(object.page || 1, function(items){ self.onDataLoaded(items); });
         };
 
-        // --- ШАГ 5: Модификация onDataLoaded ---
         this.onDataLoaded = function(items){
             $('#zf-loader').remove();
             if(!items.length){
@@ -220,7 +260,6 @@
                         id: index
                     });
                     
-                    // Привязываем данные
                     card.data('card-url', m.url);
                     card.data('card-title', m.title);
                     
@@ -238,27 +277,23 @@
                 }
             });
             
-            // Инициализация навигации ( capture phase = true, чтобы перехватить до Lampa)
             window.addEventListener('keydown', self.initNavigation, true);
             
-            // Фокус на первую карточку
             setTimeout(function(){
                 isActive = true;
                 self.setFocus(wrap.find('.card').first());
             }, 300);
         };
 
-        // Жизненный цикл
         this.start = function(){ isActive = true; };
         this.toggle = function(){ isActive = true; };
         this.pause = function(){ isActive = false; };
         this.stop = function(){ isActive = false; };
         this.render = function(){ return scroll.render(); };
         
-        // --- ШАГ 6: Очистка ---
         this.destroy = function(){ 
             isActive = false;
-            window.removeEventListener('keydown', self.initNavigation, true); // Убираем перехватчик
+            window.removeEventListener('keydown', self.initNavigation, true); 
             scroll.destroy(); 
             wrap.remove(); 
         };
@@ -266,6 +301,7 @@
 
     function openInBrowser(url, title){
         D.noty('▶ Открываю: ' + title);
+        lastBrowserOpenTime = Date.now(); // Записываем время клика
         try {
             if(typeof Lampa.Android !== 'undefined' && Lampa.Android.openUrl){
                 Lampa.Android.openUrl(url);
