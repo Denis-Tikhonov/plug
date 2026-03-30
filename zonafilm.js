@@ -1,13 +1,14 @@
 /**
  * ============================================================
- *  LAMPA PLUGIN — Trahkino v2.7.0 (Точное попадание в контейнер)
+ *  LAMPA PLUGIN — Trahkino v2.8.0 (Золотой ключ)
  * ============================================================
  *
- *  ИЗМЕНЕНИЯ v2.7.0:
- *    ✅ Взят идеальный базовый код версии 1.9.0 (0 ошибок).
- *    ✅ ИЗМЕНЕНА 1 СТРОКА: Lampa.Controller.collectionSet() теперь 
- *       получает напрямую 'grid', а не 'scroll.render()'.
- *       Теперь алгоритм move() точно видит карточки.
+ *  РЕШЕНИЕ v2.8.0:
+ *    ✅ Убран Lampa.Controller.clear() (больше не ломает другие плагины).
+ *    ✅ В add('content') передано ТОЛЬКО свойство render: grid.
+ *    ✅ Методы up/down/left/right НЕ переопределены. Lampa использует 
+ *       свои родные методы для Lampa.Controller.move().
+ *    ✅ Идеальная совместимость с системой ByLampa.
  *
  * ============================================================
  */
@@ -17,7 +18,7 @@
 
     var CONFIG = {
         debug: true,
-        ver: '2.7.0',
+        ver: '2.8.0',
         site: 'https://trahkino.me',
         proxy: [
             'https://api.codetabs.com/v1/proxy?quest={u}',
@@ -163,35 +164,38 @@
 
         this.bindFocus = function(){
             setTimeout(function(){
-                // --- ГЛАВНОЕ ИЗМЕНЕНИЕ: Передаем напрямую grid ---
                 Lampa.Controller.collectionSet(grid);
                 Lampa.Controller.collectionFocus(false, grid);
             }, 150);
         };
 
-        // --- БЕЗОПАСНАЯ ПРОПИСКА КОМАНД (Как в 1.9.0) ---
+        // --- МАГИЯ БЕЗ НАВЯЗЫВАНИЯ ---
         this.start = function(){
-            Lampa.Controller.own({
-                toggle: function(){},
-                left: function(){ Lampa.Controller.move('left'); },
-                right: function(){ Lampa.Controller.move('right'); },
-                up: function(){ Lampa.Controller.move('up'); },
-                down: function(){ Lampa.Controller.move('down'); },
-                back: function(){ Lampa.Activity.backward(); }
+            // Расширяем системный 'content', но НЕ трогаем его стрелки!
+            Lampa.Controller.add('content', {
+                render: grid, // Говорим встроенному move() где искать карточки
+                toggle: function(){
+                    Lampa.Controller.collectionSet(grid);
+                    Lampa.Controller.collectionFocus(false, grid);
+                }
             });
+            Lampa.Controller.toggle('content');
         };
         
         this.toggle = function(){
-            // --- И ЗДЕСЬ ТОЖЕ grid ---
             Lampa.Controller.collectionSet(grid);
             Lampa.Controller.collectionFocus(false, grid);
         };
 
         this.pause = function(){};
-        this.stop = function(){};
+        this.stop = function(){
+            // НИКАКОГО clear()! Пусть система сама восстанавливает контроллеры
+        };
+        
         this.render = function(){ return scroll.render(); };
+        
         this.destroy = function(){ 
-            Lampa.Controller.clear();
+            // Только чистим свой DOM
             scroll.destroy(); 
             grid.remove(); 
         };
