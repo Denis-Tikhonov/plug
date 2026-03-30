@@ -1,14 +1,12 @@
 /**
  * ============================================================
- *  LAMPA PLUGIN — Trahkino v3.5.0 (Архитектура Activity)
+ *  LAMPA PLUGIN — Trahkino v3.5.1 (Исправлено меню)
  * ============================================================
  *
- *  ИСПРАВЛЕНИЯ v3.5.0:
- *    ✅ Вариант Б: Меню плагина теперь полноценный первый экран (Activity).
- *    ✅ Стрелка "Вверх" на первой строке возвращает в меню плагина.
- *    ✅ Кнопка "Назад" возвращает в меню плагина (а не в главное меню).
- *    ✅ Скролл исправлен (использован надежный scrollIntoView).
- *    ✅ Script Error при открытии видео устранен (защитный try-catch).
+ *  ИСПРАВЛЕНИЯ v3.5.1:
+ *    ✅ Убран position:absolute из CSS меню (из-за него кнопки прятались).
+ *    ✅ Меню отрисовано стандартным контейнером Lampa.Scroll.
+ *    ✅ Вся навигация и скролл карточек работают как в 3.5.0.
  *
  * ============================================================
  */
@@ -18,7 +16,7 @@
 
     var CONFIG = {
         debug: true,
-        ver: '3.5.0',
+        ver: '3.5.1',
         site: 'https://trahkino.me',
         proxy: [
             'https://api.codetabs.com/v1/proxy?quest={u}',
@@ -79,7 +77,7 @@
     };
 
     /* ==========================================================
-     *  СТИЛИ: Добавлен CSS для экрана меню
+     *  СТИЛИ (Упрощено для стабильности)
      * ========================================================== */
     var CSS = '\
         .items-cards{display:flex;flex-wrap:wrap;gap:1em;padding:1.5em}\
@@ -90,33 +88,31 @@
             animation:zfspin .7s linear infinite}\
         @keyframes zfspin{to{transform:rotate(360deg)}}\
         .zf-empty{text-align:center;padding:4em;color:#666;font-size:1.3em;width:100%}\
-        .zf-menu-body{position:absolute;top:0;left:0;right:0;bottom:0;display:flex;\
-            align-items:center;justify-content:center;background:rgba(0,0,0,0.85);z-index:20}\
-        .zf-menu-list{width:20em;background:#1e1e1e;border-radius:1em;overflow:hidden;padding:1em 0}\
-        .zf-menu-item{padding:1.2em 1.5em;color:#eee;font-size:1.4em;cursor:pointer;\
-            transition:background .2s}\
-        .zf-menu-item:hover,.zf-menu-item.focus{background:#2d2d2d}\
+        .zf-menu-wrap{padding:2em 0}\
+        .zf-menu-item{padding:1.4em 1.5em;color:#eee;font-size:1.5em;margin:0.5em 1em;\
+            background:#222;border-radius:0.5em;cursor:pointer;transition:background .2s}\
+        .zf-menu-item:hover,.zf-menu-item.focus{background:#333}\
     ';
     $('#zf-css').remove();
     $('<style>').attr('id','zf-css').text(CSS).appendTo('head');
 
     /* ==========================================================
-     *  КОМПОНЕНТ ГЛАВНОГО МЕНЮ (Новый полноценный экран)
+     *  КОМПОНЕНТ ГЛАВНОГО МЕНЮ (Без position:absolute)
      * ========================================================== */
     function MenuComp(){
         var scroll = new Lampa.Scroll({mask:true, over:true});
-        var body   = $('<div class="zf-menu-body"></div>');
-        var list   = $('<div class="zf-menu-list"></div>');
+        var wrap   = $('<div class="zf-menu-wrap"></div>');
+        var list   = $('<div></div>');
         
         var items = [
-            { title: '🔍 Поиск', subtitle: '(Этап 3)', action: 'search' },
-            { title: '📽 Последние видео', subtitle: 'Каталог', action: 'all' },
-            { title: '← Назад', subtitle: 'В главное меню', action: 'back' }
+            { title: '🔍 Поиск', action: 'search' },
+            { title: '📽 Последние видео', action: 'all' },
+            { title: '← Назад', action: 'back' }
         ];
 
         this.create = function(){
-            body.append(list);
-            scroll.append(body);
+            wrap.append(list);
+            scroll.append(wrap);
 
             items.forEach(function(item){
                 var el = $('<div class="zf-menu-item selector">' + item.title + '</div>');
@@ -138,17 +134,15 @@
             Lampa.Controller.collectionFocus(false, list);
             Lampa.Controller.toggle('content');
         };
-        this.toggle = function(){
-            Lampa.Controller.toggle('content');
-        };
+        this.toggle = function(){ Lampa.Controller.toggle('content'); };
         this.pause = function(){};
         this.stop = function(){};
         this.render = function(){ return scroll.render(); };
-        this.destroy = function(){ scroll.destroy(); body.remove(); };
+        this.destroy = function(){ scroll.destroy(); wrap.remove(); };
     }
 
     /* ==========================================================
-     *  КОМПОНЕНТ КАРТОЧЕК (Сетка с D-pad)
+     *  КОМПОНЕНТ КАРТОЧЕК (Без изменений с 3.5.0)
      * ========================================================== */
     function CardsComp(object){
         var self   = this;
@@ -163,8 +157,6 @@
             wrap.find('.card').removeClass('focus');
             card.addClass('focus');
             card.trigger('hover:focus');
-            
-            // Надежный скролл к элементу
             try { card[0].scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' }); } catch(e){}
         };
 
@@ -173,15 +165,12 @@
 
             var key = e.key;
             
-            // --- КНОПКА НАЗАД ---
             if (key === 'Escape' || key === 'Backspace') {
                 if (Date.now() - lastBrowserOpenTime < 1500) {
                     e.preventDefault();
                     e.stopPropagation();
                     return; 
                 }
-                // Стандартный возврат в предыдущий экран (в меню плагина)
-                // Мы не блокируем событие, ядро Lampa само вызовет Lampa.Activity.backward()
                 wrap.find('.card').removeClass('focus');
                 return; 
             }
@@ -249,16 +238,11 @@
                     return;
             }
 
-            // --- ВЫХОД ЗА ПРЕДЕЛЫ СЕТКИ ---
             if(!target || !target.length) {
                 e.preventDefault();
                 e.stopPropagation();
-                
-                // Отключаем наш перехватчик
                 isActive = false;
                 window.removeEventListener('keydown', self.initNavigation, true);
-                
-                // Возвращаемся на предыдущий экран (в меню плагина)
                 Lampa.Activity.backward();
                 return; 
             }
@@ -329,32 +313,20 @@
         };
     }
 
-    /* ==========================================================
-     *  БЕЗОПАСНОЕ ВОСПРОИЗВЕДЕНИЕ
-     * ========================================================== */
     function openInBrowser(url, title){
         D.noty('▶ Открываю: ' + title);
         lastBrowserOpenTime = Date.now(); 
-        
-        // Вариант 1: Нативный вызов Android (вызывает Script Error на некоторых URL)
         try {
             if(typeof Lampa.Android !== 'undefined' && Lampa.Android.openUrl){
                 Lampa.Android.openUrl(url);
                 return;
             }
         } catch(e){}
-        
-        // Вариант 2: Если Lampa.Android упал с ошибкой, используем window.open
-        try { 
-            window.open(url,'_blank'); 
-        } catch(e){}
+        try { window.open(url,'_blank'); } catch(e){}
     }
 
-    /* ==========================================================
-     *  РЕГИСТРАЦИЯ + ЗАПУСК
-     * ========================================================== */
-    Lampa.Component.add('zf_menu', MenuComp);  // Регистрируем экран меню
-    Lampa.Component.add('zf_cards', CardsComp); // Регистрируем экран карточек
+    Lampa.Component.add('zf_menu', MenuComp);
+    Lampa.Component.add('zf_cards', CardsComp);
 
     var ICO = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>';
 
@@ -364,7 +336,6 @@
             '<div class="menu__ico">'+ICO+'</div>'+
             '<div class="menu__text">Trahkino</div></li>');
         
-        // ИЗМЕНЕНИЕ: При клике открываем не Lampa.Select, а новый экран (Activity)
         li.on('hover:enter', function(){
             Lampa.Activity.push({ 
                 url: '', 
