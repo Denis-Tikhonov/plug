@@ -1900,7 +1900,7 @@ function _toPrimitive(e, t) {
             value: function (t) {
               if (!t) return [];
               for (
-                var a = t.split('class="video-item responsive-page"'),
+                var a = t.split('class="thumb-block"'),
                   n = [],
                   r = 1;
                 r < a.length;
