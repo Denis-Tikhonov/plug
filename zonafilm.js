@@ -1897,43 +1897,43 @@ function _toPrimitive(e, t) {
           },
           {
             key: "Playlist",
-value: function (html) {
-  if (!html) return [];
+            value: function (html) {
+        if (!html) return [];
 
-  var list = [];
-  var blocks = html.split('class="thumb-block"');
+        var list = [];
+        var blocks = html.split('class="thumb-block"');
 
-  for (var i = 1; i < blocks.length; i++) {
-    var block = blocks[i];
+        for (var i = 1; i < blocks.length; i++) {
+        var block = blocks[i];
 
-    var url = c.extract(block, /href="\/(video[^"]+)"/);
-    var title = c.extract(block, /title="([^"]+)"/);
+        var url = c.extract(block, /href="\/(video[^"]+)"/);
+        var title = c.extract(block, /title="([^"]+)"/);
 
-    var img =
-      c.extract(block, /data-src="([^"]+)"/) ||
-      c.extract(block, /src="([^"]+)"/);
+        var img =
+          c.extract(block, /data-src="([^"]+)"/) ||
+          c.extract(block, /src="([^"]+)"/);
 
-    var duration = c.extract(block, /class="duration">([^<]+)</);
+        var duration = c.extract(block, /class="duration">([^<]+)</);
 
-    if (url && title) {
-      list.push(
-        new u(
-          title,
-          e.host + "/" + url,
-          img || "",
-          null,
-          duration || null,
-          null,
-          true,
-          true,
-          null
-        )
-      );
-    }
-  }
+        if (url && title) {
+          list.push(
+            new u(
+              title,
+              e.host + "/" + url,
+              img || "",
+              null,
+              duration || null,
+              null,
+              true,
+              true,
+              null
+            )
+          );
+        }
+      }
 
-  return list;
-}
+      return list;
+    
             },
           },
           {
