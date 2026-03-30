@@ -1,12 +1,14 @@
 /**
  * ============================================================
- *  LAMPA PLUGIN — Trahkino v3.5.2 (Навигация в меню)
+ *  LAMPA PLUGIN — Trahkino v3.5.3 (Финальный скролл и клик)
  * ============================================================
  *
- *  ИСПРАВЛЕНИЯ v3.5.2:
- *    ✅ В MenuComp добавлен перехват D-pad для переключения кнопок.
- *    ✅ Вверх/Вниз переключают фокус, Enter нажимает кнопку.
- *    ✅ Навигация карточек оставлена без изменений.
+ *  ИСПРАВЛЕНИЯ v3.5.3:
+ *    ✅ Скролл: точечное вычисление и прокрутка внутреннего 
+ *       контейнера .scroll__body (вместо нерабочего scrollIntoView).
+ *    ✅ Клик: заменен Lampa.Android.openUrl на эмуляцию клика по 
+ *       скрытому <a target="_blank">. Это открывает браузер без 
+ *       обрушения WebView (Script Error).
  *
  * ============================================================
  */
@@ -16,7 +18,7 @@
 
     var CONFIG = {
         debug: true,
-        ver: '3.5.2',
+        ver: '3.5.3',
         site: 'https://trahkino.me',
         proxy: [
             'https://api.codetabs.com/v1/proxy?quest={u}',
@@ -94,10 +96,10 @@
     $('<style>').attr('id','zf-css').text(CSS).appendTo('head');
 
     /* ==========================================================
-     *  КОМПОНЕНТ ГЛАВНОГО МЕНЮ (С D-pad навигацией)
+     *  КОМПОНЕНТ ГЛАВНОГО МЕНЮ
      * ========================================================== */
     function MenuComp(){
-        var self   = this; // Добавлено!
+        var self   = this;
         var scroll = new Lampa.Scroll({mask:true, over:true});
         var wrap   = $('<div class="zf-menu-wrap"></div>');
         var list   = $('<div></div>');
@@ -114,26 +116,14 @@
             el.addClass('focus');
         };
 
-        // --- Навигация для меню (Up/Down/Enter) ---
         this.initMenuNav = function(e) {
             if (!isActiveMenu) return;
-
             var key = e.key;
-            
-            // Обработка кнопки "Назад" в меню
-            if (key === 'Escape' || key === 'Backspace') {
-                Lampa.Activity.backward();
-                return; 
-            }
-
+            if (key === 'Escape' || key === 'Backspace') { Lampa.Activity.backward(); return; }
             if (!['ArrowUp', 'ArrowDown', 'Enter'].includes(key)) return;
 
             var current = list.find('.zf-menu-item.focus');
-            if(!current.length) {
-                self.setFocusMenu(list.find('.zf-menu-item').first());
-                return;
-            }
-
+            if(!current.length) { self.setFocusMenu(list.find('.zf-menu-item').first()); return; }
             var target = null;
 
             switch(key) {
@@ -172,9 +162,7 @@
                 list.append(el);
             });
 
-            // Запускаем перехватчик меню
             window.addEventListener('keydown', self.initMenuNav, true);
-            
             setTimeout(function(){
                 isActiveMenu = true;
                 self.setFocusMenu(list.find('.zf-menu-item').first());
@@ -209,40 +197,46 @@
             wrap.find('.card').removeClass('focus');
             card.addClass('focus');
             card.trigger('hover:focus');
-            try { card[0].scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' }); } catch(e){}
+            
+            // --- ТОЧЕЧНЫЙ СКРОЛЛ ---
+            // Ищем скрытый контейнер прокрутки внутри Lampa.Scroll
+            var scrollBody = scroll.render().find('.scroll__body')[0] || scroll.render()[0];
+            if (scrollBody) {
+                // Вычисляем, на сколько пикселей нужно прокрутить
+                var offsetTop = card[0].offsetTop - scrollBody.offsetTop;
+                var scrollTo = offsetTop - (scrollBody.clientHeight / 2) + (card.height() / 2);
+                
+                // Прокручиваем
+                scrollBody.scrollTo({
+                    top: scrollTo,
+                    behavior: 'smooth'
+                });
+            }
         };
 
         this.initNavigation = function(e) {
             if (!isActive) return;
-
             var key = e.key;
             
             if (key === 'Escape' || key === 'Backspace') {
                 if (Date.now() - lastBrowserOpenTime < 1500) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    return; 
+                    e.preventDefault(); e.stopPropagation(); return; 
                 }
-                wrap.find('.card').removeClass('focus');
-                return; 
+                wrap.find('.card').removeClass('focus'); return; 
             }
 
             if (!['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'Enter'].includes(key)) return;
 
             var current = wrap.find('.card.focus');
             if(!current.length) {
-                e.preventDefault();
-                e.stopPropagation();
-                self.setFocus(wrap.find('.card').first());
-                return;
+                e.preventDefault(); e.stopPropagation();
+                self.setFocus(wrap.find('.card').first()); return;
             }
 
             var target = null;
-
             switch(key) {
                 case 'ArrowRight': target = current.next('.card'); break;
                 case 'ArrowLeft': if(current.index() > 0) target = current.prev('.card'); break;
-                    
                 case 'ArrowDown': {
                     var curTop = current.offset().top;
                     var nextRowTop = null;
@@ -262,7 +256,6 @@
                     }
                     break;
                 }
-                    
                 case 'ArrowUp': {
                     var curTop = current.offset().top;
                     var prevRowTop = null;
@@ -282,25 +275,19 @@
                     }
                     break;
                 }
-
                 case 'Enter':
-                    e.preventDefault();
-                    e.stopPropagation();
-                    current.trigger('hover:enter');
-                    return;
+                    e.preventDefault(); e.stopPropagation();
+                    current.trigger('hover:enter'); return;
             }
 
             if(!target || !target.length) {
-                e.preventDefault();
-                e.stopPropagation();
+                e.preventDefault(); e.stopPropagation();
                 isActive = false;
                 window.removeEventListener('keydown', self.initNavigation, true);
-                Lampa.Activity.backward();
-                return; 
+                Lampa.Activity.backward(); return; 
             }
 
-            e.preventDefault();
-            e.stopPropagation();
+            e.preventDefault(); e.stopPropagation();
             self.setFocus(target);
         };
 
@@ -344,7 +331,6 @@
             });
             
             window.addEventListener('keydown', self.initNavigation, true);
-            
             setTimeout(function(){
                 isActive = true;
                 self.setFocus(wrap.find('.card').first());
@@ -356,7 +342,6 @@
         this.pause = function(){ isActive = false; };
         this.stop = function(){ isActive = false; };
         this.render = function(){ return scroll.render(); };
-        
         this.destroy = function(){ 
             isActive = false;
             window.removeEventListener('keydown', self.initNavigation, true); 
@@ -364,16 +349,30 @@
         };
     }
 
+    /* ==========================================================
+     *  БЕЗОПАСНОЕ ВОСПРОИЗВЕДЕНИЕ
+     * ========================================================== */
     function openInBrowser(url, title){
         D.noty('▶ Открываю: ' + title);
         lastBrowserOpenTime = Date.now(); 
-        try {
-            if(typeof Lampa.Android !== 'undefined' && Lampa.Android.openUrl){
-                Lampa.Android.openUrl(url);
-                return;
+        
+        // Эмуляция клика по скрытой ссылке (безопасно для WebView, нет Script Error)
+        var link = document.createElement('a');
+        link.href = url;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.style.display = 'none'; // Прячем ссылку
+        document.body.appendChild(link);
+        
+        // Кликаем
+        link.click();
+        
+        // Удаляем мусор через 100мс
+        setTimeout(function() {
+            if (link.parentNode) {
+                document.body.removeChild(link);
             }
-        } catch(e){}
-        try { window.open(url,'_blank'); } catch(e){}
+        }, 100);
     }
 
     Lampa.Component.add('zf_menu', MenuComp);
