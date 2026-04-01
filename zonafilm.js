@@ -15,7 +15,7 @@
 
   Lampa.Lang.add({
     lampac_sisiname: {
-      ru: 'Клубничка',
+      ru: 'Клубна',
       en: 'Strawberry',
       uk: 'Полуничка',
       zh: '草莓'
