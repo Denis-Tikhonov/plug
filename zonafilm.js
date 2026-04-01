@@ -3,7 +3,7 @@
 
   var Defined = {
     use_api: 'lampac',
-    localhost: 'http://144.124.225.106:11310/sisi',
+    localhost: 'http://83.217.212.10:12128/sisi',
     framework: ''
   };
 
@@ -46,7 +46,7 @@
   }
 }
 
-var hostkey = 'http://144.124.225.106:11310'.replace('http://', '').replace('https://', '');
+var hostkey = 'http://83.217.212.10:12128'.replace('http://', '').replace('https://', '');
 
 if (!window.rch_nws || !window.rch_nws[hostkey]) {
   if (!window.rch_nws) window.rch_nws = {};
@@ -71,7 +71,7 @@ window.rch_nws[hostkey].typeInvoke = function rchtypeInvoke(host, call) {
     if (Lampa.Platform.is('android') || Lampa.Platform.is('tizen')) check(true);
     else {
       var net = new Lampa.Reguest();
-      net.silent('http://144.124.225.106:11310'.indexOf(location.host) >= 0 ? 'https://github.com/' : host + '/cors/check', function() {
+      net.silent('http://83.217.212.10:12128'.indexOf(location.host) >= 0 ? 'https://github.com/' : host + '/cors/check', function() {
         check(true);
       }, function() {
         check(false);
@@ -83,7 +83,7 @@ window.rch_nws[hostkey].typeInvoke = function rchtypeInvoke(host, call) {
 };
 
 window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection) {
-  window.rch_nws[hostkey].typeInvoke('http://144.124.225.106:11310', function() {
+  window.rch_nws[hostkey].typeInvoke('http://83.217.212.10:12128', function() {
 
     client.invoke("RchRegistry", JSON.stringify({
       version: 151,
@@ -113,7 +113,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 	  
 	  function sendResult(uri, html) {
 	    $.ajax({
-	      url: 'http://144.124.225.106:11310/rch/' + uri + '?id=' + rchId,
+	      url: 'http://83.217.212.10:12128/rch/' + uri + '?id=' + rchId,
 	      type: 'POST',
 	      data: html,
 	      async: true,
@@ -194,7 +194,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     });
   });
 };
-  window.rch_nws[hostkey].typeInvoke('http://144.124.225.106:11310', function() {});
+  window.rch_nws[hostkey].typeInvoke('http://83.217.212.10:12128', function() {});
 
   function rchInvoke(json, call) {
     if (window.nwsClient && window.nwsClient[hostkey] && window.nwsClient[hostkey]._shouldReconnect){
@@ -217,7 +217,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 
   function rchRun(json, call) {
     if (typeof NativeWsClient == 'undefined') {
-      Lampa.Utils.putScript(["http://144.124.225.106:11310/js/nws-client-es5.js?v18112025"], function() {}, false, function() {
+      Lampa.Utils.putScript(["http://83.217.212.10:12128/js/nws-client-es5.js?v18112025"], function() {}, false, function() {
         rchInvoke(json, call);
       }, true);
     } else {
@@ -1079,7 +1079,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var Search = {
       title: 'Клубничка',
       search: function search(params, oncomplite) {
-        network.silent('http://144.124.225.106:11310/rch/check/connected', function(json) {
+        network.silent('http://83.217.212.10:12128/rch/check/connected', function(json) {
           if (json.rch) {
             rchRun(json, function() {
               Api.search(params, oncomplite);
