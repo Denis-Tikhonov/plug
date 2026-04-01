@@ -2,8 +2,8 @@
   'use strict';
 
   var Defined = {
-    use_api: 'lampac',
-    localhost: 'http://83.217.212.10:12128/sisi',
+    use_api: 'z01sisi',
+    localhost: 'http://z01.online/sisi',
     framework: ''
   };
 
@@ -15,7 +15,7 @@
 
   Lampa.Lang.add({
     lampac_sisiname: {
-      ru: 'Клубна',
+      ru: 'Клубничка',
       en: 'Strawberry',
       uk: 'Полуничка',
       zh: '草莓'
@@ -46,7 +46,7 @@
   }
 }
 
-var hostkey = 'http://83.217.212.10:12128'.replace('http://', '').replace('https://', '');
+var hostkey = 'http://z01.online'.replace('http://', '').replace('https://', '');
 
 if (!window.rch_nws || !window.rch_nws[hostkey]) {
   if (!window.rch_nws) window.rch_nws = {};
@@ -71,7 +71,7 @@ window.rch_nws[hostkey].typeInvoke = function rchtypeInvoke(host, call) {
     if (Lampa.Platform.is('android') || Lampa.Platform.is('tizen')) check(true);
     else {
       var net = new Lampa.Reguest();
-      net.silent('http://83.217.212.10:12128'.indexOf(location.host) >= 0 ? 'https://github.com/' : host + '/cors/check', function() {
+      net.silent('http://z01.online'.indexOf(location.host) >= 0 ? 'https://github.com/' : host + '/cors/check', function() {
         check(true);
       }, function() {
         check(false);
@@ -83,10 +83,10 @@ window.rch_nws[hostkey].typeInvoke = function rchtypeInvoke(host, call) {
 };
 
 window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection) {
-  window.rch_nws[hostkey].typeInvoke('http://83.217.212.10:12128', function() {
+  window.rch_nws[hostkey].typeInvoke('http://z01.online', function() {
 
-    client.invoke("RchRegistry", JSON.stringify({
-      version: 151,
+    client.invoke("RchRegistry", {
+      version: 154,
       host: location.host,
       rchtype: Lampa.Platform.is('android') ? 'apk' : Lampa.Platform.is('tizen') ? 'cors' : (window.rch_nws[hostkey].type || 'web'),
       apkVersion: window.rch_nws[hostkey].apkVersion,
@@ -95,7 +95,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 	  unic_id: Lampa.Storage.get('lampac_unic_id', ''),
 	  profile_id: Lampa.Storage.get('lampac_profile_id', ''),
 	  token: ''
-    }));
+    });
 
     if (client._shouldReconnect && window.rch_nws[hostkey].rchRegistry) {
       if (startConnection) startConnection();
@@ -113,7 +113,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 	  
 	  function sendResult(uri, html) {
 	    $.ajax({
-	      url: 'http://83.217.212.10:12128/rch/' + uri + '?id=' + rchId,
+	      url: 'http://z01.online/rch/' + uri + '?id=' + rchId,
 	      type: 'POST',
 	      data: html,
 	      async: true,
@@ -194,7 +194,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     });
   });
 };
-  window.rch_nws[hostkey].typeInvoke('http://83.217.212.10:12128', function() {});
+  window.rch_nws[hostkey].typeInvoke('http://z01.online', function() {});
 
   function rchInvoke(json, call) {
     if (window.nwsClient && window.nwsClient[hostkey] && window.nwsClient[hostkey]._shouldReconnect){
@@ -217,7 +217,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 
   function rchRun(json, call) {
     if (typeof NativeWsClient == 'undefined') {
-      Lampa.Utils.putScript(["http://83.217.212.10:12128/js/nws-client-es5.js?v18112025"], function() {}, false, function() {
+      Lampa.Utils.putScript(["http://z01.online/js/nws-client-es5.js?v03022026"], function() {}, false, function() {
         rchInvoke(json, call);
       }, true);
     } else {
@@ -890,7 +890,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 
   var ApiHttp$1 = new ApiHttp();
 
-  var Api = ApiHttp$1; //Defined.use_api == 'pwa' ? ApiPWA$1 : ApiHttp$1;
+  var Api = ApiHttp$1; //true ? ApiPWA$1 : ApiHttp$1;
 
   function Sisi(object) {
     var comp = new Lampa.InteractionMain(object);
@@ -1079,7 +1079,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     var Search = {
       title: 'Клубничка',
       search: function search(params, oncomplite) {
-        network.silent('http://83.217.212.10:12128/rch/check/connected', function(json) {
+        network.silent('http://z01.online/rch/check/connected', function(json) {
           if (json.rch) {
             rchRun(json, function() {
               Api.search(params, oncomplite);
@@ -1121,7 +1121,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
 	
 
   function startPlugin() {
-    window['plugin_sisi_' + Defined.use_api + '_ready'] = true;
+    window['plugin_z01sisi_' + Defined.use_api + '_ready'] = true;
     var unic_id = Lampa.Storage.get('sisi_unic_id', '');
 
     if (!unic_id) {
@@ -1205,8 +1205,8 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     function add() {
       var button = $("<li class=\"menu__item selector\" data-action=\"sisi\">\n            <div class=\"menu__ico\">\n                <svg width=\"200\" height=\"243\" viewBox=\"0 0 200 243\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M187.714 130.727C206.862 90.1515 158.991 64.2019 100.983 64.2019C42.9759 64.2019 -4.33044 91.5669 10.875 130.727C26.0805 169.888 63.2501 235.469 100.983 234.997C138.716 234.526 168.566 171.303 187.714 130.727Z\" stroke=\"currentColor\" stroke-width=\"15\"/><path d=\"M102.11 62.3146C109.995 39.6677 127.46 28.816 169.692 24.0979C172.514 56.1811 135.338 64.2018 102.11 62.3146Z\" stroke=\"currentColor\" stroke-width=\"15\"/><path d=\"M90.8467 62.7863C90.2285 34.5178 66.0667 25.0419 31.7127 33.063C28.8904 65.1461 68.8826 62.7863 90.8467 62.7863Z\" stroke=\"currentColor\" stroke-width=\"15\"/><path d=\"M100.421 58.5402C115.627 39.6677 127.447 13.7181 85.2149 9C82.3926 41.0832 83.5258 35.4214 100.421 58.5402Z\" stroke=\"currentColor\" stroke-width=\"15\"/><rect x=\"39.0341\" y=\"98.644\" width=\"19.1481\" height=\"30.1959\" rx=\"9.57407\" fill=\"currentColor\"/><rect x=\"90.8467\" y=\"92.0388\" width=\"19.1481\" height=\"30.1959\" rx=\"9.57407\" fill=\"currentColor\"/><rect x=\"140.407\" y=\"98.644\" width=\"19.1481\" height=\"30.1959\" rx=\"9.57407\" fill=\"currentColor\"/><rect x=\"116.753\" y=\"139.22\" width=\"19.1481\" height=\"30.1959\" rx=\"9.57407\" fill=\"currentColor\"/><rect x=\"64.9404\" y=\"139.22\" width=\"19.1481\" height=\"30.1959\" rx=\"9.57407\" fill=\"currentColor\"/><rect x=\"93.0994\" y=\"176.021\" width=\"19.1481\" height=\"30.1959\" rx=\"9.57407\" fill=\"currentColor\"/></svg>\n            </div>\n            <div class=\"menu__text\">" + Lampa.Lang.translate('lampac_sisiname') + "</div>\n        </li>");
 
-      if (Defined.use_api == 'pwa') {
-        var pw = $('<div>p</div>');
+      if (true) {
+        var pw = $('<div>z</div>');
         pw.css({
           position: 'absolute',
           right: '-0.3em',
@@ -1239,7 +1239,7 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
             // }]
             var items = [];
 			
-            if (true && (Defined.use_api !== 'pwa' || Lampa.Platform.is('android'))) {
+            if (false && (Defined.use_api !== 'pwa' || Lampa.Platform.is('android'))) {
               items.push({
                 title: 'Все'
               });
@@ -1324,10 +1324,10 @@ window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection)
     }
   }
 
-  if (!window['plugin_sisi_' + Defined.use_api + '_ready']) {
+  if (!window['plugin_z01sisi_' + Defined.use_api + '_ready']) {
     startPlugin();
     /*
-    if(Defined.use_api == 'pwa'){
+    if(true){
         let s = document.createElement('script')
             s.onload = function(){
                 Blazor.start({
