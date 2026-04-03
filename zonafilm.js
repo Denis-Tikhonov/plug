@@ -1938,7 +1938,6 @@ function _toPrimitive(e, t) {
   // ============================================================
   window.AdultJS_Debugger = (function () {
 
-    var TAG = "[AdultJS-DEBUG]";
     var TIMEOUT_MS = 8000;
 
     // Список всех источников для проверки:
@@ -1959,10 +1958,9 @@ function _toPrimitive(e, t) {
       return fixed.concat(nexthub);
     }
 
-    // Показать уведомление на TV через Lampa.Noty
+    // Показать уведомление на TV через Lampa.Noty (только Noty, без console)
     function notify(msg) {
       try { Lampa.Noty.show(msg); } catch(e) {}
-      console.log(TAG, msg);
     }
 
 
@@ -2052,19 +2050,26 @@ function _toPrimitive(e, t) {
     // Гарантирует что каждое Lampa.Noty успевает отобразиться
     // и не перекрывается следующим мгновенно.
     // --------------------------------------------------------
-    var NOTIFY_PAUSE_MS = 3000;
+    // Пауза между сообщениями: 3 сек
+    // Пауза после последнего (чтобы успеть прочитать): 5 сек
+    // Lampa.Noty не имеет встроенного параметра времени показа,
+    // поэтому последнее сообщение висит пока пользователь не
+    // нажмёт кнопку или пока Lampa сама не скроет Noty.
+    // Задержка 5 сек гарантирует что следующих вызовов нет.
+    var NOTIFY_PAUSE_MS  = 3000;
+    var NOTIFY_LAST_MS   = 5000;
 
     function notifyQueue(messages) {
       if (!messages || messages.length === 0) return;
       var i = 0;
       function showNext() {
         if (i >= messages.length) return;
-        var item = messages[i]; i++;
-        if (item.type === "error")     console.error(TAG, item.text);
-        else if (item.type === "warn") console.warn(TAG, item.text);
-        else                           console.log(TAG, item.text);
+        var item = messages[i];
+        var isLast = (i === messages.length - 1);
+        i++;
         try { Lampa.Noty.show(item.text); } catch(e) {}
-        setTimeout(showNext, NOTIFY_PAUSE_MS);
+        // После последнего — пауза 5 сек, между остальными — 3 сек
+        setTimeout(showNext, isLast ? NOTIFY_LAST_MS : NOTIFY_PAUSE_MS);
       }
       showNext();
     }
@@ -2084,43 +2089,48 @@ function _toPrimitive(e, t) {
           var failed = results.filter(function(r) { return !r.ok; });
           var warned = results.filter(function(r) { return r.ok && r.cards >= 0 && r.cards < 3; });
 
-          // Успешные — только в консоль, не засоряем TV
-          ok.forEach(function(r) {
-            console.log(TAG, "OK [" + r.name + "] карточек: " + r.cards);
-          });
-
-          // Сообщение 1: итоговая сводка (всегда одно)
+          // --------------------------------------------------
+          // Сообщение A: итоговая сводка одной строкой
+          // --------------------------------------------------
           var summary = "✅ Готово: " + ok.length + " OK"
-            + (failed.length ? " | ❌ " + failed.length + " ошибок"        : "")
+            + (failed.length ? " | ❌ " + failed.length + " ошибок"         : "")
             + (warned.length ? " | ⚠️ "  + warned.length + " предупреждений" : "")
             + " (всего: " + total + ")";
 
-          // Очередь: сводка → каждая ошибка → каждое предупреждение
-          // Пауза NOTIFY_PAUSE_MS (3 сек) между каждым сообщением
-          var queue = [{ type: "info", text: summary }];
-
+          // --------------------------------------------------
+          // Сообщение B: все ошибки + предупреждения одним блоком
+          // Формируется только если есть что показывать
+          // --------------------------------------------------
+          var detailLines = [];
           failed.forEach(function(r) {
-            queue.push({ type: "error", text: "❌ " + r.name + ": " + r.error });
+            detailLines.push("❌ " + r.name + ": " + r.error);
           });
           warned.forEach(function(r) {
-            queue.push({ type: "warn",
-              text: "⚠️ " + r.name + ": мало карточек (" + r.cards + ") — возможна проблема парсинга" });
+            detailLines.push("⚠️ " + r.name + ": мало карточек (" + r.cards + ") — проблема парсинга");
           });
+
+          // --------------------------------------------------
+          // Очередь: [A] сводка → пауза 3 сек → [B] детали
+          // Lampa.Noty.show не имеет встроенного timeout API,
+          // поэтому используем notifyQueue с NOTIFY_PAUSE_MS.
+          // Последнее сообщение висит 5 сек (NOTIFY_LAST_MS)
+          // за счёт того что после него нет следующего вызова.
+          // --------------------------------------------------
+          var queue = [{ text: summary }];
+          if (detailLines.length > 0) {
+            queue.push({ text: detailLines.join("\n") });
+          }
 
           notifyQueue(queue);
           return;
         }
 
-        // Прогресс только в console.log — не засоряем TV во время проверки
+        // Во время проверки TV не засоряем — тихая обработка
         var src = sources[idx];
         idx++;
 
         checkSource(src).then(function(result) {
           results.push(result);
-          console.log(TAG, "⏳ [" + idx + "/" + total + "] " + result.name
-            + (result.ok
-              ? " OK (" + result.cards + " карточек)"
-              : " ОШИБКА: " + result.error));
           checkNext();
         });
       }
