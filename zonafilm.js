@@ -18,7 +18,7 @@
 "use strict";
 
 // ============================================================
-// [SECTION: POLYFILLS] — вспомогательные функции (не изменять)
+// [BLOCK:01:START] POLYFILLS — вспомогательные функции Babel (не изменять)
 // ============================================================
 function _toConsumableArray(e) {
   return _arrayWithoutHoles(e) || _iterableToArray(e) || _unsupportedIterableToArray(e) || _nonIterableSpread()
@@ -250,7 +250,9 @@ function _toPrimitive(e, t) {
     var e = "AdultJS";
 
     // --------------------------------------------------------
-    // [SECTION: LANG] v1.1.0 — изменено название ru -> "Adult JS"
+    // [BLOCK:01:END]
+
+    // [BLOCK:02:START] LANG — локализация названия плагина
     // --------------------------------------------------------
     Lampa.Lang.add({
       lampac_adultName: {
@@ -611,7 +613,9 @@ function _toPrimitive(e, t) {
           }(),
 
           // --------------------------------------------------------
-          // [SECTION: SETTINGS REGISTRATION] v1.0.0
+          // [BLOCK:02:END]
+
+          // [BLOCK:03:START] SETTINGS — регистрация параметров в меню Lampa
           // --------------------------------------------------------
           window.sisi_add_param_ready || (window.sisi_add_param_ready = !0,
             Lampa.SettingsApi.addComponent({
@@ -652,7 +656,9 @@ function _toPrimitive(e, t) {
   }();
 
   // ============================================================
-  // [SECTION: HTTP HELPER CLASS] v1.0.0
+  // [BLOCK:03:END]
+
+  // [BLOCK:04:START] HTTP_HELPER — класс fetch/native запросов
   // ============================================================
   var l = (e = function () {
     function e() { _classCallCheck(this, e) }
@@ -711,7 +717,9 @@ function _toPrimitive(e, t) {
     e),
 
     // ============================================================
-    // [SECTION: REGEX HELPER] v1.0.0
+    // [BLOCK:04:END]
+
+    // [BLOCK:05:START] HELPERS — RegexHelper и модели данных (VideoItem, MenuItem)
     // ============================================================
     c = function () {
       return _createClass(function e() { _classCallCheck(this, e) }, null, [{
@@ -738,7 +746,9 @@ function _toPrimitive(e, t) {
     }),
 
     // ============================================================
-    // [SECTION: SOURCE - BongaCams] v1.0.0
+    // [BLOCK:05:END]
+
+    // [BLOCK:06:START] SOURCE_BONGACAMS — парсер BongaCams (live-камеры)
     // ============================================================
     d = (t = function () {
       function e() { _classCallCheck(this, e) }
@@ -807,7 +817,9 @@ function _toPrimitive(e, t) {
     }),
 
     // ============================================================
-    // [SECTION: SOURCE - XVideos] v1.0.0
+    // [BLOCK:06:END]
+
+    // [BLOCK:07:START] SOURCE_XVIDEOS — парсер XVideos (xv-ru.com)
     // ============================================================
     g = (a = function () {
       function e() { _classCallCheck(this, e) }
@@ -954,7 +966,9 @@ function _toPrimitive(e, t) {
     }(), a.host = "https://www.xv-ru.com", a),
 
     // ============================================================
-    // [SECTION: SOURCE - XNXX] v1.0.0
+    // [BLOCK:07:END]
+
+    // [BLOCK:08:START] SOURCE_XNXX — парсер XNXX (xnxx-ru.com)
     // ============================================================
     y = (n = function () {
       function e() { _classCallCheck(this, e) }
@@ -1038,7 +1052,9 @@ function _toPrimitive(e, t) {
     }(), n.host = "https://www.xnxx-ru.com", n),
 
     // ============================================================
-    // [SECTION: SOURCE - SpankBang] v1.0.0
+    // [BLOCK:08:END]
+
+    // [BLOCK:09:START] SOURCE_SPANKBANG — парсер SpankBang
     // ============================================================
     v = (r = function () {
       function e() { _classCallCheck(this, e) }
@@ -1120,7 +1136,9 @@ function _toPrimitive(e, t) {
     }(), r.host = "https://ru.spankbang.com", r),
 
     // ============================================================
-    // [SECTION: SOURCE - Chaturbate] v1.0.0
+    // [BLOCK:09:END]
+
+    // [BLOCK:10:START] SOURCE_CHATURBATE — парсер Chaturbate (live-камеры)
     // ============================================================
     b = (i = function () {
       function e() { _classCallCheck(this, e) }
@@ -1213,7 +1231,9 @@ function _toPrimitive(e, t) {
     }(), i.host = "https://chaturbate.com", i),
 
     // ============================================================
-    // [SECTION: SOURCE - EPorner] v1.0.0
+    // [BLOCK:10:END]
+
+    // [BLOCK:11:START] SOURCE_EPORNER — парсер EPorner
     // ============================================================
     f = (o = function () {
       function e() { _classCallCheck(this, e) }
@@ -1356,7 +1376,9 @@ function _toPrimitive(e, t) {
     }(), o.host = "https://www.eporner.com", o);
 
   // ============================================================
-  // [SECTION: NEXTHUB HELPERS] v1.0.0
+  // [BLOCK:11:END]
+
+  // [BLOCK:12:START] NEXTHUB_ENGINE — вспомогательные функции и движок NextHub
   // ============================================================
   function k(e, t) {
     return e.replace(/\{([^}]+)\}/g, function (e, a) {
@@ -1678,7 +1700,9 @@ function _toPrimitive(e, t) {
   }(), s.host = "nexthub://", s),
 
   // ============================================================
-  // [SECTION: NEXTHUB CONFIGS ARRAY - P] v1.0.0 → v1.2.0
+  // [BLOCK:12:END]
+
+  // [BLOCK:13:START] NEXTHUB_CONFIGS — массив P конфигов источников NextHub
   // Добавление нового источника: вставить объект-конфиг перед
   // закрывающей скобкой ], следуя шаблону в README.md
   // ============================================================
@@ -1843,7 +1867,9 @@ function _toPrimitive(e, t) {
   ]; // конец массива P
 
   // ============================================================
-  // [SECTION: INSTANCE CREATION] v1.0.0
+  // [BLOCK:13:END]
+
+  // [BLOCK:14:START] ROUTING — создание экземпляров и window.AdultJS
   // ============================================================
   var z = new d, L = new g, j = new y, M = new v, T = new b, A = new f, I = new S(P);
 
@@ -1899,18 +1925,65 @@ function _toPrimitive(e, t) {
       }))).apply(this, arguments)
     }
 
+    // ----------------------------------------------------------
+    // [STATUS_STORE] v1.3.0 — хранилище статусов источников
+    // Ключ: имя источника (строчными буквами)
+    // Значение: "green" | "yellow" | "red"
+    // Изначально все источники — "green"
+    // Обновляется модулем AdultJS_Debugger после runAll()
+    // ----------------------------------------------------------
+    window.AdultJS_Status = window.AdultJS_Status || (function () {
+      var _store = {};
+
+      // Значок для каждого статуса
+      var _dot = {
+        green:  "🟢",
+        yellow: "🟡",
+        red:    "🔴"
+      };
+
+      return {
+        // Установить статус источника
+        set: function (name, status) {
+          _store[name.toLowerCase()] = status;
+        },
+        // Получить значок для отображения рядом с названием
+        dot: function (name) {
+          var s = _store[name.toLowerCase()];
+          // Если статус не установлен — считаем зелёным (не проверялся)
+          return _dot[s] || _dot.green;
+        },
+        // Получить текущий статус (green/yellow/red)
+        get: function (name) {
+          return _store[name.toLowerCase()] || "green";
+        },
+        // Сбросить все статусы (например, перед новой проверкой)
+        reset: function () {
+          _store = {};
+        }
+      };
+    })();
+
     window.AdultJS = {
       Menu: function () {
         var e = [
-          { title: "xvideos.com", playlist_url: g.host },
-          { title: "spankbang.com", playlist_url: v.host },
-          { title: "eporner.com", playlist_url: f.host },
-          { title: "xnxx.com", playlist_url: y.host },
-          { title: "bongacams.com", playlist_url: d.host },
-          { title: "chaturbate.com", playlist_url: b.host }
+          // --------------------------------------------------
+          // [STATUS_IN_MENU] v1.3.0 — значок статуса в заголовке
+          // Формат: "🟢 xvideos.com"
+          // --------------------------------------------------
+          { title: window.AdultJS_Status.dot("xvideos.com")    + " xvideos.com",    playlist_url: g.host },
+          { title: window.AdultJS_Status.dot("spankbang.com")  + " spankbang.com",  playlist_url: v.host },
+          { title: window.AdultJS_Status.dot("eporner.com")    + " eporner.com",    playlist_url: f.host },
+          { title: window.AdultJS_Status.dot("xnxx.com")       + " xnxx.com",       playlist_url: y.host },
+          { title: window.AdultJS_Status.dot("bongacams.com")  + " bongacams.com",  playlist_url: d.host },
+          { title: window.AdultJS_Status.dot("chaturbate.com") + " chaturbate.com", playlist_url: b.host }
         ];
         P.filter(function (e) { return e.enable }).forEach(function (t) {
-          e.push({ title: t.displayname.toLowerCase(), playlist_url: "nexthub://".concat(t.displayname, "?mode=list") })
+          var name = t.displayname.toLowerCase();
+          e.push({
+            title:        window.AdultJS_Status.dot(name) + " " + name,
+            playlist_url: "nexthub://".concat(t.displayname, "?mode=list")
+          });
         });
         // --------------------------------------------------------
         // [DEBUG_MENU_ITEM] v1.2.0-debug — кнопка диагностики
@@ -1929,12 +2002,15 @@ function _toPrimitive(e, t) {
   }();
 
   // ============================================================
-  // [DEBUG_MODULE_START] AdultJS_Debugger v1.2.0-debug
+// [BLOCK:14:END]
+
+  // [BLOCK:15:START] DEBUG_MODULE — модуль диагностики AdultJS_Debugger
   // Для отката к версии без отладки:
   //   1) Удалить блок [DEBUG_MENU_ITEM]    — e.push в window.AdultJS.Menu
   //   2) Удалить блок [DEBUG_MENU_HANDLER] — if (t.debug_action) в onSelect
   //   3) Удалить весь блок от этой строки до [DEBUG_MODULE_END]
-  //   4) Сохранить файл как AdultJS.txt (без -debug суффикса)
+  //   4) Удалить [STATUS_STORE] из block_14 (window.AdultJS_Status)
+  //   5) Сохранить файл как AdultJS.txt (без -debug суффикса)
   // ============================================================
   window.AdultJS_Debugger = (function () {
 
@@ -1963,7 +2039,6 @@ function _toPrimitive(e, t) {
       try { Lampa.Noty.show(msg); } catch(e) {}
     }
 
-
     // Проверка доступности одного источника (GET первой страницы)
     // Возвращает Promise<{name, ok, cards, error}>
     function checkSource(sourceObj) {
@@ -1973,7 +2048,6 @@ function _toPrimitive(e, t) {
       // Для nexthub-источников строим реальный URL первой страницы
       var testUrl = url;
       if (url.startsWith("nexthub://")) {
-        // Ищем конфиг в P по displayname
         var cfg = P.find(function(c) {
           return ("nexthub://" + c.displayname) === url
               || c.displayname.toLowerCase() === name.toLowerCase();
@@ -1989,7 +2063,7 @@ function _toPrimitive(e, t) {
             testUrl = cfg.host.replace(/\/?$/, "/") + testUrl.replace(/^\//, "");
           }
         } else {
-          testUrl = ""; // не можем определить
+          testUrl = "";
         }
       }
 
@@ -2015,8 +2089,6 @@ function _toPrimitive(e, t) {
             return;
           }
           return resp.text().then(function(html) {
-            // Считаем количество карточек по признаку наличия тегов с ссылками на видео
-            // Простая эвристика: ищем href="/video" или data-src= в тексте
             var cardCount = 0;
             try {
               var cfg2 = P.find(function(c) { return c.displayname.toLowerCase() === name.toLowerCase(); });
@@ -2028,7 +2100,6 @@ function _toPrimitive(e, t) {
                 );
                 cardCount = nodes.snapshotLength;
               } else {
-                // fallback: считаем вхождения data-src=
                 var matches = html.match(/data-src=/g);
                 cardCount = matches ? matches.length : 0;
               }
@@ -2046,40 +2117,60 @@ function _toPrimitive(e, t) {
     }
 
     // --------------------------------------------------------
-    // Очередь уведомлений с паузой NOTIFY_PAUSE_MS между ними.
-    // Гарантирует что каждое Lampa.Noty успевает отобразиться
-    // и не перекрывается следующим мгновенно.
+    // Очередь уведомлений: пауза 3 сек между сообщениями,
+    // пауза 5 сек после последнего (для чтения).
     // --------------------------------------------------------
-    // Пауза между сообщениями: 3 сек
-    // Пауза после последнего (чтобы успеть прочитать): 5 сек
-    // Lampa.Noty не имеет встроенного параметра времени показа,
-    // поэтому последнее сообщение висит пока пользователь не
-    // нажмёт кнопку или пока Lampa сама не скроет Noty.
-    // Задержка 5 сек гарантирует что следующих вызовов нет.
-    var NOTIFY_PAUSE_MS  = 3000;
-    var NOTIFY_LAST_MS   = 5000;
+    var NOTIFY_PAUSE_MS = 3000;
+    var NOTIFY_LAST_MS  = 5000;
 
     function notifyQueue(messages) {
       if (!messages || messages.length === 0) return;
       var i = 0;
       function showNext() {
         if (i >= messages.length) return;
-        var item = messages[i];
+        var item   = messages[i];
         var isLast = (i === messages.length - 1);
         i++;
         try { Lampa.Noty.show(item.text); } catch(e) {}
-        // После последнего — пауза 5 сек, между остальными — 3 сек
         setTimeout(showNext, isLast ? NOTIFY_LAST_MS : NOTIFY_PAUSE_MS);
       }
       showNext();
     }
 
+    // ----------------------------------------------------------
+    // [STATUS_UPDATE] v1.3.0 — обновление статусов в хранилище
+    // и перерисовка меню после завершения диагностики.
+    //
+    // Логика определения цвета:
+    //   🔴 red    — сайт недоступен (HTTP-ошибка, таймаут, сетевая ошибка)
+    //   🟡 yellow — сайт доступен, но карточек < 3 (возможна проблема парсинга)
+    //   🟢 green  — сайт доступен, карточек >= 3
+    // ----------------------------------------------------------
+    function applyStatuses(results) {
+      if (!window.AdultJS_Status) return;
+
+      results.forEach(function(r) {
+        var status;
+        if (!r.ok) {
+          status = "red";
+        } else if (r.cards >= 0 && r.cards < 3) {
+          status = "yellow";
+        } else {
+          status = "green";
+        }
+        window.AdultJS_Status.set(r.name, status);
+      });
+    }
+
     // Запуск диагностики всех источников последовательно
     function runAll() {
       var sources = getAllSources();
-      var total = sources.length;
-      var idx = 0;
+      var total   = sources.length;
+      var idx     = 0;
       var results = [];
+
+      // Сбрасываем все статусы перед новой проверкой
+      if (window.AdultJS_Status) { window.AdultJS_Status.reset(); }
 
       notify("🔍 Диагностика AdultJS: проверяем " + total + " источников...");
 
@@ -2089,43 +2180,47 @@ function _toPrimitive(e, t) {
           var failed = results.filter(function(r) { return !r.ok; });
           var warned = results.filter(function(r) { return r.ok && r.cards >= 0 && r.cards < 3; });
 
-          // --------------------------------------------------
-          // Сообщение A: итоговая сводка одной строкой
-          // --------------------------------------------------
+          // ------------------------------------------------
+          // Обновляем значки статуса во хранилище
+          // ------------------------------------------------
+          applyStatuses(results);
+
+          // ------------------------------------------------
+          // Сообщение A: итоговая сводка
+          // ------------------------------------------------
           var summary = "✅ Готово: " + ok.length + " OK"
             + (failed.length ? " | ❌ " + failed.length + " ошибок"         : "")
             + (warned.length ? " | ⚠️ "  + warned.length + " предупреждений" : "")
             + " (всего: " + total + ")";
 
-          // --------------------------------------------------
-          // Сообщение B: все ошибки + предупреждения одним блоком
-          // Формируется только если есть что показывать
-          // --------------------------------------------------
+          // ------------------------------------------------
+          // Сообщение B: детали ошибок и предупреждений
+          // ------------------------------------------------
           var detailLines = [];
           failed.forEach(function(r) {
-            detailLines.push("❌ " + r.name + ": " + r.error);
+            detailLines.push("🔴 " + r.name + ": " + r.error);
           });
           warned.forEach(function(r) {
-            detailLines.push("⚠️ " + r.name + ": мало карточек (" + r.cards + ") — проблема парсинга");
+            detailLines.push("🟡 " + r.name + ": мало карточек (" + r.cards + ") — проблема парсинга");
           });
 
-          // --------------------------------------------------
-          // Очередь: [A] сводка → пауза 3 сек → [B] детали
-          // Lampa.Noty.show не имеет встроенного timeout API,
-          // поэтому используем notifyQueue с NOTIFY_PAUSE_MS.
-          // Последнее сообщение висит 5 сек (NOTIFY_LAST_MS)
-          // за счёт того что после него нет следующего вызова.
-          // --------------------------------------------------
           var queue = [{ text: summary }];
           if (detailLines.length > 0) {
             queue.push({ text: detailLines.join("\n") });
           }
 
+          // ------------------------------------------------
+          // Подсказка: объясняем значки пользователю
+          // ------------------------------------------------
+          queue.push({
+            text: "🟢 — ОК  🟡 — мало карточек  🔴 — недоступен\nЗначки обновлены в меню «Сайты»"
+          });
+
           notifyQueue(queue);
           return;
         }
 
-        // Во время проверки TV не засоряем — тихая обработка
+        // Тихая обработка во время проверки — TV не засоряем
         var src = sources[idx];
         idx++;
 
@@ -2138,17 +2233,17 @@ function _toPrimitive(e, t) {
       checkNext();
     }
 
-
     // Публичный API модуля отладки
     return {
-      runAll: runAll,
-      checkSource: checkSource,
+      runAll:       runAll,
+      checkSource:  checkSource,
       getAllSources: getAllSources
     };
 
   })();
   // ============================================================
   // [DEBUG_MODULE_END] AdultJS_Debugger v1.2.0-debug
+// [BLOCK:15:END]
   // ============================================================
 
 }();
