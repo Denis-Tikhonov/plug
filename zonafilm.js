@@ -1216,6 +1216,73 @@ function _toPrimitive(e, t) {
         "function" == typeof window.Lampa.Platform.is &&
         window.Lampa.Platform.is("android")),
       e),
+
+/* ==========================================================================
+ * MIRROR FALLBACK — GetWithMirrorFallback(url, mirrors, headers, charset)
+ * Пробует зеркала по порядку; при успехе кэширует рабочее зеркало.
+ * Используется только парсером xnxx (класс y).
+ * Совместимость: Promise (Android 5.0+), regex (всегда).
+ * ========================================================================== */
+    l.GetWithMirrorFallback = (function () {
+      // Память последнего рабочего зеркала (в течение сессии)
+      var _lastWorkingMirror = null;
+
+      /**
+       * _swapHost(url, newHost) — заменяет hostname в URL на newHost.
+       * Использует regex вместо new URL() для совместимости со старыми WebView.
+       */
+      function _swapHost(url, newHost) {
+        var m = url.match(/^(https?:\/\/)([^\/]+)(\/[^#?]*)?(#[^?]*)?(\?.*)?$/);
+        if (!m) return url;
+        var cleanHost = newHost.replace(/^https?:\/\//, "");
+        var proto = newHost.indexOf("https") === 0 ? "https://" : "http://";
+        return proto + cleanHost + (m[3] || "") + (m[4] || "") + (m[5] || "");
+      }
+
+      /**
+       * _tryMirror — пробует один запрос к зеркалу, возвращает Promise.
+       */
+      function _tryMirror(url, mirror, headers, charset) {
+        var mirrorUrl = _swapHost(url, mirror);
+        return l.Get(mirrorUrl, headers, charset).then(function (result) {
+          _lastWorkingMirror = mirror;
+          console.log("[Mirror] OK: " + mirror);
+          return result;
+        });
+      }
+
+      // Основная функция — возвращает Promise (без async/await!)
+      return function (url, mirrors, headers, charset) {
+        if (!mirrors || mirrors.length === 0) {
+          return l.Get(url, headers, charset);
+        }
+
+        // Если знаем рабочее зеркало — пробуем его первым
+        var orderedMirrors = mirrors.slice();
+        if (_lastWorkingMirror) {
+          orderedMirrors = [_lastWorkingMirror].concat(
+            mirrors.filter(function (m) { return m !== _lastWorkingMirror; })
+          );
+        }
+
+        // Цепочка Promise: пробуем зеркала по очереди
+        var idx = 0;
+        function tryNext(reason) {
+          if (idx >= orderedMirrors.length) {
+            // Все зеркала недоступны
+            throw new Error("[Mirror] All mirrors failed for xnxx");
+          }
+          var mirror = orderedMirrors[idx++];
+          console.log("[Mirror] Trying: " + mirror);
+          return _tryMirror(url, mirror, headers, charset).catch(function (err) {
+            console.log("[Mirror] Failed: " + mirror + " — " + (err.message || err));
+            return tryNext(err);
+          });
+        }
+
+        return tryNext();
+      };
+    })();
 /* ==========================================================================
  * УТИЛИТЫ: Extract (класс c), VideoItem (класс u), PlaylistItem (класс p)
  * ========================================================================== */
@@ -1755,7 +1822,7 @@ function _toPrimitive(e, t) {
                               t.n = 2;
                               break;
                             }
-                            return ((t.n = 1), l.Get(a));
+                            return ((t.n = 1), l.GetWithMirrorFallback(a, e.mirrors));
                           case 1:
                             return (
                               (n = t.v),
@@ -1777,7 +1844,7 @@ function _toPrimitive(e, t) {
                               )),
                               (s = this.buildUrl(e.host, i, o)),
                               (t.n = 3),
-                              l.Get(s)
+                              l.GetWithMirrorFallback(s, e.mirrors)
                             );
                           case 3:
                             return (
@@ -1916,6 +1983,8 @@ function _toPrimitive(e, t) {
         var t;
       })()),
       (n.host = "https://www.xnxx-ru.com"),
+
+      (n.mirrors = ["https://www.xnxx-ru.com", "https://www.xnxx.com", "https://xnxx.com"]),
       n),
 /* ==========================================================================
  * ПАРСЕР SpankBang (класс v) — https://ru.spankbang.com
@@ -6351,7 +6420,7 @@ function _toPrimitive(e, t) {
                   }
                   return ((e.n = 3), L.Invoke(t));
                 case 4:
-                  if (!t.startsWith(y.host)) {
+                  if (!["https://www.xnxx-ru.com", "https://www.xnxx.com", "https://xnxx.com"].some(function(m) { return t.startsWith(m); })) {
                     e.n = 6;
                     break;
                   }
