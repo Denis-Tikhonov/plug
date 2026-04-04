@@ -1,102 +1,3 @@
-
-/* ================= MIRROR SYSTEM ================= */
-
-const MIRRORS = {
-  xnxx: [
-    "https://www.xnxx.com",
-    "https://xnxx.tv",
-    "https://www.xnxx-ru.com"
-  ],
-  xvideos: [
-    "https://www.xvideos.com",
-    "https://xvideos.red"
-  ],
-  spankbang: [
-    "https://spankbang.com",
-    "https://spankbang.party"
-  ],
-  eporner: [
-    "https://www.eporner.com",
-    "https://eporner.video"
-  ],
-  youjizz: [
-    "https://www.youjizz.com",
-    "https://youjizz.video"
-  ],
-  vporn: [
-    "https://www.vporn.com",
-    "https://vporn.xxx"
-  ]
-};
-
-l.GetWithMirrorFallback = async function(url, headers, charset, cfg){
-
-  if(!cfg || !cfg.mirrors){
-    return l.GetWithMirrorFallback(url, headers, charset, null, null, {
-        host: MIRRORS.xnxx[0],
-        mirrors: MIRRORS.xnxx
-    });
-  }
-
-  const errors = [];
-
-  for(const mirror of cfg.mirrors){
-
-    try{
-
-      let mirrorUrl = url;
-
-      if(cfg.host && mirror !== cfg.host){
-        mirrorUrl = url.replace(cfg.host, mirror);
-      }
-
-      const result = await l.GetWithMirrorFallback(mirrorUrl, headers, charset, null, null, {
-        host: MIRRORS.xnxx[0],
-        mirrors: MIRRORS.xnxx
-    });
-      return result;
-
-    }catch(e){
-      errors.push(mirror);
-    }
-
-  }
-
-  throw new Error("All mirrors failed: " + errors.join(","));
-
-};
-
-
-
-TRAHKINO CODE (ANNOTATED FOR PATCHING)
-
-PARSER BLOCKS INCLUDED
-- XNXX
-- XVIDEOS
-- SPANKBANG
-- EPORNER
-- YOUJIZZ
-- VPORN
-
-Markers are inserted so patch scripts can detect parser sections.
-
-
-
-/* ================= PARSER BLOCK: XNXX ================= */
-
-/* ================= PARSER BLOCK: XVIDEOS ================= */
-
-/* ================= PARSER BLOCK: SPANKBANG ================= */
-
-/* ================= PARSER BLOCK: EPORNER ================= */
-
-/* ================= PARSER BLOCK: YOUJIZZ ================= */
-
-/* ================= PARSER BLOCK: VPORN ================= */
-
-
-/* ================= ORIGINAL SOURCE ================= */
-
 /** ============================================================================
  * ПЛАГИН ADULTJS — ТрахКино и агрегатор adult-сайтов для медиацентра Lampa
  * =============================================================================
@@ -1390,11 +1291,8 @@ function _toPrimitive(e, t) {
                           case 0:
                             return (
                               (e.n = 1),
-                              l.GetWithMirrorFallback(
-                                t.replace("?pg=1", "", null, null, {
-        host: MIRRORS.xnxx[0],
-        mirrors: MIRRORS.xnxx
-    }).replace("pg=", "page="),
+                              l.Get(
+                                t.replace("?pg=1", "").replace("pg=", "page="),
                               )
                             );
                           case 1:
@@ -1531,10 +1429,7 @@ function _toPrimitive(e, t) {
                               t.n = 2;
                               break;
                             }
-                            return ((t.n = 1), l.GetWithMirrorFallback(a, null, null, {
-        host: MIRRORS.xnxx[0],
-        mirrors: MIRRORS.xnxx
-    }));
+                            return ((t.n = 1), l.Get(a));
                           case 1:
                             return (
                               (n = t.v),
@@ -1558,10 +1453,7 @@ function _toPrimitive(e, t) {
                               )),
                               (u = this.buildUrl(e.host, i, o, s, c)),
                               (t.n = 3),
-                              l.GetWithMirrorFallback(u, null, null, {
-        host: MIRRORS.xnxx[0],
-        mirrors: MIRRORS.xnxx
-    })
+                              l.Get(u)
                             );
                           case 3:
                             return (
@@ -1863,10 +1755,7 @@ function _toPrimitive(e, t) {
                               t.n = 2;
                               break;
                             }
-                            return ((t.n = 1), l.GetWithMirrorFallback(a, null, null, {
-        host: MIRRORS.xnxx[0],
-        mirrors: MIRRORS.xnxx
-    }));
+                            return ((t.n = 1), l.Get(a));
                           case 1:
                             return (
                               (n = t.v),
@@ -1888,10 +1777,7 @@ function _toPrimitive(e, t) {
                               )),
                               (s = this.buildUrl(e.host, i, o)),
                               (t.n = 3),
-                              l.GetWithMirrorFallback(s, null, null, {
-        host: MIRRORS.xnxx[0],
-        mirrors: MIRRORS.xnxx
-    })
+                              l.Get(s)
                             );
                           case 3:
                             return (
@@ -2056,10 +1942,7 @@ function _toPrimitive(e, t) {
                               t.n = 2;
                               break;
                             }
-                            return ((t.n = 1), l.GetWithMirrorFallback(a, null, null, {
-        host: MIRRORS.xnxx[0],
-        mirrors: MIRRORS.xnxx
-    }));
+                            return ((t.n = 1), l.Get(a));
                           case 1:
                             return (
                               (n = t.v),
@@ -2082,10 +1965,7 @@ function _toPrimitive(e, t) {
                               )),
                               (c = this.buildUrl(e.host, i, o, s)),
                               (t.n = 3),
-                              l.GetWithMirrorFallback(c, null, null, {
-        host: MIRRORS.xnxx[0],
-        mirrors: MIRRORS.xnxx
-    })
+                              l.Get(c)
                             );
                           case 3:
                             return (
@@ -2242,10 +2122,7 @@ function _toPrimitive(e, t) {
                               )),
                               (o = this.buildUrl(e.host, r, i)),
                               (t.n = 3),
-                              l.GetWithMirrorFallback(o, null, null, {
-        host: MIRRORS.xnxx[0],
-        mirrors: MIRRORS.xnxx
-    })
+                              l.Get(o)
                             );
                           case 3:
                             return (
@@ -2360,10 +2237,7 @@ function _toPrimitive(e, t) {
                         case 1:
                           return (
                             (t.n = 2),
-                            l.GetWithMirrorFallback("".concat(e.host, "/", null, null, {
-        host: MIRRORS.xnxx[0],
-        mirrors: MIRRORS.xnxx
-    }).concat(a, "/"))
+                            l.Get("".concat(e.host, "/").concat(a, "/"))
                           );
                         case 2:
                           if (
@@ -2450,10 +2324,7 @@ function _toPrimitive(e, t) {
                               )),
                               (c = this.buildUrl(e.host, r, i, o, s)),
                               (t.n = 3),
-                              l.GetWithMirrorFallback(c, null, null, {
-        host: MIRRORS.xnxx[0],
-        mirrors: MIRRORS.xnxx
-    })
+                              l.Get(c)
                             );
                           case 3:
                             return (
@@ -2728,10 +2599,7 @@ function _toPrimitive(e, t) {
                             }
                             return e.a(2, new m({}, []));
                           case 1:
-                            return ((e.n = 2), l.GetWithMirrorFallback(a, null, null, {
-        host: MIRRORS.xnxx[0],
-        mirrors: MIRRORS.xnxx
-    }));
+                            return ((e.n = 2), l.Get(a));
                           case 2:
                             if ((n = e.v)) {
                               e.n = 3;
@@ -2760,10 +2628,7 @@ function _toPrimitive(e, t) {
                                 )
                                 .concat(Math.floor(Date.now() / 1e3))),
                               (e.n = 5),
-                              l.GetWithMirrorFallback(o, null, null, {
-        host: MIRRORS.xnxx[0],
-        mirrors: MIRRORS.xnxx
-    })
+                              l.Get(o)
                             );
                           case 5:
                             if ((s = e.v)) {
@@ -3293,10 +3158,7 @@ function _toPrimitive(e, t) {
                                 (p = u[1]),
                                 (d = p.startsWith("http") ? p : a.host + p),
                                 (e.n = 1),
-                                l.GetWithMirrorFallback(d, void 0, a.charset, null, null, {
-        host: MIRRORS.xnxx[0],
-        mirrors: MIRRORS.xnxx
-    })
+                                l.Get(d, void 0, a.charset)
                               );
                             case 1:
                               t = e.v;
@@ -3505,10 +3367,7 @@ function _toPrimitive(e, t) {
                                 (s = decodeURIComponent(o)),
                                 (c = s.replace("&related?pg=1", "")),
                                 (e.n = 3),
-                                l.GetWithMirrorFallback(c, void 0, r.charset, null, null, {
-        host: MIRRORS.xnxx[0],
-        mirrors: MIRRORS.xnxx
-    })
+                                l.Get(c, void 0, r.charset)
                               );
                             case 3:
                               return (
@@ -3542,10 +3401,7 @@ function _toPrimitive(e, t) {
                                 (m = Number(a.searchParams.get("pg") || "1")),
                                 (g = this.buildModelUrl(r, d, m)),
                                 (e.n = 7),
-                                l.GetWithMirrorFallback(g, void 0, r.charset, null, null, {
-        host: MIRRORS.xnxx[0],
-        mirrors: MIRRORS.xnxx
-    })
+                                l.Get(g, void 0, r.charset)
                               );
                             case 7:
                               return (
@@ -3570,10 +3426,7 @@ function _toPrimitive(e, t) {
                                 (k = Number(a.searchParams.get("pg") || "1")),
                                 (w = this.buildSearchUrl(r, f, k)),
                                 (e.n = 9),
-                                l.GetWithMirrorFallback(w, void 0, r.charset, null, null, {
-        host: MIRRORS.xnxx[0],
-        mirrors: MIRRORS.xnxx
-    })
+                                l.Get(w, void 0, r.charset)
                               );
                             case 9:
                               return (
@@ -3591,10 +3444,7 @@ function _toPrimitive(e, t) {
                                 (z = Number(a.searchParams.get("pg") || "1")),
                                 (L = this.buildListUrl(r, z, S, P)),
                                 (e.n = 11),
-                                l.GetWithMirrorFallback(L, void 0, r.charset, null, null, {
-        host: MIRRORS.xnxx[0],
-        mirrors: MIRRORS.xnxx
-    })
+                                l.Get(L, void 0, r.charset)
                               );
                             case 11:
                               return (
