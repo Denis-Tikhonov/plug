@@ -1925,18 +1925,65 @@ function _toPrimitive(e, t) {
       }))).apply(this, arguments)
     }
 
+    // ----------------------------------------------------------
+    // [STATUS_STORE] v1.3.0 — хранилище статусов источников
+    // Ключ: имя источника (строчными буквами)
+    // Значение: "green" | "yellow" | "red"
+    // Изначально все источники — "green"
+    // Обновляется модулем AdultJS_Debugger после runAll()
+    // ----------------------------------------------------------
+    window.AdultJS_Status = window.AdultJS_Status || (function () {
+      var _store = {};
+
+      // Значок для каждого статуса
+      var _dot = {
+        green:  "🟢",
+        yellow: "🟡",
+        red:    "🔴"
+      };
+
+      return {
+        // Установить статус источника
+        set: function (name, status) {
+          _store[name.toLowerCase()] = status;
+        },
+        // Получить значок для отображения рядом с названием
+        dot: function (name) {
+          var s = _store[name.toLowerCase()];
+          // Если статус не установлен — считаем зелёным (не проверялся)
+          return _dot[s] || _dot.green;
+        },
+        // Получить текущий статус (green/yellow/red)
+        get: function (name) {
+          return _store[name.toLowerCase()] || "green";
+        },
+        // Сбросить все статусы (например, перед новой проверкой)
+        reset: function () {
+          _store = {};
+        }
+      };
+    })();
+
     window.AdultJS = {
       Menu: function () {
         var e = [
-          { title: "xvideos.com", playlist_url: g.host },
-          { title: "spankbang.com", playlist_url: v.host },
-          { title: "eporner.com", playlist_url: f.host },
-          { title: "xnxx.com", playlist_url: y.host },
-          { title: "bongacams.com", playlist_url: d.host },
-          { title: "chaturbate.com", playlist_url: b.host }
+          // --------------------------------------------------
+          // [STATUS_IN_MENU] v1.3.0 — значок статуса в заголовке
+          // Формат: "🟢 xvideos.com"
+          // --------------------------------------------------
+          { title: window.AdultJS_Status.dot("xvideos.com")    + " xvideos.com",    playlist_url: g.host },
+          { title: window.AdultJS_Status.dot("spankbang.com")  + " spankbang.com",  playlist_url: v.host },
+          { title: window.AdultJS_Status.dot("eporner.com")    + " eporner.com",    playlist_url: f.host },
+          { title: window.AdultJS_Status.dot("xnxx.com")       + " xnxx.com",       playlist_url: y.host },
+          { title: window.AdultJS_Status.dot("bongacams.com")  + " bongacams.com",  playlist_url: d.host },
+          { title: window.AdultJS_Status.dot("chaturbate.com") + " chaturbate.com", playlist_url: b.host }
         ];
         P.filter(function (e) { return e.enable }).forEach(function (t) {
-          e.push({ title: t.displayname.toLowerCase(), playlist_url: "nexthub://".concat(t.displayname, "?mode=list") })
+          var name = t.displayname.toLowerCase();
+          e.push({
+            title:        window.AdultJS_Status.dot(name) + " " + name,
+            playlist_url: "nexthub://".concat(t.displayname, "?mode=list")
+          });
         });
         // --------------------------------------------------------
         // [DEBUG_MENU_ITEM] v1.2.0-debug — кнопка диагностики
@@ -1955,7 +2002,7 @@ function _toPrimitive(e, t) {
   }();
 
   // ============================================================
-  // [BLOCK:14:END]
+// [BLOCK:14:END]
 
   // [BLOCK:15:START] DEBUG_MODULE — модуль диагностики AdultJS_Debugger
   // Для отката к версии без отладки:
@@ -2181,4 +2228,3 @@ function _toPrimitive(e, t) {
   // ============================================================
 
 }();
-
