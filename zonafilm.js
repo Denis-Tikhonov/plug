@@ -1,37 +1,449 @@
 // ============================================================
-// AdultJS Plugin for Lampa (Android TV) — DEBUG VERSION
-// VERSION: 1.3.2
+// AdultJS Plugin for Lampa (Android TV)
+// VERSION: 2.0.0
 // CHANGELOG:
 //   v1.0.0        - Оригинальная версия
-//   v1.1.0        - Добавлен TrahKino, переименован плагин "Adult JS"
+//   v1.1.0        - Добавлен TrahKino
 //   v1.2.0        - Добавлен UkDevilz, fallback_host механизм
-//   v1.2.0-debug  - Встроен модуль отладки AdultJS_Debugger:
-//                   * Кнопка "Диагностика источников" в меню сайтов
-//                   * Проверка доступности каждого источника (GET + счёт карточек)
-//                   * Вывод итогов через Lampa.Noty.show (TV-уведомления)
-//                   * Очередь Noty: сводка → детали (пауза 3с) → подсказка (5с)
-//   v1.3.0        - Цветные значки статуса источников в меню сайтов:
-//                   * 🟢 зелёный — источник доступен, карточек >= 3
-//                   * 🟡 жёлтый — доступен, но карточек < 3 (проблема парсинга)
-//                   * 🔴 красный — недоступен (HTTP-ошибка / таймаут)
-//                   * Изначально все источники отображаются как 🟢
-//   v1.3.1        - Исправление: значки теперь реально обновляются в меню
-//   v1.3.2        - Исправлена диагностика xvideos (ложный 🔴)
-//                   Исправлен парсер SpankBang (новый HTML 2024+)
-//                   Исправлен JopaOnline: добавлен nodeFile og:video
-//                   Версия плагина отображается в настройках Lampa
-//                   * Хранилище статусов: Lampa.Storage (персистентное)
-//                   * Статусы сохраняются после перезапуска приложения
-//                   * Кэш меню инвалидируется после диагностики
-//                   * Батчевая запись в Storage (один JSON.stringify)
-// ============================================================
-// [DEBUG_MODULE_START] — не удалять этот маркер
+//   v1.2.0-debug  - Встроен AdultJS_Debugger
+//   v1.3.0        - Цветные значки статуса источников
+//   v1.3.1        - Значки реально обновляются в меню
+//   v1.3.2        - Исправления парсеров, версия в настройках
+//   v2.0.0        - Архитектурный рефакторинг:
+//                   * [BLOCK:00] Новые модули: MirrorResolver,
+//                     SourceHealth, requestWithRetry,
+//                     AdultJS_ProxyAdapter, AdultJS_Config
+//                   * MirrorResolver: HEAD-тест доменов,
+//                     redirect-guard, TTL-кэш в localStorage,
+//                     fallback на GitHub/CF Worker API
+//                   * SourceHealth: exponential backoff,
+//                     successRate, автоотключение источников
+//                   * requestWithRetry: 3 попытки 0.5/1.5/4с,
+//                     не ретраить 404/410
+//                   * AdultJS_ProxyAdapter: опциональный
+//                     Cloudflare Worker прокси для CORS/HLS
+//                   * playlist(): фильтрация disabled-источников,
+//                     сортировка по successRate
+//                   * Меню: кнопка "Обновить зеркала"
+//                   * Debugger v2.0.0: mirror check + health stats
 // ============================================================
 
 "use strict";
 
 // ============================================================
-// [BLOCK:01:START] POLYFILLS — вспомогательные функции Babel (не изменять)
+// [BLOCK:00:START] ADULTJS MODULES v2.0.0
+// Подключить ДО основного IIFE плагина.
+// Все объекты доступны глобально через замыкание.
+// ============================================================
+
+// ── Конфигурация ─────────────────────────────────────────────
+var AdultJS_Config = {
+  // URL вашего Cloudflare Worker (заполнить после деплоя)
+  workerUrl: 'https://YOUR_WORKER.workers.dev',
+
+  // true → проксировать видеозапросы через CF Worker
+  // false → прямые запросы (по умолчанию)
+  proxyEnabled: false,
+
+  // Endpoints для обновления зеркал (primary → fallback)
+  mirrorApiUrls: [
+    'https://YOUR_WORKER.workers.dev/mirrors',
+    'https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/mirrors_fallback.json'
+  ],
+
+  // TTL кэша зеркал в миллисекундах
+  cacheTtl: {
+    success:   4  * 3600 * 1000,  // 4 часа — успешные зеркала
+    fallback:  1  * 3600 * 1000,  // 1 час  — резервные зеркала
+    afterFail: 15 * 60   * 1000   // 15 мин — после сбоев
+  }
+};
+
+// ── MirrorResolver ───────────────────────────────────────────
+var MirrorResolver = (function () {
+
+  var CACHE_KEY = 'adultjs_mirrors_cache';
+  var _cache    = null;
+
+  // Реестр доменов и сигнатур парсеров
+  var REGISTRY = {
+    bongacams:  {
+      domains:  ['https://ukr.bongacams.com', 'https://bongacams.com'],
+      testPath: '/new-models',
+      testSign: 'ls_thumb'
+    },
+    xvideos:    {
+      domains:  ['https://www.xv-ru.com', 'https://xvideos.com', 'https://xvideos2.com'],
+      testPath: '/new/1',
+      testSign: 'id="video'
+    },
+    xnxx:       {
+      domains:  ['https://www.xnxx-ru.com', 'https://xnxx.com', 'https://xnxx.gold'],
+      testPath: '/best/',
+      testSign: 'id="video_'
+    },
+    spankbang:  {
+      domains:  ['https://ru.spankbang.com', 'https://spankbang.com'],
+      testPath: '/new_videos/1/',
+      testSign: 'video-item'
+    },
+    chaturbate: {
+      domains:  ['https://chaturbate.com'],
+      testPath: '/api/ts/roomlist/room-list/?limit=5',
+      testSign: 'username'
+    },
+    eporner:    {
+      domains:  ['https://www.eporner.com', 'https://eporner.com'],
+      testPath: '/most-viewed/1/',
+      testSign: 'class="mb'
+    }
+  };
+
+  // ── Кэш ──────────────────────────────────────────────────
+  function _loadCache() {
+    try {
+      var raw = localStorage.getItem(CACHE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+
+  function _saveCache(data) {
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify(data)); } catch (e) {}
+  }
+
+  function _isCacheExpired(cache, afterFail) {
+    if (!cache || !cache.updatedAt) return true;
+    var ttl = afterFail
+      ? AdultJS_Config.cacheTtl.afterFail
+      : AdultJS_Config.cacheTtl.success;
+    return (Date.now() - cache.updatedAt) > ttl;
+  }
+
+  // ── HEAD-тест домена с redirect-guard ─────────────────────
+  function testDomain(domain, timeoutMs) {
+    timeoutMs = timeoutMs || 6000;
+    return new Promise(function (resolve) {
+      var startTs    = Date.now();
+      var controller = null;
+      var timer;
+
+      try { controller = new AbortController(); } catch (e) {}
+
+      timer = setTimeout(function () {
+        if (controller) controller.abort();
+        resolve({ ok: false, reason: 'timeout', domain: domain, latency: null });
+      }, timeoutMs);
+
+      var opts = { method: 'HEAD', redirect: 'follow' };
+      if (controller) opts.signal = controller.signal;
+
+      fetch(domain, opts).then(function (res) {
+        clearTimeout(timer);
+        var latency = Date.now() - startTs;
+
+        // Redirect-guard: убеждаемся что не попали на заглушку провайдера
+        try {
+          var expectedRoot = new URL(domain).hostname.split('.').slice(-2).join('.');
+          var finalRoot    = new URL(res.url).hostname.split('.').slice(-2).join('.');
+          if (finalRoot !== expectedRoot) {
+            resolve({ ok: false, reason: 'redirect_stub', domain: domain, latency: null });
+            return;
+          }
+        } catch (ex) {}
+
+        // 403 = сайт жив но блокирует HEAD — считаем рабочим
+        var alive = (res.status === 200 || res.status === 301 ||
+                     res.status === 302 || res.status === 403);
+        resolve({ ok: alive, reason: 'http_' + res.status, domain: domain, latency: latency });
+
+      }).catch(function (err) {
+        clearTimeout(timer);
+        resolve({ ok: false, reason: err.message || 'net_error', domain: domain, latency: null });
+      });
+    });
+  }
+
+  // ── Проверка сигнатуры парсера ────────────────────────────
+  function testParser(siteKey, domain) {
+    var reg = REGISTRY[siteKey];
+    if (!reg || !reg.testPath || !reg.testSign) {
+      return Promise.resolve({ ok: true, reason: 'no_test' });
+    }
+    var url = domain.replace(/\/$/, '') + reg.testPath;
+    return fetch(url, {
+      method: 'GET',
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+    })
+    .then(function (r) { return r.text(); })
+    .then(function (html) {
+      var ok = html.indexOf(reg.testSign) !== -1;
+      return { ok: ok, reason: ok ? 'parser_ok' : 'parser_signature_missing' };
+    })
+    .catch(function (e) {
+      return { ok: false, reason: e.message };
+    });
+  }
+
+  // ── Найти первый рабочий домен из списка ─────────────────
+  function _resolveSite(domains) {
+    var idx = 0;
+    function tryNext() {
+      if (idx >= domains.length) return Promise.resolve(null);
+      var domain = domains[idx++];
+      return testDomain(domain, 6000).then(function (result) {
+        return result.ok ? domain : tryNext();
+      });
+    }
+    return tryNext();
+  }
+
+  // ── Получить зеркала из удалённого API ────────────────────
+  function _fetchRemoteMirrors() {
+    var idx = 0;
+    function tryNext() {
+      if (idx >= AdultJS_Config.mirrorApiUrls.length) return Promise.resolve(null);
+      var url = AdultJS_Config.mirrorApiUrls[idx++];
+      return fetch(url)
+        .then(function (r) { return r.json(); })
+        .catch(function () { return tryNext(); });
+    }
+    return tryNext();
+  }
+
+  // ── Основной метод: обновить все зеркала ─────────────────
+  function resolve(force) {
+    var cache = _loadCache();
+    if (!force && !_isCacheExpired(cache)) {
+      _cache = cache;
+      console.log('[MirrorResolver] Кэш актуален, обновлён:',
+        new Date(cache.updatedAt).toLocaleTimeString());
+      return Promise.resolve(cache.mirrors);
+    }
+
+    console.log('[MirrorResolver] Обновляем зеркала...');
+
+    var siteKeys = Object.keys(REGISTRY);
+    var promises = siteKeys.map(function (key) {
+      var reg = REGISTRY[key];
+      // Приоритет: закэшированный хост, потом известные домены
+      var domains = (cache && cache.mirrors && cache.mirrors[key])
+        ? [cache.mirrors[key]].concat(reg.domains.filter(function (d) {
+            return d !== cache.mirrors[key];
+          }))
+        : reg.domains;
+      return _resolveSite(domains).then(function (domain) {
+        return { key: key, domain: domain };
+      });
+    });
+
+    return Promise.all(promises).then(function (results) {
+      var mirrors    = {};
+      var failedKeys = [];
+
+      results.forEach(function (r) {
+        if (r.domain) {
+          mirrors[r.key] = r.domain;
+        } else {
+          failedKeys.push(r.key);
+          mirrors[r.key] = REGISTRY[r.key].domains[0]; // fallback
+        }
+      });
+
+      if (failedKeys.length === 0) {
+        var ok = { mirrors: mirrors, updatedAt: Date.now(), hasFails: false };
+        _saveCache(ok);
+        _cache = ok;
+        console.log('[MirrorResolver] Все зеркала OK:', mirrors);
+        return mirrors;
+      }
+
+      // Есть сбои — обращаемся к Remote API
+      console.warn('[MirrorResolver] Сбой для:', failedKeys.join(', '),
+        '→ запрашиваем Mirror API...');
+
+      return _fetchRemoteMirrors().then(function (remote) {
+        if (remote) {
+          failedKeys.forEach(function (key) {
+            var list = remote[key] || (remote.nexthub && remote.nexthub[key]);
+            if (list && Array.isArray(list) && list.length > 0) {
+              mirrors[key] = list[0];
+            }
+          });
+        }
+        // Сохраняем с сокращённым TTL (afterFail)
+        var afterFailOffset = AdultJS_Config.cacheTtl.success - AdultJS_Config.cacheTtl.afterFail;
+        var fail = {
+          mirrors:   mirrors,
+          updatedAt: Date.now() - afterFailOffset,
+          hasFails:  true
+        };
+        _saveCache(fail);
+        _cache = fail;
+        console.log('[MirrorResolver] Зеркала с fallback:', mirrors);
+        return mirrors;
+      });
+    });
+  }
+
+  // ── Синхронное получение активного хоста ─────────────────
+  function getActiveHost(siteKey) {
+    var c = _cache || _loadCache();
+    if (c && c.mirrors && c.mirrors[siteKey]) return c.mirrors[siteKey];
+    return REGISTRY[siteKey] ? REGISTRY[siteKey].domains[0] : null;
+  }
+
+  return {
+    resolve:       resolve,
+    getActiveHost: getActiveHost,
+    testDomain:    testDomain,
+    testParser:    testParser,
+    REGISTRY:      REGISTRY
+  };
+})();
+
+
+// ── SourceHealth — трекинг здоровья источников ───────────────
+var SourceHealth = (function () {
+
+  var STORAGE_KEY = 'adultjs_health';
+  var BACKOFF_MS  = [0, 60000, 300000, 900000, 3600000]; // 0/1m/5m/15m/60m
+  var _state      = {};
+
+  function _load() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      _state = raw ? JSON.parse(raw) : {};
+    } catch (e) { _state = {}; }
+    return _state;
+  }
+
+  function _save() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_state)); } catch (e) {}
+  }
+
+  function _get(name) {
+    var k = (name || '').toLowerCase();
+    if (!_state[k]) _state[k] = { failCount: 0, disabledUntil: 0, success: 0, total: 0 };
+    return _state[k];
+  }
+
+  _load(); // Загружаем при старте
+
+  return {
+    recordSuccess: function (name) {
+      var s = _get(name);
+      s.failCount = 0; s.disabledUntil = 0; s.success++; s.total++;
+      _save();
+    },
+
+    recordFail: function (name) {
+      var s = _get(name);
+      s.failCount++;
+      s.total++;
+      var idx = Math.min(s.failCount, BACKOFF_MS.length - 1);
+      s.disabledUntil = Date.now() + BACKOFF_MS[idx];
+      _save();
+      console.warn('[SourceHealth]', name, 'fail #' + s.failCount,
+        'отключён на', (BACKOFF_MS[idx] / 60000).toFixed(0) + 'мин');
+    },
+
+    isDisabled: function (name) {
+      return _get(name).disabledUntil > Date.now();
+    },
+
+    getDisabledUntil: function (name) {
+      return _get(name).disabledUntil || 0;
+    },
+
+    getSuccessRate: function (name) {
+      var s = _get(name);
+      return s.total === 0 ? 1.0 : s.success / s.total;
+    },
+
+    getFailCount: function (name) {
+      return _get(name).failCount || 0;
+    },
+
+    reset: function (name) {
+      var k = (name || '').toLowerCase();
+      _state[k] = { failCount: 0, disabledUntil: 0, success: 0, total: 0 };
+      _save();
+    },
+
+    resetAll: function () { _state = {}; _save(); },
+
+    getAll: function () { return _state; }
+  };
+})();
+
+
+// ── requestWithRetry — fetch с экспоненциальным backoff ───────
+function requestWithRetry(url, options, maxRetries) {
+  maxRetries = (typeof maxRetries === 'number') ? maxRetries : 3;
+  var delays = [500, 1500, 4000];
+
+  function attempt(n) {
+    return fetch(url, options || {}).then(function (res) {
+      if (res.ok) return res;
+      // Постоянные ошибки — не ретраить
+      if (res.status === 404 || res.status === 410 || res.status === 403) {
+        var e = new Error('no_retry:' + res.status);
+        e.status = res.status;
+        throw e;
+      }
+      throw new Error('http_' + res.status);
+    }).catch(function (err) {
+      if (err.message && err.message.indexOf('no_retry:') === 0) throw err;
+      if (n >= maxRetries) throw err;
+      var delay = delays[n] !== undefined ? delays[n] : 4000;
+      console.log('[retry] attempt', (n + 1) + '/' + maxRetries,
+        '→ retry in', delay + 'ms |', err.message || err);
+      return new Promise(function (resolve, reject) {
+        setTimeout(function () {
+          attempt(n + 1).then(resolve).catch(reject);
+        }, delay);
+      });
+    });
+  }
+
+  return attempt(0);
+}
+
+
+// ── AdultJS_ProxyAdapter — опциональный прокси через CF Worker
+var AdultJS_ProxyAdapter = (function () {
+
+  function buildStreamUrl(videoUrl) {
+    return AdultJS_Config.workerUrl + '/stream?url=' + encodeURIComponent(videoUrl);
+  }
+
+  function isVideoUrl(url) {
+    return /\.(mp4|m3u8|webm|ts)(\?|$)/i.test(url)
+        || url.indexOf('/get_file/')   !== -1
+        || url.indexOf('chunks.m3u8') !== -1
+        || url.indexOf('/hls/')        !== -1;
+  }
+
+  function patchVideoUrl(url) {
+    if (!AdultJS_Config.proxyEnabled || !url) return url;
+    if (!isVideoUrl(url)) return url;
+    return buildStreamUrl(url);
+  }
+
+  return {
+    buildStreamUrl: buildStreamUrl,
+    patchVideoUrl:  patchVideoUrl,
+    isVideoUrl:     isVideoUrl
+  };
+})();
+
+// ============================================================
+// [BLOCK:00:END] ADULTJS MODULES v2.0.0
+// ============================================================
+
+
+// ============================================================
+// [BLOCK:01:START] POLYFILLS — вспомогательные функции Babel
 // ============================================================
 function _toConsumableArray(e) {
   return _arrayWithoutHoles(e) || _iterableToArray(e) || _unsupportedIterableToArray(e) || _nonIterableSpread()
@@ -117,7 +529,6 @@ function _typeof(e) {
     }), _typeof(e)
 }
 function _regenerator() {
-  /*! regenerator-runtime -- Copyright (c) 2014-present, Facebook, Inc. -- license (MIT): https://github.com/babel/babel/blob/main/packages/babel-helpers/LICENSE */
   var e, t, a = "function" == typeof Symbol ? Symbol : {},
     n = a.iterator || "@@iterator", r = a.toStringTag || "@@toStringTag";
   function i(a, n, r, i) {
@@ -254,6 +665,10 @@ function _toPrimitive(e, t) {
   }
   return ("string" === t ? String : Number)(e)
 }
+// ============================================================
+// [BLOCK:01:END]
+// ============================================================
+
 
 // ============================================================
 // [SECTION: MAIN PLUGIN IIFE]
@@ -263,15 +678,13 @@ function _toPrimitive(e, t) {
     var e = "AdultJS";
 
     // --------------------------------------------------------
-    // [BLOCK:01:END]
-
-    // [BLOCK:02:START] LANG — локализация названия плагина
+    // [BLOCK:02:START] LANG
     // --------------------------------------------------------
     Lampa.Lang.add({
       lampac_adultName: {
         ru: "Adult JS",
         en: "Adult 18+",
-        uk: "Для взрослых",
+        uk: "Для взрослих",
         zh: "Adult 18+"
       }
     });
@@ -340,6 +753,11 @@ function _toPrimitive(e, t) {
             url_reserve: r(e.qualitys_proxy) || e.video_reserve || "",
             quality: e.qualitys
           };
+          // [v2.0.0] Применить прокси если включён
+          if (AdultJS_Config.proxyEnabled) {
+            if (a.url)         a.url         = AdultJS_ProxyAdapter.patchVideoUrl(a.url);
+            if (a.url_reserve) a.url_reserve = AdultJS_ProxyAdapter.patchVideoUrl(a.url_reserve);
+          }
           Lampa.Player.play(a), Lampa.Player.playlist([a]),
             Lampa.Player.callback(function () { Lampa.Controller.toggle(t) })
         }
@@ -397,11 +815,6 @@ function _toPrimitive(e, t) {
     var l = new function () {
       var e = this, t = new Lampa.Reguest;
       this.menu = function (e, t) {
-        // [STATUS_MENU_NOCACHE] v1.3.1 — не кэшируем список сайтов:
-        // значки статуса должны читаться свежо при каждом открытии меню.
-        // Если хранилище пустое — строим список и кэшируем.
-        // После диагностики вызывается AdultJS_Status.invalidateMenu()
-        // которая сбрасывает o → следующее открытие перечитает значки.
         if (o && !window._adultjs_menu_dirty) return e(o);
         window._adultjs_menu_dirty = false;
         var a = AdultJS.Menu();
@@ -419,39 +832,93 @@ function _toPrimitive(e, t) {
               console.log("AdultJS", "no load", e.url), a()
             })
         },
+
+        // --------------------------------------------------------
+        // [v2.0.0] playlist() — SourceHealth фильтрация + сортировка
+        // --------------------------------------------------------
         this.playlist = function (t, a, n) {
-          var r = function () {
-            var e = new Lampa.Status(o.length);
-            e.onComplite = function (e) {
+          var _run = function () {
+            // Фильтруем отключённые источники
+            var activeSources = o.filter(function (src) {
+              var name = src.title.toLowerCase().replace(/^[🟢🟡🔴]\s*/, '').trim();
+              if (SourceHealth.isDisabled(name)) {
+                var until = new Date(SourceHealth.getDisabledUntil(name)).toLocaleTimeString();
+                console.log('[playlist] Пропускаем', name, '— отключён до', until);
+                return false;
+              }
+              return true;
+            });
+
+            if (activeSources.length === 0) {
+              console.warn('[playlist] Все источники отключены');
+              n();
+              return;
+            }
+
+            // Сортируем по successRate (лучшие — первыми)
+            activeSources.sort(function (x, y) {
+              var nx = x.title.toLowerCase().replace(/^[🟢🟡🔴]\s*/, '').trim();
+              var ny = y.title.toLowerCase().replace(/^[🟢🟡🔴]\s*/, '').trim();
+              return SourceHealth.getSuccessRate(ny) - SourceHealth.getSuccessRate(nx);
+            });
+
+            var statusObj = new Lampa.Status(activeSources.length);
+            statusObj.onComplite = function (e) {
               var t = [];
-              o.forEach(function (a) {
+              activeSources.forEach(function (a) {
                 e[a.playlist_url] && e[a.playlist_url].results.length && t.push(e[a.playlist_url])
-              }), t.length ? a(t) : n()
-            },
-              o.forEach(function (a, n) {
-                var r = -1 !== a.playlist_url.indexOf("?") ? "&" : "?",
-                  i = -1 !== t.indexOf("?") || -1 !== t.indexOf("&") ? t.substring(1) : t,
-                  o = !1,
-                  l = setTimeout(function () { o = !0, e.error() }, 8e3);
-                AdultJS.Invoke(a.playlist_url + r + i)
-                  .then(function (t) {
-                    clearTimeout(l), o || (t.list
-                      ? (t.title = s.sourceTitle(a.title), t.results = s.fixList(t.list),
-                        t.url = a.playlist_url, t.collection = !0, t.line_type = "none",
-                        t.card_events = {
-                          onMenu: s.menu,
-                          onEnter: function (e, t) { s.hidePreview(), s.play(t) }
-                        },
-                        s.fixCards(t.results), delete t.list, e.append(a.playlist_url, t))
-                      : e.error())
-                  }).catch(function () {
-                    console.log("AdultJS", "no load", a.playlist_url + r + i),
-                      clearTimeout(l), e.error()
-                  })
-              })
+              });
+              t.length ? a(t) : n();
+            };
+
+            activeSources.forEach(function (a) {
+              var sourceName = a.title.toLowerCase().replace(/^[🟢🟡🔴]\s*/, '').trim();
+              var r = a.playlist_url.indexOf("?") !== -1 ? "&" : "?";
+              var i = (t.indexOf("?") !== -1 || t.indexOf("&") !== -1) ? t.substring(1) : t;
+              var failed = false;
+
+              var timer = setTimeout(function () {
+                failed = true;
+                SourceHealth.recordFail(sourceName);
+                statusObj.error();
+              }, 8e3);
+
+              AdultJS.Invoke(a.playlist_url + r + i)
+                .then(function (t) {
+                  clearTimeout(timer);
+                  if (failed) return;
+                  if (t.list) {
+                    SourceHealth.recordSuccess(sourceName);
+                    t.title        = s.sourceTitle(a.title);
+                    t.results      = s.fixList(t.list);
+                    t.url          = a.playlist_url;
+                    t.collection   = true;
+                    t.line_type    = "none";
+                    t.card_events  = {
+                      onMenu:  s.menu,
+                      onEnter: function (e, t) { s.hidePreview(); s.play(t); }
+                    };
+                    s.fixCards(t.results);
+                    delete t.list;
+                    statusObj.append(a.playlist_url, t);
+                  } else {
+                    SourceHealth.recordFail(sourceName);
+                    statusObj.error();
+                  }
+                })
+                .catch(function () {
+                  clearTimeout(timer);
+                  if (failed) return;
+                  SourceHealth.recordFail(sourceName);
+                  console.log("AdultJS", "no load", a.playlist_url + r + i);
+                  statusObj.error();
+                });
+            });
           };
-          o ? r() : e.menu(r, n)
+
+          o ? _run() : e.menu(_run, n);
         },
+
         this.main = function (e, t, a) { this.playlist("", t, a) },
         this.search = function (e, t, a) {
           this.playlist("?search=" + encodeURIComponent(e.query), t, a)
@@ -529,7 +996,7 @@ function _toPrimitive(e, t) {
                     function (t) {
                       if ($("body").removeClass("ambience--enable"),
                         Lampa.Controller.toggle("content"), t) {
-                        var a = -1 !== i.playlist_url.indexOf("?") ? "&" : "?";
+                        var a = i.playlist_url.indexOf("?") !== -1 ? "&" : "?";
                         Lampa.Activity.push({
                           url: i.playlist_url + a + "search=" + encodeURIComponent(t),
                           title: "Поиск - " + t,
@@ -585,9 +1052,19 @@ function _toPrimitive(e, t) {
                       title: "Сайты", items: a,
                       onSelect: function (t) {
                         // ----------------------------------------
-                        // [DEBUG_MENU_HANDLER] v1.2.0-debug
-                        // Перехват нажатия на пункт "Диагностика источников"
-                        // Для отката: удалить блок if (t.debug_action) {...}
+                        // [v2.0.0] Обработчик кнопки "Обновить зеркала"
+                        // ----------------------------------------
+                        if (t.mirror_action) {
+                          Lampa.Controller.toggle("menu");
+                          if (window.AdultJS_Debugger) {
+                            AdultJS_Debugger.runMirrorCheck();
+                          } else {
+                            Lampa.Noty.show("[AdultJS] Модуль зеркал не загружен");
+                          }
+                          return;
+                        }
+                        // ----------------------------------------
+                        // [v1.2.0-debug] Обработчик "Диагностика"
                         // ----------------------------------------
                         if (t.debug_action) {
                           Lampa.Controller.toggle("menu");
@@ -632,60 +1109,30 @@ function _toPrimitive(e, t) {
           }(),
 
           // --------------------------------------------------------
-          // [BLOCK:02:END]
-
-          // [BLOCK:03:START] SETTINGS — регистрация параметров в меню Lampa
+          // [BLOCK:03:START] SETTINGS
           // --------------------------------------------------------
           window.sisi_add_param_ready || (window.sisi_add_param_ready = !0,
             Lampa.SettingsApi.addComponent({
               component: "AdultJS",
-              // [VERSION_DISPLAY] v1.3.2 — версия отображается в заголовке компонента
-              name: Lampa.Lang.translate("lampac_adultName") + "  v 1.3.2",
+              name: Lampa.Lang.translate("lampac_adultName") + "  v 2.0.0",
               icon: '<svg width="200" height="243" viewBox="0 0 200 243" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M187.714 130.727C206.862 90.1515 158.991 64.2019 100.983 64.2019C42.9759 64.2019 -4.33044 91.5669 10.875 130.727C26.0805 169.888 63.2501 235.469 100.983 234.997C138.716 234.526 168.566 171.303 187.714 130.727Z" stroke="currentColor" stroke-width="15"/><path d="M102.11 62.3146C109.995 39.6677 127.46 28.816 169.692 24.0979C172.514 56.1811 135.338 64.2018 102.11 62.3146Z" stroke="currentColor" stroke-width="15"/><path d="M90.8467 62.7863C90.2285 34.5178 66.0667 25.0419 31.7127 33.063C28.8904 65.1461 68.8826 62.7863 90.8467 62.7863Z" stroke="currentColor" stroke-width="15"/><path d="M100.421 58.5402C115.627 39.6677 127.447 13.7181 85.2149 9C82.3926 41.0832 83.5258 35.4214 100.421 58.5402Z" stroke="currentColor" stroke-width="15"/><rect x="39.0341" y="98.644" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="90.8467" y="92.0388" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="140.407" y="98.644" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="116.753" y="139.22" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="64.9404" y="139.22" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="93.0994" y="176.021" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/></svg>'
             }),
-
-            // --------------------------------------------------------
-            // [PARAM: version_info] v1.3.2 — строка версии в настройках
-            // type:"select" с одним значением = нередактируемая строка-label
-            // --------------------------------------------------------
             Lampa.SettingsApi.addParam({
               component: "AdultJS",
-              param: {
-                name:    "adultjs_version",
-                type:    "select",
-                values:  "v 1.3.2",
-                default: "v 1.3.2"
-              },
-              field: {
-                name:        "Версия плагина",
-                description: "AdultJS v 1.3.2 — debug"
-              },
-              onRender: function (e) {
-                // Делаем поле нередактируемым: убираем интерактивность
-                e.find(".selector").removeClass("selector");
-              }
+              param: { name: "adultjs_version", type: "select", values: "v 2.0.0", default: "v 2.0.0" },
+              field: { name: "Версия плагина", description: "AdultJS v 2.0.0 — MirrorResolver + SourceHealth" },
+              onRender: function (e) { e.find(".selector").removeClass("selector"); }
             }),
-
-            // --------------------------------------------------------
-            // [PARAM: sisi_preview] v1.0.0 — предпросмотр при наведении
-            // --------------------------------------------------------
             Lampa.SettingsApi.addParam({
               component: "AdultJS",
               param: { name: "sisi_preview", type: "trigger", values: "", default: !0 },
-              field: {
-                name: "Предпросмотр",
-                description: "Показывать предпросмотр при наведение на карточку"
-              },
+              field: { name: "Предпросмотр", description: "Показывать предпросмотр при наведении на карточку" },
               onRender: function (e) {}
             })
-            // --------------------------------------------------------
-            // [DEBUG_SETTINGS_NOTE] v1.2.0-debug
-            // Кнопка диагностики перенесена в меню выбора сайтов
-            // (последний пункт списка "📝 Диагностика источников").
-            // Для отката debug-модуля: удалить [DEBUG_MENU_ITEM],
-            // [DEBUG_MENU_HANDLER] и [DEBUG_MODULE_START..END].
-            // --------------------------------------------------------
           )
+          // --------------------------------------------------------
+          // [BLOCK:03:END]
+          // --------------------------------------------------------
       }
 
       window["plugin_adultjs_" + e + "_ready"] = !0,
@@ -698,9 +1145,7 @@ function _toPrimitive(e, t) {
   }();
 
   // ============================================================
-  // [BLOCK:03:END]
-
-  // [BLOCK:04:START] HTTP_HELPER — класс fetch/native запросов
+  // [BLOCK:04:START] HTTP_HELPER — v2.0.0 (requestWithRetry)
   // ============================================================
   var l = (e = function () {
     function e() { _classCallCheck(this, e) }
@@ -716,21 +1161,25 @@ function _toPrimitive(e, t) {
       },
       {
         key: "Get",
+        // [v2.0.0] Использует requestWithRetry вместо голого fetch
         value: (t = _asyncToGenerator(_regenerator().m(function t(a, n, r) {
-          var i, o, s, l, c;
+          var i, o, s;
           return _regenerator().w(function (t) {
             for (;;) switch (t.n) {
               case 0:
                 if (!e.isAndroid) { t.n = 1; break }
                 return t.a(2, e.Native(a));
               case 1:
-                return i = e.ensureHeaders(n), o = { method: "GET", headers: i },
-                  t.n = 2, fetch(a, o);
+                return i = e.ensureHeaders(n),
+                  o = { method: "GET", headers: i },
+                  t.n = 2,
+                  requestWithRetry(a, o, 2);
               case 2:
-                if (s = t.v, null == r) { t.n = 4; break }
+                s = t.v;
+                if (r == null) { t.n = 4; break }
                 return t.n = 3, s.arrayBuffer();
               case 3:
-                return l = t.v, c = new TextDecoder(r), t.a(2, c.decode(l));
+                return t.a(2, new TextDecoder(r).decode(t.v));
               case 4:
                 return t.n = 5, s.text();
               case 5:
@@ -757,12 +1206,13 @@ function _toPrimitive(e, t) {
       void 0 !== window.Lampa.Platform && "function" == typeof window.Lampa.Platform.is &&
       window.Lampa.Platform.is("android"),
     e),
+  // ============================================================
+  // [BLOCK:04:END]
+  // ============================================================
 
-    // ============================================================
-    // [BLOCK:04:END]
-
-    // [BLOCK:05:START] HELPERS — RegexHelper и модели данных (VideoItem, MenuItem)
-    // ============================================================
+  // ============================================================
+  // [BLOCK:05:START] HELPERS — RegexHelper, VideoItem, MenuItem
+  // ============================================================
     c = function () {
       return _createClass(function e() { _classCallCheck(this, e) }, null, [{
         key: "extract",
@@ -773,10 +1223,6 @@ function _toPrimitive(e, t) {
         }
       }])
     }(),
-
-    // ============================================================
-    // [SECTION: DATA MODELS] v1.0.0
-    // ============================================================
     u = _createClass(function e(t, a, n, r, i, o, s, l, c) {
       _classCallCheck(this, e),
         this.name = t, this.video = a, this.picture = n, this.preview = r,
@@ -786,12 +1232,13 @@ function _toPrimitive(e, t) {
       _classCallCheck(this, e), this.title = t, this.playlist_url = a,
         n && (this.search_on = n), r && (this.submenu = r)
     }),
+  // ============================================================
+  // [BLOCK:05:END]
+  // ============================================================
 
-    // ============================================================
-    // [BLOCK:05:END]
-
-    // [BLOCK:06:START] SOURCE_BONGACAMS — парсер BongaCams (live-камеры)
-    // ============================================================
+  // ============================================================
+  // [BLOCK:06:START] SOURCE_BONGACAMS
+  // ============================================================
     d = (t = function () {
       function e() { _classCallCheck(this, e) }
       return _createClass(e, [{
@@ -848,6 +1295,9 @@ function _toPrimitive(e, t) {
       }]);
       var t
     }(), t.host = "https://ukr.bongacams.com", t),
+  // ============================================================
+  // [BLOCK:06:END]
+  // ============================================================
 
     h = _createClass(function e(t, a) {
       _classCallCheck(this, e),
@@ -858,11 +1308,9 @@ function _toPrimitive(e, t) {
       _classCallCheck(this, e), this.qualitys = t, this.recomends = a
     }),
 
-    // ============================================================
-    // [BLOCK:06:END]
-
-    // [BLOCK:07:START] SOURCE_XVIDEOS — парсер XVideos (xv-ru.com)
-    // ============================================================
+  // ============================================================
+  // [BLOCK:07:START] SOURCE_XVIDEOS
+  // ============================================================
     g = (a = function () {
       function e() { _classCallCheck(this, e) }
       return _createClass(e, [{
@@ -915,13 +1363,13 @@ function _toPrimitive(e, t) {
               var s = c.extract(i, /<span class="video-hd-mark">([^<]+)<\/span>/),
                 lv = c.extract(i, /<span class="duration">([^<]+)<\/span>/),
                 pv = c.extract(i, /data-src="([^"]+)"/),
-                d = (pv = pv
+                dv = (pv = pv
                   ? (pv = (pv = pv.replace(/\/videos\/thumbs([0-9]+)\//, "/videos/thumbs$1lll/"))
                     .replace(/\.THUMBNUM\.(jpg|png)$/i, ".1.$1"))
                     .replace("thumbs169l/", "thumbs169lll/").replace("thumbs169ll/", "thumbs169lll/")
                   : "").replace(/\/thumbs[^/]+\//, "/videopreview/");
-              d = (d = d.replace(/\/[^/]+$/, "")).replace(/-[0-9]+$/, ""),
-                n.push(new u(o[2], "".concat(e.host, "/").concat(o[1]), pv, d + "_169.mp4",
+              dv = (dv = dv.replace(/\/[^/]+$/, "")).replace(/-[0-9]+$/, ""),
+                n.push(new u(o[2], "".concat(e.host, "/").concat(o[1]), pv, dv + "_169.mp4",
                   lv || null, s || null, !0, !0, null))
             }
           }
@@ -984,7 +1432,7 @@ function _toPrimitive(e, t) {
       }, {
         key: "StreamLinks",
         value: function (t) {
-          var a = c.extract(t, /html5player\.setVideoHLS\('([^']+)'\);/);
+          var a = c.extract(t, /html5player\.setVideoHLS$'([^']+)'$;/);
           if (!a) return new m({}, []);
           var n = [], r = c.extract(t, /video_related=([^\n\r]+);window/);
           if (r && r.startsWith("[") && r.endsWith("]")) try {
@@ -1006,12 +1454,13 @@ function _toPrimitive(e, t) {
       }]);
       var t
     }(), a.host = "https://www.xv-ru.com", a),
+  // ============================================================
+  // [BLOCK:07:END]
+  // ============================================================
 
-    // ============================================================
-    // [BLOCK:07:END]
-
-    // [BLOCK:08:START] SOURCE_XNXX — парсер XNXX (xnxx-ru.com)
-    // ============================================================
+  // ============================================================
+  // [BLOCK:08:START] SOURCE_XNXX
+  // ============================================================
     y = (n = function () {
       function e() { _classCallCheck(this, e) }
       return _createClass(e, [{
@@ -1057,10 +1506,10 @@ function _toPrimitive(e, t) {
             if (o && o[1] && o[2]) {
               var lv = c.extract(i, /<\/span>([^<]+)<span class="video-hd">/),
                 pv = c.extract(i, /data-src="([^"]+)"/),
-                d = (pv = pv ? pv.replace(".THUMBNUM.", ".1.") : "").replace(/\/thumbs[^/]+\//, "/videopreview/");
-              d = (d = d.replace(/\/[^/]+$/, "")).replace(/-[0-9]+$/, ""),
+                dv = (pv = pv ? pv.replace(".THUMBNUM.", ".1.") : "").replace(/\/thumbs[^/]+\//, "/videopreview/");
+              dv = (dv = dv.replace(/\/[^/]+$/, "")).replace(/-[0-9]+$/, ""),
                 n.push(new u(o[2], "".concat(e.host, "/").concat(o[1]), pv,
-                  d + "_169.mp4", lv || null, s || null, !0, !0, null))
+                  dv + "_169.mp4", lv || null, s || null, !0, !0, null))
             }
           }
           return n
@@ -1074,7 +1523,7 @@ function _toPrimitive(e, t) {
       }, {
         key: "StreamLinks",
         value: function (t) {
-          var a = c.extract(t, /html5player\.setVideoHLS\('([^']+)'\);/);
+          var a = c.extract(t, /html5player\.setVideoHLS$'([^']+)'$;/);
           if (!a) return new m({}, []);
           var n = [], r = c.extract(t, /video_related=([^\n\r]+);window/);
           if (r && r.startsWith("[") && r.endsWith("]")) try {
@@ -1091,13 +1540,14 @@ function _toPrimitive(e, t) {
         }
       }]);
       var t
-    }(), n.host = "https://www.xnxx-ru.com/todays-selection", n),
+    }(), n.host = "https://www.xnxx-ru.com", n),
+  // ============================================================
+  // [BLOCK:08:END]
+  // ============================================================
 
-    // ============================================================
-    // [BLOCK:08:END]
-
-    // [BLOCK:09:START] SOURCE_SPANKBANG — парсер SpankBang
-    // ============================================================
+  // ============================================================
+  // [BLOCK:09:START] SOURCE_SPANKBANG
+  // ============================================================
     v = (r = function () {
       function e() { _classCallCheck(this, e) }
       return _createClass(e, [{
@@ -1143,8 +1593,8 @@ function _toPrimitive(e, t) {
                 lv = c.extract(i, /<span class="video-badge l">([^<]+)<\/span>/),
                 pv = c.extract(i, /data-src="([^"]+)"/);
               pv = pv ? pv.replace(/\/w:[0-9]00\//, "/w:300/") : "";
-              var d = c.extract(i, /data-preview="([^"]+)"/);
-              n.push(new u(o[2], "".concat(e.host, "/").concat(o[1]), pv, d || null,
+              var dv = c.extract(i, /data-preview="([^"]+)"/);
+              n.push(new u(o[2], "".concat(e.host, "/").concat(o[1]), pv, dv || null,
                 lv || null, s || null, !0, !0, null))
             }
           }
@@ -1166,7 +1616,7 @@ function _toPrimitive(e, t) {
       }, {
         key: "StreamLinks",
         value: function (e) {
-          for (var t, a = {}, n = /'([0-9]+)(p|k)': ?\['(https?:\/\/[^']+)'/g;
+          for (var t, a = {}, n = /'([0-9]+)(p|k)': ?$'(https?:\/\/[^']+)'/g;
             null !== (t = n.exec(e));) {
             var r = "k" === t[2] ? 2160 : parseInt(t[1], 10);
             a["".concat(r, "p")] = t[3]
@@ -1176,12 +1626,13 @@ function _toPrimitive(e, t) {
       }]);
       var t
     }(), r.host = "https://ru.spankbang.com", r),
+  // ============================================================
+  // [BLOCK:09:END]
+  // ============================================================
 
-    // ============================================================
-    // [BLOCK:09:END]
-
-    // [BLOCK:10:START] SOURCE_CHATURBATE — парсер Chaturbate (live-камеры)
-    // ============================================================
+  // ============================================================
+  // [BLOCK:10:START] SOURCE_CHATURBATE
+  // ============================================================
     b = (i = function () {
       function e() { _classCallCheck(this, e) }
       return _createClass(e, [{
@@ -1271,12 +1722,13 @@ function _toPrimitive(e, t) {
       }]);
       var t, a
     }(), i.host = "https://chaturbate.com", i),
+  // ============================================================
+  // [BLOCK:10:END]
+  // ============================================================
 
-    // ============================================================
-    // [BLOCK:10:END]
-
-    // [BLOCK:11:START] SOURCE_EPORNER — парсер EPorner
-    // ============================================================
+  // ============================================================
+  // [BLOCK:11:START] SOURCE_EPORNER
+  // ============================================================
     f = (o = function () {
       function e() { _classCallCheck(this, e) }
       return _createClass(e, [{
@@ -1416,11 +1868,12 @@ function _toPrimitive(e, t) {
       }]);
       var t, a
     }(), o.host = "https://www.eporner.com", o);
-
   // ============================================================
   // [BLOCK:11:END]
+  // ============================================================
 
-  // [BLOCK:12:START] NEXTHUB_ENGINE — вспомогательные функции и движок NextHub
+  // ============================================================
+  // [BLOCK:12:START] NEXTHUB_ENGINE
   // ============================================================
   function k(e, t) {
     return e.replace(/\{([^}]+)\}/g, function (e, a) {
@@ -1450,9 +1903,6 @@ function _toPrimitive(e, t) {
     return e.getAttribute(t || "src") || a || ""
   }
 
-  // ============================================================
-  // [SECTION: NEXTHUB ENGINE] v1.0.0
-  // ============================================================
   var S = (s = function () {
     return _createClass(function e(t) {
       _classCallCheck(this, e), this.cfgs = t
@@ -1740,186 +2190,66 @@ function _toPrimitive(e, t) {
     }]);
     var e, t
   }(), s.host = "nexthub://", s),
-
   // ============================================================
   // [BLOCK:12:END]
+  // ============================================================
 
-  // [BLOCK:13:START] NEXTHUB_CONFIGS — массив P конфигов источников NextHub
-  // Добавление нового источника: вставить объект-конфиг перед
-  // закрывающей скобкой ], следуя шаблону в README.md
+  // ============================================================
+  // [BLOCK:13:START] NEXTHUB_CONFIGS
   // ============================================================
   P = [
-    // --- PornHub ---
     { enable: !0, displayname: "PornHub", host: "https://rt.pornhub.com", menu: { route: { sort: "{host}/video?o={sort}&page={page}", model: "{host}{model}/videos?page={page}", cat: "{host}/video?c={cat}&page={page}", catsort: "{host}/video?c={cat}&o={sort}&page={page}" }, sort: { "Недавно в Избранном": "", "Новые": "cm", "Популярные": "mv", "Лучшие": "tr", "Горячие": "ht" }, categories: { "Все": "", "Азиатки": "1", "Анальный секс": "35", "Арабское": "98", "БДСМ": "10", "Бисексуалы": "76", "Блондинки": "9", "Большая грудь": "8", "Большие члены": "7", "Брюнетки": "11", "Зрелые": "28", "Лесбиянки": "27", "Любительское": "3", "Мамочки": "29", "Межрассовый Секс": "25", "Минет": "13", "Попки": "4", "Русское": "99", "Секс втроем": "65" } }, list: { uri: "video?page={page}" }, search: { uri: "video/search?search={search}&page={page}" }, contentParse: { nodes: "//li[contains(@class,'videoblock')] | //div[contains(@class,'video-list') or contains(@class,'videos')]//li[contains(@class,'videoblock')] | //ul[@id='videoCategory']//li[contains(@class,'videoblock')]", name: { node: ".//a[@data-event='thumb_click'] | .//a[@class='gtm-event-thumb-click'] | .//span[@class='title']//a" }, href: { node: ".//a[contains(@class,'linkVideoThumb')] | .//a[contains(@class,'title')]", attribute: "href" }, img: { node: ".//img | .//a[contains(@class,'linkVideoThumb')]//img", attributes: ["data-mediumthumb", "data-thumb_url", "data-image", "src"] }, preview: { node: ".//img | .//a[contains(@class,'linkVideoThumb')]//img", attribute: "data-mediabook" }, duration: { node: ".//*[contains(@class,'duration')]" }, model: { name: { node: ".//a[contains(@href,'/model/')]" }, href: { node: ".//a[contains(@href,'/model/')]", attribute: "href" } } }, view: { related: !0, regexMatch: { matches: ["1080", "720", "480", "360", "240"], pattern: '"videoUrl":"([^"]+)","quality":"{value}"' } } },
-    // --- Xhamster ---
-    { enable: !0, displayname: "Xhamster", host: "https://xhamster.com", menu: { route: { sort: "{host}/{sort}/{page}", cat: "{host}/categories/{cat}/{page}", catsort: "{host}/categories/{cat}/{sort}/{page}" }, sort: { "В тренде": "", "Новейшее": "newest", "Лучшие": "best/weekly" }, categories: { "Все": "", "Русское": "russian", "Анал": "anal", "Зрелые": "mature", "Лесбиянка": "lesbian", "Любительское порно": "amateur", "Минет": "blowjob", "МИЛФ": "milf" } }, list: { uri: "{host}/{page}", firstpage: "{host}" }, search: { uri: "search/{search}/{page}" }, contentParse: { nodes: "//div[contains(@class,'thumb-list__item')] | //div[contains(@class,'thumb-list-mobile-item')]", name: { node: ".//a[contains(@class,'video-thumb-info__name')]" }, href: { node: ".//a[contains(@class,'video-thumb-info__name')]", attribute: "href" }, img: { node: ".//img", attributes: ["srcset", "src"] }, preview: { node: ".//a", attribute: "data-previewvideo" }, duration: { node: ".//div[@data-role='video-duration'] | .//time[contains(@class,'video-thumb__time')]" } }, view: { related: !0, nodeFile: { node: "//link[@rel='preload']", attribute: "href" } } },
-    // --- Lenkino ---
+    { enable: !0, displayname: "Xhamster", host: "https://ru.xhamster.com", menu: { route: { sort: "{host}/{sort}/{page}", cat: "{host}/categories/{cat}/{page}", catsort: "{host}/categories/{cat}/{sort}/{page}" }, sort: { "В тренде": "", "Новейшее": "newest", "Лучшие": "best/weekly" }, categories: { "Все": "", "Русское": "russian", "Анал": "anal", "Зрелые": "mature", "Лесбиянка": "lesbian", "Любительское порно": "amateur", "Минет": "blowjob", "МИЛФ": "milf" } }, list: { uri: "{host}/{page}", firstpage: "{host}" }, search: { uri: "search/{search}/{page}" }, contentParse: { nodes: "//div[contains(@class,'thumb-list__item')] | //div[contains(@class,'thumb-list-mobile-item')]", name: { node: ".//a[contains(@class,'video-thumb-info__name')]" }, href: { node: ".//a[contains(@class,'video-thumb-info__name')]", attribute: "href" }, img: { node: ".//img", attributes: ["srcset", "src"] }, preview: { node: ".//a", attribute: "data-previewvideo" }, duration: { node: ".//div[@data-role='video-duration'] | .//time[contains(@class,'video-thumb__time')]" } }, view: { related: !0, nodeFile: { node: "//link[@rel='preload']", attribute: "href" } } },
     { enable: !0, displayname: "Lenkino", host: "https://wes.lenkino.adult", menu: { route: { cat: "{host}/{cat}/page/{page}", sort: "{host}/{sort}/page/{page}", catsort: "{host}/{cat}-top/page/{page}", model: "{model}/page/{page}" }, sort: { "Новые": "", "Лучшие": "top-porno", "Горячие": "hot-porno" }, categories: { "Русское порно": "a1-russian", "Порно зрелых": "milf-porn", "Анал": "anal-porno", "Большие сиськи": "big-tits", "Лесби": "lesbi-porno", "Минет": "blowjob", "Соло": "solo", "Хардкор": "hardcore" } }, list: { uri: "page/{page}" }, search: { uri: "search/{search}/page/{page}" }, contentParse: { nodes: "//div[@class='item']", name: { node: ".//div[@class='itm-tit']" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img[@class='lzy']", attribute: "data-srcset" }, duration: { node: ".//div[@class='itm-dur fnt-cs']" }, preview: { node: ".//img[@class='lzy']", attribute: "data-preview" }, model: { name: { node: ".//a[@class='itm-opt-mdl len_pucl']" }, href: { node: ".//a[@class='itm-opt-mdl len_pucl']", attribute: "href" } } }, view: { related: !0, regexMatch: { matches: ["alt_url", "url"], pattern: "video_{value}:[\\t ]+'([^']+)'" } } },
-    // --- Lenporno ---
     { enable: !0, displayname: "Lenporno", host: "https://pepa.lenporno.xyz", menu: { route: { cat: "{host}/{cat}/{page}/", sort: "{host}/{sort}/{page}/" }, sort: { "Новинки": "", "Лучшее": "the-best", "Популярнаe": "most-popular" }, categories: { "Русское": "russkoye", "Анальное": "analnoye", "Зрелые": "zrelyye", "Мамки": "mamki", "Молодые": "molodyye", "Минет": "minet", "Групповое": "gruppovoye" } }, list: { uri: "new-update/{page}/" }, search: { uri: "search/{search}/{page}/" }, contentParse: { nodes: "//div[@class='innercont']", name: { node: ".//a[@class='preview_link']" }, href: { node: ".//a[@class='preview_link']", attribute: "href" }, img: { node: ".//img", attribute: "src" }, duration: { node: ".//div[@class='duration']" } }, view: { related: !0, regexMatch: { matches: ["1080p", "720p", "480p", "360p"], pattern: '(https?://[^\\t" ]+_{value}.mp4)' } } },
-    // --- 24video ---
-    { enable: !0, displayname: "24video", host: "https://lov.24videos.space/videos/", menu: { route: { cat: "{host}/{cat}/page-{page}/", sort: "{host}/{sort}/page-{page}/" }, sort: { "Новинки": "", "Рейтинговое": "top-rated-porn", "Популярнаe": "most-popular-porn" }, categories: { "Русское": "porno-russkoye", "Анальное": "porno-analnoye", "Зрелые": "porno-zrelyye", "Мамки": "porno-mamki", "Молодые": "porno-molodyye" } }, list: { uri: "page-{page}/" }, search: { uri: "search/{search}/page-{page}/" }, contentParse: { nodes: "//div[@class='item video-block']", name: { node: ".//div[@class='title']" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img", attribute: "data-original" }, duration: { node: ".//span[@class='duration']" } }, view: { related: !0, regexMatch: { matches: ["1080p", "720p", "480p", "360p"], pattern: '(https://[^",\\n\\r\\t ]+/JOPORN_NET_[0-9]+_{value}.mp4)' } } },
-    // --- BigBoss ---
+    { enable: !0, displayname: "24video", host: "https://sex.24videos.space", menu: { route: { cat: "{host}/{cat}/page-{page}/", sort: "{host}/{sort}/page-{page}/" }, sort: { "Новинки": "", "Рейтинговое": "top-rated-porn", "Популярнаe": "most-popular-porn" }, categories: { "Русское": "porno-russkoye", "Анальное": "porno-analnoye", "Зрелые": "porno-zrelyye", "Мамки": "porno-mamki", "Молодые": "porno-molodyye" } }, list: { uri: "page-{page}/" }, search: { uri: "search/{search}/page-{page}/" }, contentParse: { nodes: "//div[@class='item video-block']", name: { node: ".//div[@class='title']" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img", attribute: "data-original" }, duration: { node: ".//span[@class='duration']" } }, view: { related: !0, regexMatch: { matches: ["1080p", "720p", "480p", "360p"], pattern: '(https://[^",\\n\\r\\t ]+/JOPORN_NET_[0-9]+_{value}.mp4)' } } },
     { enable: !0, displayname: "BigBoss", host: "https://bigboss.video", menu: { route: { cat: "{host}/category/{cat}_page-{page}.html", sort: "{host}/videos/{sort}_page-{page}.htm" }, sort: { "Новинки": "", "Популярное": "popular" }, categories: { "Русское порно": "rus", "Зрелые": "zrelue", "Домашнее (любительское)": "domashka", "Лесбиянки": "lesbiyanka", "Минет": "minet-video" } }, list: { uri: "latest/{page}/" }, search: { uri: "search/{search}/page/{page}/" }, contentParse: { nodes: "//div[contains(@class,'main__ct-items')]//div[contains(@class,'main__ct-item')]", name: { node: ".//div[contains(@class,'video-unit__caption')]" }, href: { node: ".//a[contains(@class,'video-unit')]", attribute: "href" }, img: { node: ".//img", attributes: ["data-src", "src"] } }, view: { related: !0, regexMatch: { matches: ["1080", "720", "480", "360"], pattern: '/(common/getvideo/video.mp4\\?q={value}&[^", ]+)', format: "{host}/{value}" } } },
-    // --- Ebasos ---
     { enable: !0, displayname: "Ebasos", host: "https://wel.ebasos.club", menu: { route: { sort: "{host}/{sort}/{page}/", cat: "{host}/categories/{cat}/{page}/", catsort: "{host}/categories/{cat}/top/{page}/" }, sort: { "Новое": "", "Лучшее": "top-rated" }, categories: { "Русское порно": "ruporno", "Анал": "anal", "Зрелые": "zrelye", "Мамки": "mamki" } }, list: { uri: "latest-updates/{page}/" }, search: { uri: "search/{search}/{page}/" }, contentParse: { nodes: "//div[@id='list_videos_common_videos_list_items']//div[contains(@class, 'item')]", name: { node: ".//span[contains(@class, 'title')]" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img[contains(@class,'thumb')]", attribute: "data-original" }, duration: { node: ".//div[contains(@class, 'duration')]" } }, view: { iframe: { pattern: '<iframe[^>]+ src="([^"]+)"' }, regexMatch: { matches: ["video_alt_url", "video_url"], pattern: "{value}:[\\t ]+'([^']+)'" } } },
-    // --- Ebun ---
     { enable: !0, displayname: "Ebun", host: "https://www1.ebun.tv", menu: { route: { sort: "{host}/{sort}/{page}/", cat: "{host}/categories/{cat}/{page}/", catsort: "{host}/categories/{cat}/{sort}/{page}/" }, sort: { "Новинки": "", "Топ рейтинга": "top-rated", "Популярнаe": "most-popular" }, categories: { "Русское": "russkoe", "Анал": "anal", "Зрелые": "zrelye", "Мамки": "mamki" } }, list: { uri: "latest-updates/{page}/" }, search: { uri: "search/{search}/{page}/" }, contentParse: { nodes: "//div[contains(@class, 'item th-item item_new')]", name: { node: ".//div[@class='item-title']" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img", attribute: "data-src" }, duration: { node: ".//div[@class='meta-time']" } }, view: { iframe: { pattern: '<iframe[^>]+ src="([^"]+)"' }, regexMatch: { matches: ["video_alt_url", "video_url"], pattern: "{value}:[\\t ]+'([^']+)'" } } },
-    // --- JopaOnline ---
-    // [FIX v1.3.2] JopaOnline сменил JS-плеер. Добавлен nodeFile как дополнительный способ извлечения URL видео (og:video мета-тег)
-    // Старый паттерн video_alt_{value} оставлен как fallback.
     { enable: !0, displayname: "JopaOnline", host: "https://jopaonline.mobi", menu: { route: { sort: "{host}/{sort}/{page}", cat: "{host}/categories/{cat}/{page}", catsort: "{host}/categories/{cat}/{sort}/{page}" }, sort: { "Новинки": "", "Топ рейтинга": "toprated", "Популярнаe": "popular" }, categories: { "Мамки": "mamki", "Русское": "russkoe", "Зрелые": "zrelye", "Анал": "anal" } }, list: { uri: "{page}" }, search: { uri: "search/{search}/{page}" }, contentParse: { nodes: "//div[@class='th']", name: { node: ".//p" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img", attribute: "src" }, duration: { node: ".//div[@class='th-duration']" }, preview: { node: ".//img", attribute: "data-preview" } }, view: { related: !0, nodeFile: { node: "//meta[@property='og:video']", attribute: "content" }, regexMatch: { matches: ["url3", "url2", "url"], pattern: "video_alt_{value}:[\\t ]+'([^']+)'" } } },
-    // --- NoodleMagazine ---
     { enable: !0, displayname: "NoodleMagazine", host: "https://adult.noodlemagazine.com", menu: { route: { sort: "{host}/{sort}/week?p={page}" }, sort: { "Новинки": "", "Популярное": "popular" } }, list: { uri: "now?p={page}" }, search: { uri: "video/{search}?p={page}" }, contentParse: { nodes: "//div[contains(@class, 'item')]", name: { node: ".//div[@class='title']" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img", attribute: "data-src" }, duration: { node: ".//div[@class='m_time']" }, preview: { node: ".//div", attribute: "data-trailer_url" } }, view: { related: !0, regexMatch: { pattern: '"file":"([^"]+)"' } } },
-    // --- Porndig ---
     { enable: !0, displayname: "Porndig", host: "https://www.porndig.com", menu: { route: { cat: "{host}/channels/{cat}/page/{page}" }, categories: { "Анал": "33/anal", "Азиатки": "38/asian", "Лесби": "40/lesbian", "МИЛФ": "39/milf", "Минет": "52/blowjob" } }, list: { uri: "video/page/{page}" }, search: { uri: "channels/33/{search}/page/{page}" }, contentParse: { nodes: "//section[contains(@class, 'video_item_wrapper even_item video_item_medium')]", name: { node: ".//a" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img[@class='thumb_preview hidden']", attribute: "data-src" }, duration: { node: ".//div[@class='bubble bubble_duration']//span" }, preview: { node: ".//img[contains(@class, 'js_video_preview')]", attribute: "data-vid" } }, view: { related: !0, iframe: { pattern: '<link rel="prefetch" as="document" href="([^"]+)"' }, regexMatch: { matches: ["/master.mpd", "_2160.mp4", "_1080.mp4", "_720.mp4", "_540.mp4", "_468.mp4", "_360.mp4"], pattern: '"src":"([^"]+{value})"' } } },
-    // --- Pornk ---
     { enable: !0, displayname: "Pornk", host: "https://ps.pornk.top", menu: { route: { sort: "{host}/{sort}/week/{page}/", cat: "{host}/categories/{cat}/{page}/" }, sort: { "Новинки": "", "Топ рейтинга": "top-rated", "Популярное": "most-popular" }, categories: { "Красотки": "krasotki", "Зрелые": "zrelye", "Лесби": "lesbi" } }, list: { uri: "latest-updates/{page}/" }, search: { uri: "search/{search}/{page}/" }, contentParse: { nodes: "//a[contains(@class, 'preview')]", name: { node: ".//span[@class='preview-title']" }, href: { node: ".", attribute: "href" }, img: { node: ".//img", attribute: "src" }, duration: { node: ".//span[@class='preview-duration']" } }, view: { related: !0, regexMatch: { matches: ["1080p", "720p", "480p", "360p"], pattern: "/(get_file/[^', ]+_{value}.mp4)", format: "{host}/{value}" } } },
-    // --- Porno365 ---
     { enable: !0, displayname: "Porno365", host: "https://porno365x.me", menu: { route: { cat: "{host}/{cat}/{page}/", sort: "{host}/{sort}/{page}/", catsort: "{host}/{cat}/{sort}/{page}/" }, sort: { "Новинки": "", "Топ рейтинга": "toprated", "Топ просмотров": "popular" }, categories: { "Русское": "russkoye", "Анал": "anal", "Зрелые": "zrelyye", "Мамки": "mamki" } }, list: { uri: "{page}/" }, search: { uri: "search/{search}/{page}/" }, contentParse: { nodes: "//li[contains(@class, ' trailer')]", name: { node: ".//p" }, href: { node: ".//a[@class='image']", attribute: "href" }, img: { node: ".//img", attribute: "src" }, duration: { node: ".//span[@class='duration']" } }, view: { related: !0, regexMatch: { pattern: 'file:[\\t ]+"([^"]+)"' } } },
-    // --- Porno666 ---
     { enable: !0, displayname: "Porno666", host: "https://wwwp.porno666.news", menu: { route: { cat: "{host}/categories/{cat}/{page}/", sort: "{host}/{sort}" }, sort: { "Новинки": "", "Лучшее": "top-rated/{page}/", "Популярнаe": "most-popular/{page}/" }, categories: { "Русское порно": "russkoe", "Анал": "analnyy-seks", "Зрелые": "zrelye" } }, list: { uri: "latest-updates/{page}/" }, search: { uri: "search/{search}/{page}/" }, contentParse: { nodes: "//div[@class='item trailer']", name: { node: ".//strong" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img", attribute: "data-original" }, duration: { node: ".//div[@class='duration']" }, preview: { node: ".//img", attribute: "data-preview" } }, view: { related: !0, regexMatch: { matches: ["url3", "url2", "url"], pattern: "video_alt_{value}:[\\t ]+'([^']+)'" } } },
-    // --- PornoBriz ---
     { enable: !0, displayname: "PornoBriz", host: "https://pornobriz.com", menu: { route: { cat: "{host}/{cat}/page{page}/", sort: "{host}/{sort}" }, sort: { "Новинки": "", "Топ рейтинга": "top/page{page}/", "Популярнаe": "best/page{page}/" }, categories: { "Русское порно": "russian", "Анальный секс": "anal", "Лесбиянки": "lesbian" } }, list: { uri: "new/page{page}/" }, search: { uri: "search/{search}/page{page}/" }, contentParse: { nodes: "//div[contains(@class, 'thumb_main')]", name: { node: ".//div[@class='th-title']" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img", attribute: "data-original" }, duration: { node: ".//div[@class='duration']" }, preview: { node: ".//video", attribute: "data-preview" } }, view: { regexMatch: { matches: ["720", "480", "240"], pattern: 'src="([^"]+)" type="video/mp4" size="{value}"' } } },
-    // --- SemBatsa (disabled) ---
     { enable: !1, displayname: "SemBatsa", host: "https://sem.batsa.pro", menu: { route: { sort: "{host}/{sort}/monthly?page={page}", cat: "{host}/{cat}?page={page}" }, sort: { "Новое": "", "Топ рейтинга": "top-rated", "Топ просмотров": "most-popular" }, categories: { "Русское порно": "russkoe-porno" } }, list: { uri: "?page={page}" }, search: { uri: "search?q={search}" }, contentParse: { nodes: "//div[@class='grid-item aspect-ratio-16x9']", name: { node: ".//div[@class='grid-item-description']//a" }, href: { node: ".//a[1]", attribute: "href" }, img: { node: ".//img", attribute: "src" }, duration: { node: ".//span[contains(@class,'grid-item-dur')]" }, preview: { node: ".//video//source", attribute: "src" } }, view: { related: !0, regexMatch: { matches: ["1080", "720", "480", "400", "360"], pattern: 'src="([^"]+)" type="video/mp4" label="{value}"' } } },
-    // --- Sosushka ---
     { enable: !0, displayname: "Sosushka", host: "https://gi.sosushka.vip", menu: { route: { sort: "{host}/{sort}/all/month/page{page}/", cat: "{host}/{cat}/page{page}/" }, sort: { "Новинки": "", "Популярное": "top", "Лучшие": "bests" }, categories: { "Русское порно": "russian", "Анальный секс": "anal", "Зрелые": "milf" } }, list: { uri: "new/page{page}/" }, search: { uri: "search/{search}/" }, contentParse: { nodes: "//div[@class='thumb']", name: { node: ".//p" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img", attribute: "data-src" }, duration: { node: ".//span[@class='right']" }, preview: { node: ".//div", attribute: "data-preview-src" } }, view: { iframe: { pattern: 'property="ya:ovs:embed_url" content="([^"]+)"' }, regexMatch: { matches: ["720", "480", "240"], pattern: '<source src="([^"]+)" type="video/mp4" size="{value}"' } } },
-    // --- Youjizz ---
     { enable: !0, displayname: "Youjizz", host: "https://www.youjizz.com", menu: { route: { sort: "{host}/{sort}/{page}.html" }, sort: { "Новинки": "newest-clips", "Популярные": "most-popular", "Топ рейтинга": "top-rated-week", "В тренде": "trending" } }, list: { uri: "newest-clips/{page}.html" }, search: { uri: "search/{search}-{page}.html" }, contentParse: { nodes: "//div[@class='video-thumb']", name: { node: ".//div[@class='video-title']//a" }, href: { node: ".//a[contains(@class, 'frame video')]", attribute: "href" }, img: { node: ".//img", attribute: "data-original" }, duration: { node: ".//span[@class='time']" }, preview: { node: ".//a", attribute: "data-clip" } }, view: { related: !0, regexMatch: { format: "https:{value}", pattern: '"quality":"Auto","filename":"([^"]+)"' } } },
-    // --- Vporno ---
     { enable: !0, displayname: "Vporno", host: "https://vv.vporno.video", menu: { route: { cat: "{host}/{cat}&{page}" }, categories: { "Зрелые": "zrelyee", "Минет": "minet", "Азиатки": "aziatki" } }, list: { uri: "page/{page}" }, search: { uri: "search/?word={search}&page={page}" }, contentParse: { nodes: "//div[@class='col-xs-6 col-sm-6 col-md-4 col-lg-4']", name: { node: ".//h3" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img", attribute: "src" }, duration: { node: ".//span[@class='time']" } }, view: { related: !0, regexMatch: { matches: ["720", "480", "360", "240"], pattern: 'href="(/down/{value}/[^"]+)"', format: "{host}{value}" } } },
-    // --- Pornobolt ---
     { enable: !0, displayname: "Pornobolt", host: "https://ru.pornobolt.li", menu: { route: { sort: "{host}/{page}?sort={sort}", cat: "{host}/{cat}/{page}" }, sort: { "Новинки": "", "Популярнаe": "mv" }, categories: { "Русские": "russkoe-porno", "Зрелые": "zrelye", "Анал": "anal" } }, list: { uri: "{page}/" }, search: { uri: "search/{search}/{page}" }, contentParse: { nodes: "//div[@class='media-obj widethumb']", name: { node: ".//p" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img", attributes: ["data-original", "src"] }, duration: { node: ".//span[@itemprop='duration']" }, preview: { node: ".//img", attribute: "data-video" } }, view: { related: !0, nodeFile: { node: "//meta[@property='ya:ovs:content_url']", attribute: "content" } } },
-    // --- PornoAkt ---
     { enable: !0, displayname: "PornoAkt", host: "https://a.pornoakt.club", menu: { route: { cat: "{host}/{cat}/page/{page}/" }, categories: { "Русское порно": "russkoe-porno", "Анальный секс": "anal", "Зрелые": "zrelye" } }, list: { uri: "page/{page}/" }, search: { uri: "index.php?do=search&subaction=search&search_start={page}&full_search=0&result_from=25&story={search}" }, contentParse: { nodes: "//article[contains(@class, 'shortstory')]", name: { node: ".//h2//a" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img", attribute: "src" }, duration: { node: ".//div[@class='video_time']" } }, view: { related: !0, nodeFile: { node: "//li[@data-type='m4v']", attribute: "data-url" } } },
-    // --- PornOne ---
     { enable: !0, displayname: "PornOne", host: "https://pornone.com", menu: { route: { sort: "{host}/{sort}/week/{page}/", cat: "{host}/{cat}/{page}/", catsort: "{host}/{cat}/{sort}/{page}/" }, sort: { "Новинки": "", "Популярные": "rating" }, categories: { "Amateur": "amateur", "Anal": "anal", "Russian": "russian", "Teen": "teen", "Mature": "mature", "MILF": "milf" } }, list: { uri: "{page}/" }, search: { uri: "search?q={search}&sort=relevance&page={page}" }, contentParse: { nodes: "//a[@class='popbop vidLinkFX  videocard linkage']", name: { node: ".//div[@class='videotitle ']" }, href: { node: ".", attribute: "href" }, img: { node: ".//img[contains(@class, 'lazy-loading')]", attribute: "data-src" }, duration: { node: ".//span[@class='durlabel']" } }, view: { related: !0, nodeFile: { node: "//source", attribute: "src" } } },
-    // --- Rusvideos ---
     { enable: !0, displayname: "Rusvideos", host: "https://sex.rusvideos.art", menu: { route: { sort: "{host}/{page}?sortirovka={sort}", cat: "{host}/{cat}/{page}" }, sort: { "Новинки": "", "Популярнаe": "popularnoe" }, categories: { "Зрелые": "zrelye", "Молодые": "molodye", "Анал": "anal", "Минет": "minet", "Лесбиянки": "lesbians", "Групповухи": "gruppovuxi" } }, list: { uri: "{page}/" }, search: { uri: "poisk/{page}?q={search}" }, contentParse: { nodes: "//div[@class='thumb wide']", name: { node: ".//div[@class='thumb-title']" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img", attributes: ["data-original", "src"] }, duration: { node: ".//span[@class='ttime']" }, preview: { node: ".//img", attribute: "data-video" } }, view: { related: !0, nodeFile: { node: "//meta[@property='ya:ovs:content_url']", attribute: "content" } } },
-    // --- Veporn ---
     { enable: !0, displayname: "Veporn", host: "https://veporn.com", menu: { route: { cat: "{host}/{cat}/page/{page}/" }, categories: { "amateur": "amateur", "anal": "anal", "russian": "russian", "milf": "milf", "mature": "mature" } }, list: { uri: "page/{page}/" }, search: { uri: "page/{page}/?s={search}" }, contentParse: { nodes: "//article[contains(@class, 'loop-post vdeo')]", name: { node: ".//h2" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img", attribute: "src" }, duration: { node: ".//p//span[2]" } }, view: { related: !0, nodeFile: { node: "//source", attribute: "src" } } },
-    // --- Porntrex ---
     { enable: !0, displayname: "Porntrex", host: "https://www.porntrex.com", menu: { route: { sort: "{host}/{sort}/{page}/", cat: "{host}/categories/{cat}/{page}/" }, sort: { "Новинки": "", "Популярное": "most-popular", "Топ рейтинга": "top-rated", "Длинные": "longest" }, categories: { "Аматорское": "amateur", "Анальное": "anal", "Азиатки": "asian", "Лесби": "lesbian", "МИЛФ": "milf" } }, list: { uri: "latest-updates/{page}/" }, search: { uri: "search/{search}/latest-updates/{page}/" }, contentParse: { nodes: "//div[contains(@class,'video-preview-screen')]", name: { node: ".//p[@class='inf']//a" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img", attributes: ["data-src", "src"] }, duration: { node: ".//div[@class='durations']" } }, view: { related: !0, regexMatch: { matches: ["2160p", "1440p", "1080p", "720p", "480p", "360p"], pattern: "'(https?://[^/]+/get_file/[^']+_{value}.mp4/)'" } } },
-    // --- GayPornTube ---
     { enable: !0, displayname: "GayPornTube", host: "https://www.gayporntube.com", menu: { route: { sort: "{host}/{sort}/page{page}.html" }, sort: { "Новые": "most-recent", "Топ по рейтингу": "top-rated", "Длинные": "longest" } }, list: { uri: "page{page}.html" }, search: { uri: "search/videos/{search}/page{page}.html" }, contentParse: { nodes: "//div[contains(@class,'item') and contains(@class,'item-col')]", name: { node: ".//a[contains(@class,'title')]" }, href: { node: ".//a[contains(@class,'title')]", attribute: "href" }, img: { node: ".//img", attributes: ["data-src", "src"] }, preview: { node: ".//img", attribute: "data-preview" }, duration: { node: ".//div[contains(@class,'duration')]" } }, view: { related: !0, regexMatch: { pattern: 'src="([^"]+)" type="video/mp4"' } } },
-    // --- Vtrahe ---
     { enable: !0, displayname: "Vtrahe", host: "https://site.vtrahehd.tv", charset: "windows-1251", menu: { route: { sort: "{host}/{sort}/page/{page}/", cat: "{host}/{cat}/page/{page}/" }, sort: { "Новинки": "", "Рейтинговое": "top", "Популярнаe": "most-popular" }, categories: { "Русское": "russkoe-porno", "Анал": "analnoe-porno", "Зрелые": "zrelye-zhenshhiny" } }, list: { uri: "latest-updates/page/{page}/", firstpage: "" }, search: { uri: "?do=search&subaction=search&search_start={page}&full_search=0&result_from=25&story={search}" }, contentParse: { nodes: "//div[@class='innercont']", name: { node: ".//div[@class='preview_title']//a" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img", attribute: "src" }, duration: { node: ".//div[@class='dlit']" } }, view: { related: !0, eval: 'const match = html.match(/data-c="([^"]+)"/);if (!match) return null;const e = match[1].split(\';\');const videoId = parseInt(e[4]) || 0;const folder = 1000 * Math.floor(videoId / 1000);const qualitySuffix = e[1] === "720p" ? "" : "_" + e[1];return `https://${e[7]}.vstor.top/whlvid/${e[5]}/${e[6]}/${folder}/${videoId}/${videoId}${qualitySuffix}.mp4/${videoId}${qualitySuffix}.mp4`;' } },
-    // --- VtraheTV ---
     { enable: !0, displayname: "VtraheTV", host: "https://my.vtrahe.work", menu: { route: { sort: "{host}/{sort}/page/{page}/", cat: "{host}/{cat}/page/{page}/" }, sort: { "Новинки": "", "Рейтинговое": "top", "Популярнаe": "most-popular" }, categories: { "Русское": "russkoye", "Анал": "anal", "Зрелые": "zrelyye", "Мамки": "mamki" } }, list: { uri: "page/{page}/" }, search: { uri: "search/{search}/page/{page}/" }, contentParse: { nodes: "//div[@class='innercont']", name: { node: ".//div[@class='preview_title']//a" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img", attribute: "src" }, duration: { node: ".//div[@class='dlit']" } }, view: { related: !0, eval: "const match = html.match(/data-c=\"([^\"]+)\"/);if (!match) return null;const e = match[1].split(';');return `https://v${e[7]}.cdnde.com/x${e[7]}/upload_${e[0].replace(/^_/, '')}/${e[4]}/JOPORN_NET_${e[4]}_${e[1]}.mp4?time=${e[5]}`;" } },
-
-    // ============================================================
-    // [SOURCE: TrahKino] v1.1.0 — добавлен в v1.1.0
-    // fallback_host: null (зарезервировано — вставить домен-зеркало)
-    // ============================================================
     {
-      enable: !0,
-      displayname: "TrahKino",
-      host: "https://trahkino.me",
-      // [FALLBACK_SLOT] fallback_host: "https://MIRROR.trahkino.me", // раскомментировать при смене домена
-      menu: {
-        route: {
-          sort: "{host}/{sort}/{page}/",
-          cat: "{host}/categories/{cat}/{page}/"
-        },
-        sort: {
-          "Новое": "latest-updates",
-          "Лучшее": "top-rated",
-          "Популярное": "most-popular"
-        },
-        categories: {
-          "Все": "", "Любительское": "lyubitelskiy-seks", "Большие сиськи": "bolshie-siski",
-          "Большие попки": "bolshie-popki", "Минет": "minet", "Блондинки": "blondinki",
-          "Брюнетки": "bryunetki", "Хардкор": "hardkor", "Милфы": "milfy",
-          "Красотки": "krasotki", "Большие члены": "bolshie-hui", "Наездница": "naezdnica",
-          "Маленькие сиськи": "malenkie-siski", "Бритые киски": "britye-kiski",
-          "Красивое": "krasivyy-seks", "Азиатки": "aziatki",
-          "Кончают внутрь": "konchayut-vnutr", "Медсестра": "medsestra", "Анал": "anal",
-          "МЖМ": "mjm", "Раком": "rakom", "Дрочка члена": "drochka-chlena",
-          "Жесть": "jest", "На кровати": "na-krovati", "Реальное": "realnyy-seks",
-          "Женский оргазм": "jenskiy-orgazm", "В нижнем белье": "v-nijnem-bele",
-          "Японки": "yaponki", "Домашнее": "domashka", "Full HD": "full-hd",
-          "Жёны": "jeny", "В чулках": "v-chulkah", "На каблуках": "na-kablukah",
-          "В очках": "v-ochkah", "Толстушки": "tolstye", "В ванной": "v-vannoy",
-          "Ролевые игры": "rolevye-igry", "Пьяные": "pyanye", "Стриптиз": "striptiz",
-          "Мультики": "multiki", "В туалете": "v-tualete"
-        }
-      },
-      list: { uri: "latest-updates/{page}/", firstpage: "{host}" },
-      search: { uri: "search/{page}/?q={search}" },
-      contentParse: {
-        nodes: "//div[contains(@class,'item')]",
-        name: { node: ".//strong[contains(@class,'title')]" },
-        href: { node: ".//a", attribute: "href" },
-        img: { node: ".//img", attributes: ["data-original", "data-src", "src"] },
-        duration: { node: ".//div[contains(@class,'duration')]" }
-      },
-      view: {
-        related: !0,
-        regexMatch: {
-          matches: ["1080p", "720p", "480p", "360p"],
-          pattern: "function/0/(https://[^/]+/get_file/[^']+_{value}\\.mp4)/"
-        }
-      }
+      enable: !0, displayname: "TrahKino", host: "https://trahkino.me",
+      menu: { route: { sort: "{host}/{sort}/{page}/", cat: "{host}/categories/{cat}/{page}/" }, sort: { "Новое": "latest-updates", "Лучшее": "top-rated", "Популярное": "most-popular" }, categories: { "Все": "", "Любительское": "lyubitelskiy-seks", "Большие сиськи": "bolshie-siski", "Большие попки": "bolshie-popki", "Минет": "minet", "Блондинки": "blondinki", "Брюнетки": "bryunetki", "Хардкор": "hardkor", "Милфы": "milfy", "Красотки": "krasotki", "Большие члены": "bolshie-hui", "Наездница": "naezdnica", "Маленькие сиськи": "malenkie-siski", "Бритые киски": "britye-kiski", "Красивое": "krasivyy-seks", "Азиатки": "aziatki", "Кончают внутрь": "konchayut-vnutr", "Медсестра": "medsestra", "Анал": "anal", "МЖМ": "mjm", "Раком": "rakom", "Дрочка члена": "drochka-chlena", "Жесть": "jest", "На кровати": "na-krovati", "Реальное": "realnyy-seks", "Женский оргазм": "jenskiy-orgazm", "В нижнем белье": "v-nijnem-bele", "Японки": "yaponki", "Домашнее": "domashka", "Full HD": "full-hd", "Жёны": "jeny", "В чулках": "v-chulkah", "На каблуках": "na-kablukah", "В очках": "v-ochkah", "Толстушки": "tolstye", "В ванной": "v-vannoy", "Ролевые игры": "rolevye-igry", "Пьяные": "pyanye", "Стриптиз": "striptiz", "Мультики": "multiki", "В туалете": "v-tualete" } },
+      list: { uri: "latest-updates/{page}/", firstpage: "{host}" }, search: { uri: "search/{page}/?q={search}" },
+      contentParse: { nodes: "//div[contains(@class,'item')]", name: { node: ".//strong[contains(@class,'title')]" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img", attributes: ["data-original", "data-src", "src"] }, duration: { node: ".//div[contains(@class,'duration')]" } },
+      view: { related: !0, regexMatch: { matches: ["1080p", "720p", "480p", "360p"], pattern: "function/0/(https://[^/]+/get_file/[^']+_{value}\\.mp4)/" } }
     },
-
-    // ============================================================
-    // [SOURCE: UkDevilz] v1.2.0 — добавлен в v1.2.0
-    // fallback_host: null (зарезервировано — вставить домен-зеркало)
-    // Сайт: https://w0w.ukdevilz.com/now
-    // Структура: NoodleMagazine-подобная (pagination ?p=N, поиск /video/QUERY)
-    // ============================================================
     {
-      enable: !0,
-      displayname: "UkDevilz",
-      host: "https://w0w.ukdevilz.com",
-      // [FALLBACK_SLOT] fallback_host: "https://MIRROR.ukdevilz.com", // раскомментировать при смене домена
-      menu: {
-        route: {
-          sort: "{host}/{sort}?p={page}"
-        },
-        sort: {
-          "Новинки": "",
-          "Популярное": "popular"
-        }
-      },
-      list: { uri: "now?p={page}" },
-      search: { uri: "video/{search}?p={page}" },
-      contentParse: {
-        nodes: "//div[contains(@class, 'item')]",
-        name: { node: ".//div[@class='title'] | .//h3 | .//a[@class='title']" },
-        href: { node: ".//a", attribute: "href" },
-        img: { node: ".//img", attribute: "data-src" },
-        duration: { node: ".//div[@class='m_time'] | .//span[@class='time'] | .//div[contains(@class,'duration')]" },
-        preview: { node: ".//div", attribute: "data-trailer_url" }
-      },
-      view: {
-        related: !0,
-        regexMatch: {
-          pattern: '"file":"([^"]+)"'
-        }
-      }
+      enable: !0, displayname: "UkDevilz", host: "https://w0w.ukdevilz.com",
+      menu: { route: { sort: "{host}/{sort}?p={page}" }, sort: { "Новинки": "", "Популярное": "popular" } },
+      list: { uri: "now?p={page}" }, search: { uri: "video/{search}?p={page}" },
+      contentParse: { nodes: "//div[contains(@class, 'item')]", name: { node: ".//div[@class='title'] | .//h3 | .//a[@class='title']" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img", attribute: "data-src" }, duration: { node: ".//div[@class='m_time'] | .//span[@class='time'] | .//div[contains(@class,'duration')]" }, preview: { node: ".//div", attribute: "data-trailer_url" } },
+      view: { related: !0, regexMatch: { pattern: '"file":"([^"]+)"' } }
     }
-
-    // ============================================================
-    // [FALLBACK_NEW_SOURCE_SLOT]
-    // Для добавления нового источника — вставить запятую после
-    // закрывающей скобки } выше и добавить новый объект-конфиг здесь.
-    // Следуйте инструкции в README.md -> Раздел 3: Шаблон конфига.
-    // ============================================================
-
   ]; // конец массива P
-
   // ============================================================
   // [BLOCK:13:END]
+  // ============================================================
 
-  // [BLOCK:14:START] ROUTING — создание экземпляров и window.AdultJS
+  // ============================================================
+  // [BLOCK:14:START] ROUTING — экземпляры и window.AdultJS
   // ============================================================
   var z = new d, L = new g, j = new y, M = new v, T = new b, A = new f, I = new S(P);
 
-  // ============================================================
-  // [SECTION: ROUTING & WINDOW.ADULTJS] v1.0.0
-  // ============================================================
   !function () {
     function e() {
       return (e = _asyncToGenerator(_regenerator().m(function e(t) {
@@ -1969,356 +2299,250 @@ function _toPrimitive(e, t) {
       }))).apply(this, arguments)
     }
 
-    // ----------------------------------------------------------
-    // [STATUS_STORE] v1.3.1 — персистентное хранилище статусов
-    //
-    // Бэкенд: Lampa.Storage — данные сохраняются в localStorage
-    // и переживают перезапуск плагина и приложения.
-    //
-    // Ключ хранилища: "adultjs_site_status"
-    // Формат значения: JSON-объект { "xvideos.com": "green", ... }
-    //
-    // Значение статуса: "green" | "yellow" | "red"
-    // По умолчанию (не проверялся): "green"
-    // ----------------------------------------------------------
+    // ── [v2.0.0] Инициализация MirrorResolver при старте ─────
+    (function () {
+      MirrorResolver.resolve().then(function (mirrors) {
+        if (mirrors.xvideos)   g.host = mirrors.xvideos;
+        if (mirrors.xnxx)      y.host = mirrors.xnxx;
+        if (mirrors.spankbang) v.host = mirrors.spankbang;
+        if (mirrors.bongacams) d.host = mirrors.bongacams;
+        if (mirrors.eporner)   f.host = mirrors.eporner;
+        // chaturbate: один домен, зеркало не нужно
+        console.log('[AdultJS v2.0.0] Зеркала применены:', mirrors);
+      }).catch(function (err) {
+        console.warn('[AdultJS v2.0.0] MirrorResolver error:', err);
+      });
+    })();
+
+    // ── [v1.3.1] Хранилище статусов ──────────────────────────
     window.AdultJS_Status = window.AdultJS_Status || (function () {
-
-      var STORAGE_KEY = "adultjs_site_status";
-
-      // Значок для каждого статуса
-      var _dot = {
-        green:  "🟢",
-        yellow: "🟡",
-        red:    "🔴"
-      };
-
-      // Читаем сохранённые статусы из Lampa.Storage
+      var STORAGE_KEY = 'adultjs_site_status';
+      var _dot = { green: '🟢', yellow: '🟡', red: '🔴' };
       function _load() {
         try {
-          var raw = Lampa.Storage.get(STORAGE_KEY, "{}");
-          return (typeof raw === "string") ? JSON.parse(raw) : (raw || {});
-        } catch(e) {
-          return {};
-        }
+          var raw = Lampa.Storage.get(STORAGE_KEY, '{}');
+          return (typeof raw === 'string') ? JSON.parse(raw) : (raw || {});
+        } catch (e) { return {}; }
       }
-
-      // Записываем статусы в Lampa.Storage
       function _save(store) {
-        try {
-          Lampa.Storage.set(STORAGE_KEY, JSON.stringify(store));
-        } catch(e) {}
+        try { Lampa.Storage.set(STORAGE_KEY, JSON.stringify(store)); } catch (e) {}
       }
-
       return {
-        // Установить статус источника и сохранить в Storage
         set: function (name, status) {
-          var store = _load();
-          store[name.toLowerCase()] = status;
-          _save(store);
+          var store = _load(); store[name.toLowerCase()] = status; _save(store);
         },
-        // Получить значок для отображения рядом с названием
         dot: function (name) {
-          var store = _load();
-          var s = store[name.toLowerCase()];
-          return _dot[s] || _dot.green;
+          var store = _load(); var s = store[name.toLowerCase()]; return _dot[s] || _dot.green;
         },
-        // Получить текущий статус (green/yellow/red)
         get: function (name) {
-          var store = _load();
-          return store[name.toLowerCase()] || "green";
+          var store = _load(); return store[name.toLowerCase()] || 'green';
         },
-        // Сбросить все статусы (перед новой проверкой)
-        reset: function () {
-          _save({});
-        },
-        // Инвалидировать кэш меню → при следующем открытии
-        // l.menu перечитает значки из Storage
-        invalidateMenu: function () {
-          window._adultjs_menu_dirty = true;
-        }
+        reset: function () { _save({}); },
+        invalidateMenu: function () { window._adultjs_menu_dirty = true; }
       };
     })();
 
     window.AdultJS = {
       Menu: function () {
         var e = [
-          // --------------------------------------------------
-          // [STATUS_IN_MENU] v1.3.0 — значок статуса в заголовке
-          // Формат: "🟢 xvideos.com"
-          // --------------------------------------------------
-          { title: window.AdultJS_Status.dot("xvideos.com")    + " xvideos.com",    playlist_url: g.host },
-          { title: window.AdultJS_Status.dot("spankbang.com")  + " spankbang.com",  playlist_url: v.host },
-          { title: window.AdultJS_Status.dot("eporner.com")    + " eporner.com",    playlist_url: f.host },
-          { title: window.AdultJS_Status.dot("xnxx.com")       + " xnxx.com",       playlist_url: y.host },
-          { title: window.AdultJS_Status.dot("bongacams.com")  + " bongacams.com",  playlist_url: d.host },
-          { title: window.AdultJS_Status.dot("chaturbate.com") + " chaturbate.com", playlist_url: b.host }
+          { title: window.AdultJS_Status.dot('xvideos.com')    + ' xvideos.com',    playlist_url: g.host },
+          { title: window.AdultJS_Status.dot('spankbang.com')  + ' spankbang.com',  playlist_url: v.host },
+          { title: window.AdultJS_Status.dot('eporner.com')    + ' eporner.com',    playlist_url: f.host },
+          { title: window.AdultJS_Status.dot('xnxx.com')       + ' xnxx.com',       playlist_url: y.host },
+          { title: window.AdultJS_Status.dot('bongacams.com')  + ' bongacams.com',  playlist_url: d.host },
+          { title: window.AdultJS_Status.dot('chaturbate.com') + ' chaturbate.com', playlist_url: b.host }
         ];
-        P.filter(function (e) { return e.enable }).forEach(function (t) {
+        P.filter(function (e) { return e.enable; }).forEach(function (t) {
           var name = t.displayname.toLowerCase();
           e.push({
-            title:        window.AdultJS_Status.dot(name) + " " + name,
-            playlist_url: "nexthub://".concat(t.displayname, "?mode=list")
+            title:        window.AdultJS_Status.dot(name) + ' ' + name,
+            playlist_url: 'nexthub://' + t.displayname + '?mode=list'
           });
         });
-        // --------------------------------------------------------
-        // [DEBUG_MENU_ITEM] v1.2.0-debug — кнопка диагностики
-        // Последний пункт меню выбора сайтов.
-        // Для отката: удалить этот блок e.push({...}) до return e
-        // --------------------------------------------------------
-        e.push({
-          title: "📝 Диагностика источников",
-          playlist_url: "__adultjs_debug__",
-          debug_action: true
-        });
-        return e
+        // ── [v1.2.0-debug] Диагностика ──
+        e.push({ title: '📝 Диагностика источников', playlist_url: '__adultjs_debug__', debug_action: true });
+        // ── [v2.0.0] Обновление зеркал ──
+        e.push({ title: '🔄 Обновить зеркала', playlist_url: '__adultjs_mirrors__', debug_action: true, mirror_action: true });
+        return e;
       },
-      Invoke: function (t) { return e.apply(this, arguments) }
+      Invoke: function (t) { return e.apply(this, arguments); }
     };
   }();
+  // ============================================================
+  // [BLOCK:14:END]
+  // ============================================================
 
   // ============================================================
-// [BLOCK:14:END]
-
-  // [BLOCK:15:START] DEBUG_MODULE — модуль диагностики AdultJS_Debugger
-  // Для отката к версии без отладки:
-  //   1) Удалить блок [DEBUG_MENU_ITEM]    — e.push в window.AdultJS.Menu
-  //   2) Удалить блок [DEBUG_MENU_HANDLER] — if (t.debug_action) в onSelect
-  //   3) Удалить весь блок от этой строки до [DEBUG_MODULE_END]
-  //   4) Удалить [STATUS_STORE] из block_14 (window.AdultJS_Status)
-  //   5) Сохранить файл как AdultJS.txt (без -debug суффикса)
+  // [BLOCK:15:START] DEBUG_MODULE v2.0.0
   // ============================================================
   window.AdultJS_Debugger = (function () {
 
-    var TIMEOUT_MS = 8000;
+    var TIMEOUT_MS      = 8000;
+    var NOTIFY_PAUSE_MS = 3000;
+    var NOTIFY_LAST_MS  = 5000;
 
-    // Список всех источников для проверки:
-    // hardcoded (BongaCams, XVideos, XNXX, SpankBang, Chaturbate, EPorner)
-    // + все nexthub-источники из массива P
+    // ── Список всех источников ───────────────────────────────
     function getAllSources() {
       var fixed = [
-        { name: "bongacams.com",  url: d.host },
-        { name: "xvideos.com",    url: g.host },
-        { name: "xnxx.com",       url: y.host },
-        { name: "spankbang.com",  url: v.host },
-        { name: "chaturbate.com", url: b.host },
-        { name: "eporner.com",    url: f.host }
+        { name: 'bongacams',  url: d.host },
+        { name: 'xvideos',    url: g.host },
+        { name: 'xnxx',       url: y.host },
+        { name: 'spankbang',  url: v.host },
+        { name: 'chaturbate', url: b.host },
+        { name: 'eporner',    url: f.host }
       ];
-      var nexthub = P.filter(function(cfg) { return cfg.enable; }).map(function(cfg) {
+      var nexthub = P.filter(function (cfg) { return cfg.enable; }).map(function (cfg) {
         return { name: cfg.displayname, url: cfg.host };
       });
       return fixed.concat(nexthub);
     }
 
-    // Показать уведомление на TV через Lampa.Noty (только Noty, без console)
-    function notify(msg) {
-      try { Lampa.Noty.show(msg); } catch(e) {}
-    }
+    // ── Уведомление ──────────────────────────────────────────
+    function notify(msg) { try { Lampa.Noty.show(msg); } catch (e) {} }
 
-    // Проверка доступности одного источника (GET первой страницы)
-    // Возвращает Promise<{name, ok, cards, error}>
-    function checkSource(sourceObj) {
-      var name = sourceObj.name;
-      var url = sourceObj.url;
-
-      // Для nexthub-источников строим реальный URL первой страницы
-      var testUrl = url;
-      if (url.startsWith("nexthub://")) {
-        var cfg = P.find(function(c) {
-          return ("nexthub://" + c.displayname) === url
-              || c.displayname.toLowerCase() === name.toLowerCase();
-        });
-        if (cfg && cfg.list) {
-          var uri = cfg.list.firstpage || cfg.list.uri || "";
-          testUrl = uri
-            .replace("{host}", cfg.host)
-            .replace("{page}", "1")
-            .replace("{sort}", "")
-            .replace("{cat}", "");
-          if (!testUrl.startsWith("http")) {
-            testUrl = cfg.host.replace(/\/?$/, "/") + testUrl.replace(/^\//, "");
-          }
-        } else {
-          testUrl = "";
-        }
-      }
-
-      if (!testUrl || testUrl === "") {
-        return Promise.resolve({ name: name, ok: false, cards: 0, error: "Не удалось определить URL" });
-      }
-
-      return new Promise(function(resolve) {
-        var timer = setTimeout(function() {
-          resolve({ name: name, ok: false, cards: 0, error: "Таймаут " + TIMEOUT_MS + "мс" });
-        }, TIMEOUT_MS);
-
-        fetch(testUrl, {
-          method: "GET",
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
-          }
-        })
-        .then(function(resp) {
-          clearTimeout(timer);
-          if (!resp.ok) {
-            resolve({ name: name, ok: false, cards: 0, error: "HTTP " + resp.status });
-            return;
-          }
-          return resp.text().then(function(html) {
-            var cardCount = 0;
-            try {
-              var cfg2 = P.find(function(c) { return c.displayname.toLowerCase() === name.toLowerCase(); });
-              if (cfg2 && cfg2.contentParse && cfg2.contentParse.nodes) {
-                var doc = (new DOMParser()).parseFromString(html, "text/html");
-                var nodes = doc.evaluate(
-                  cfg2.contentParse.nodes, doc, null,
-                  XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null
-                );
-                cardCount = nodes.snapshotLength;
-              } else {
-                var matches = html.match(/data-src=/g);
-                cardCount = matches ? matches.length : 0;
-              }
-            } catch(ex) {
-              cardCount = -1;
-            }
-            resolve({ name: name, ok: true, cards: cardCount, error: null });
-          });
-        })
-        .catch(function(err) {
-          clearTimeout(timer);
-          resolve({ name: name, ok: false, cards: 0, error: err.message || "Ошибка сети" });
-        });
-      });
-    }
-
-    // --------------------------------------------------------
-    // Очередь уведомлений: пауза 3 сек между сообщениями,
-    // пауза 5 сек после последнего (для чтения).
-    // --------------------------------------------------------
-    var NOTIFY_PAUSE_MS = 3000;
-    var NOTIFY_LAST_MS  = 5000;
-
+    // ── Очередь уведомлений ───────────────────────────────────
     function notifyQueue(messages) {
-      if (!messages || messages.length === 0) return;
+      if (!messages || !messages.length) return;
       var i = 0;
       function showNext() {
         if (i >= messages.length) return;
-        var item   = messages[i];
         var isLast = (i === messages.length - 1);
+        try { Lampa.Noty.show(messages[i].text); } catch (e) {}
         i++;
-        try { Lampa.Noty.show(item.text); } catch(e) {}
         setTimeout(showNext, isLast ? NOTIFY_LAST_MS : NOTIFY_PAUSE_MS);
       }
       showNext();
     }
 
-    // ----------------------------------------------------------
-    // [STATUS_UPDATE] v1.3.1 — обновление статусов в Lampa.Storage
-    //
-    // Логика определения цвета:
-    //   🔴 red    — сайт недоступен (HTTP-ошибка, таймаут, сетевая ошибка)
-    //   🟡 yellow — сайт доступен, но карточек < 3 (возможна проблема парсинга)
-    //   🟢 green  — сайт доступен, карточек >= 3
-    //
-    // Оптимизация: пишем весь объект за один вызов Storage.set
-    // вместо N отдельных вызовов (уменьшает количество JSON.stringify)
-    // ----------------------------------------------------------
-    function applyStatuses(results) {
-      if (!window.AdultJS_Status) return;
+    // ── Проверка одного источника ─────────────────────────────
+    function checkSource(sourceObj) {
+      var name    = sourceObj.name;
+      var url     = sourceObj.url;
+      var testUrl = url;
 
-      // Читаем текущее состояние (могут быть статусы от прошлой проверки)
-      var STORAGE_KEY = "adultjs_site_status";
-      var store = {};
-      try {
-        var raw = Lampa.Storage.get(STORAGE_KEY, "{}");
-        store = (typeof raw === "string") ? JSON.parse(raw) : (raw || {});
-      } catch(e) { store = {}; }
+      // Для nexthub — строим реальный URL
+      if (url.startsWith('nexthub://')) {
+        var cfg = P.find(function (c) {
+          return c.displayname.toLowerCase() === name.toLowerCase();
+        });
+        if (cfg && cfg.list) {
+          testUrl = (cfg.list.firstpage || cfg.list.uri || '')
+            .replace('{host}', cfg.host).replace('{page}', '1')
+            .replace('{sort}', '').replace('{cat}', '');
+          if (!testUrl.startsWith('http')) {
+            testUrl = cfg.host.replace(/\/?$/, '/') + testUrl.replace(/^\//, '');
+          }
+        } else { testUrl = ''; }
+      }
 
-      // Обновляем статусы батчем
-      results.forEach(function(r) {
-        var status;
-        if (!r.ok) {
-          status = "red";
-        } else if (r.cards >= 0 && r.cards < 3) {
-          status = "yellow";
-        } else {
-          status = "green";
-        }
-        store[r.name.toLowerCase()] = status;
+      if (!testUrl) {
+        return Promise.resolve({ name: name, ok: false, cards: 0, error: 'Нет URL' });
+      }
+
+      return new Promise(function (resolve) {
+        var timer = setTimeout(function () {
+          resolve({ name: name, ok: false, cards: 0, error: 'Таймаут ' + TIMEOUT_MS + 'мс' });
+        }, TIMEOUT_MS);
+
+        requestWithRetry(testUrl, {
+          method: 'GET',
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+        }, 1).then(function (resp) {
+          clearTimeout(timer);
+          if (!resp.ok) {
+            resolve({ name: name, ok: false, cards: 0, error: 'HTTP ' + resp.status });
+            return;
+          }
+          return resp.text().then(function (html) {
+            var cardCount = 0;
+            try {
+              var cfg2 = P.find(function (c) { return c.displayname.toLowerCase() === name.toLowerCase(); });
+              if (cfg2 && cfg2.contentParse && cfg2.contentParse.nodes) {
+                var doc   = (new DOMParser()).parseFromString(html, 'text/html');
+                var nodes = doc.evaluate(cfg2.contentParse.nodes, doc, null,
+                  XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+                cardCount = nodes.snapshotLength;
+              } else {
+                var matches = html.match(/data-src=/g);
+                cardCount = matches ? matches.length : 0;
+              }
+            } catch (ex) { cardCount = -1; }
+            resolve({ name: name, ok: true, cards: cardCount, error: null });
+          });
+        }).catch(function (err) {
+          clearTimeout(timer);
+          resolve({ name: name, ok: false, cards: 0, error: err.message || 'Ошибка сети' });
+        });
       });
-
-      // Один вызов записи в Storage
-      try {
-        Lampa.Storage.set(STORAGE_KEY, JSON.stringify(store));
-      } catch(e) {}
     }
 
-    // Запуск диагностики всех источников последовательно
+    // ── Применить статусы в Lampa.Storage ─────────────────────
+    function _applyStatuses(results) {
+      var STORAGE_KEY = 'adultjs_site_status';
+      var store = {};
+      try {
+        var raw = Lampa.Storage.get(STORAGE_KEY, '{}');
+        store = (typeof raw === 'string') ? JSON.parse(raw) : (raw || {});
+      } catch (e) { store = {}; }
+      results.forEach(function (r) {
+        var status = !r.ok ? 'red' : (r.cards >= 0 && r.cards < 3) ? 'yellow' : 'green';
+        store[r.name.toLowerCase()] = status;
+      });
+      try { Lampa.Storage.set(STORAGE_KEY, JSON.stringify(store)); } catch (e) {}
+    }
+
+    // ── Основная диагностика ──────────────────────────────────
     function runAll() {
       var sources = getAllSources();
       var total   = sources.length;
       var idx     = 0;
       var results = [];
 
-      // Сбрасываем все статусы перед новой проверкой
-      if (window.AdultJS_Status) { window.AdultJS_Status.reset(); }
-
-      notify("🔍 Диагностика AdultJS: проверяем " + total + " источников...");
+      if (window.AdultJS_Status) window.AdultJS_Status.reset();
+      notify('🔍 Диагностика AdultJS v2.0.0: ' + total + ' источников...');
 
       function checkNext() {
         if (idx >= total) {
-          var ok     = results.filter(function(r) { return r.ok; });
-          var failed = results.filter(function(r) { return !r.ok; });
-          var warned = results.filter(function(r) { return r.ok && r.cards >= 0 && r.cards < 3; });
+          var ok     = results.filter(function (r) { return r.ok; });
+          var failed = results.filter(function (r) { return !r.ok; });
+          var warned = results.filter(function (r) { return r.ok && r.cards >= 0 && r.cards < 3; });
 
-          // ------------------------------------------------
-          // Обновляем значки статуса в Lampa.Storage
-          // и инвалидируем кэш меню — при следующем открытии
-          // меню сайтов значки будут прочитаны из Storage свежо
-          // ------------------------------------------------
-          applyStatuses(results);
-          if (window.AdultJS_Status) { window.AdultJS_Status.invalidateMenu(); }
+          _applyStatuses(results);
+          if (window.AdultJS_Status) window.AdultJS_Status.invalidateMenu();
 
-          // ------------------------------------------------
-          // Сообщение A: итоговая сводка
-          // ------------------------------------------------
-          var summary = "✅ Готово: " + ok.length + " OK"
-            + (failed.length ? " | ❌ " + failed.length + " ошибок"         : "")
-            + (warned.length ? " | ⚠️ "  + warned.length + " предупреждений" : "")
-            + " (всего: " + total + ")";
+          var summary = '✅ ' + ok.length + ' OK'
+            + (failed.length ? ' | ❌ ' + failed.length + ' ошибок' : '')
+            + (warned.length ? ' | ⚠️ '  + warned.length + ' предупреждений' : '')
+            + ' (всего: ' + total + ')';
 
-          // ------------------------------------------------
-          // Сообщение B: детали ошибок и предупреждений
-          // ------------------------------------------------
           var detailLines = [];
-          failed.forEach(function(r) {
-            detailLines.push("🔴 " + r.name + ": " + r.error);
+          failed.forEach(function (r) {
+            detailLines.push('🔴 ' + r.name + ': ' + r.error
+              + ' [fails: ' + SourceHealth.getFailCount(r.name) + ']');
           });
-          warned.forEach(function(r) {
-            detailLines.push("🟡 " + r.name + ": мало карточек (" + r.cards + ") — проблема парсинга");
+          warned.forEach(function (r) {
+            detailLines.push('🟡 ' + r.name + ': карточек=' + r.cards + ' (проблема парсинга)');
+          });
+
+          // HealthStats — только источники с rate < 100%
+          var healthLines = [];
+          var allHealth   = SourceHealth.getAll();
+          Object.keys(allHealth).forEach(function (n) {
+            var rate = Math.round(SourceHealth.getSuccessRate(n) * 100);
+            if (rate < 100) healthLines.push(n + ': ' + rate + '%');
           });
 
           var queue = [{ text: summary }];
-          if (detailLines.length > 0) {
-            queue.push({ text: detailLines.join("\n") });
-          }
-
-          // ------------------------------------------------
-          // Подсказка: объясняем значки пользователю
-          // ------------------------------------------------
-          queue.push({
-            text: "🟢 — ОК  🟡 — мало карточек  🔴 — недоступен\nЗначки обновлены в меню «Сайты»"
-          });
+          if (detailLines.length > 0) queue.push({ text: detailLines.join('\n') });
+          if (healthLines.length > 0) queue.push({ text: '📊 SuccessRate:\n' + healthLines.join('\n') });
+          queue.push({ text: '🟢 ОК  🟡 мало карточек  🔴 недоступен\nЗначки обновлены в меню «Сайты»' });
 
           notifyQueue(queue);
           return;
         }
 
-        // Тихая обработка во время проверки — TV не засоряем
-        var src = sources[idx];
-        idx++;
-
-        checkSource(src).then(function(result) {
+        var src = sources[idx++];
+        checkSource(src).then(function (result) {
           results.push(result);
           checkNext();
         });
@@ -2327,17 +2551,34 @@ function _toPrimitive(e, t) {
       checkNext();
     }
 
-    // Публичный API модуля отладки
-    return {
-      runAll:       runAll,
-      checkSource:  checkSource,
-      getAllSources: getAllSources
-    };
+    // ── Диагностика зеркал ────────────────────────────────────
+    function runMirrorCheck() {
+      notify('🔄 Обновляем зеркала...');
+      MirrorResolver.resolve(true).then(function (mirrors) {
+        var lines = Object.keys(mirrors).map(function (key) {
+          return key + ': ' + (mirrors[key] || '❌ не найдено');
+        });
+        notifyQueue([
+          { text: '✅ Зеркала обновлены (' + lines.length + ' сайтов)' },
+          { text: lines.join('\n') }
+        ]);
+      }).catch(function (err) {
+        notify('❌ Ошибка обновления зеркал: ' + (err.message || err));
+      });
+    }
 
+    // Публичный API
+    return {
+      runAll:          runAll,
+      runMirrorCheck:  runMirrorCheck,
+      checkSource:     checkSource,
+      getAllSources:    getAllSources,
+      mirrorResolver:  MirrorResolver,
+      sourceHealth:    SourceHealth
+    };
   })();
   // ============================================================
-  // [DEBUG_MODULE_END] AdultJS_Debugger v1.2.0-debug
-// [BLOCK:15:END]
+  // [BLOCK:15:END] DEBUG_MODULE v2.0.0
   // ============================================================
 
 }();
