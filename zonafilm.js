@@ -1,29 +1,16 @@
 // ============================================================
 // AdultJS Plugin for Lampa (Android TV) — DEBUG VERSION
-// VERSION: 1.3.2
+// VERSION: 1.2.0-debug
 // CHANGELOG:
 //   v1.0.0        - Оригинальная версия
 //   v1.1.0        - Добавлен TrahKino, переименован плагин "Adult JS"
 //   v1.2.0        - Добавлен UkDevilz, fallback_host механизм
 //   v1.2.0-debug  - Встроен модуль отладки AdultJS_Debugger:
-//                   * Кнопка "Диагностика источников" в меню сайтов
-//                   * Проверка доступности каждого источника (GET + счёт карточек)
+//                   * Кнопка "Диагностика источников" в настройках Lampa
+//                   * Проверка доступности каждого источника (HEAD-запрос)
+//                   * Проверка парсинга (запрос первой страницы + счёт карточек)
 //                   * Вывод итогов через Lampa.Noty.show (TV-уведомления)
-//                   * Очередь Noty: сводка → детали (пауза 3с) → подсказка (5с)
-//   v1.3.0        - Цветные значки статуса источников в меню сайтов:
-//                   * 🟢 зелёный — источник доступен, карточек >= 3
-//                   * 🟡 жёлтый — доступен, но карточек < 3 (проблема парсинга)
-//                   * 🔴 красный — недоступен (HTTP-ошибка / таймаут)
-//                   * Изначально все источники отображаются как 🟢
-//   v1.3.1        - Исправление: значки теперь реально обновляются в меню
-//   v1.3.2        - Исправлена диагностика xvideos (ложный 🔴)
-//                   Исправлен парсер SpankBang (новый HTML 2024+)
-//                   Исправлен JopaOnline: добавлен nodeFile og:video
-//                   Версия плагина отображается в настройках Lampa
-//                   * Хранилище статусов: Lampa.Storage (персистентное)
-//                   * Статусы сохраняются после перезапуска приложения
-//                   * Кэш меню инвалидируется после диагностики
-//                   * Батчевая запись в Storage (один JSON.stringify)
+//                   * Логирование ошибок в console.error с тегом [AdultJS-DEBUG]
 // ============================================================
 // [DEBUG_MODULE_START] — не удалять этот маркер
 // ============================================================
@@ -639,31 +626,8 @@ function _toPrimitive(e, t) {
           window.sisi_add_param_ready || (window.sisi_add_param_ready = !0,
             Lampa.SettingsApi.addComponent({
               component: "AdultJS",
-              // [VERSION_DISPLAY] v1.3.2 — версия отображается в заголовке компонента
-              name: Lampa.Lang.translate("lampac_adultName") + "  v 1.3.2",
+              name: Lampa.Lang.translate("lampac_adultName"),
               icon: '<svg width="200" height="243" viewBox="0 0 200 243" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M187.714 130.727C206.862 90.1515 158.991 64.2019 100.983 64.2019C42.9759 64.2019 -4.33044 91.5669 10.875 130.727C26.0805 169.888 63.2501 235.469 100.983 234.997C138.716 234.526 168.566 171.303 187.714 130.727Z" stroke="currentColor" stroke-width="15"/><path d="M102.11 62.3146C109.995 39.6677 127.46 28.816 169.692 24.0979C172.514 56.1811 135.338 64.2018 102.11 62.3146Z" stroke="currentColor" stroke-width="15"/><path d="M90.8467 62.7863C90.2285 34.5178 66.0667 25.0419 31.7127 33.063C28.8904 65.1461 68.8826 62.7863 90.8467 62.7863Z" stroke="currentColor" stroke-width="15"/><path d="M100.421 58.5402C115.627 39.6677 127.447 13.7181 85.2149 9C82.3926 41.0832 83.5258 35.4214 100.421 58.5402Z" stroke="currentColor" stroke-width="15"/><rect x="39.0341" y="98.644" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="90.8467" y="92.0388" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="140.407" y="98.644" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="116.753" y="139.22" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="64.9404" y="139.22" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="93.0994" y="176.021" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/></svg>'
-            }),
-
-            // --------------------------------------------------------
-            // [PARAM: version_info] v1.3.2 — строка версии в настройках
-            // type:"select" с одним значением = нередактируемая строка-label
-            // --------------------------------------------------------
-            Lampa.SettingsApi.addParam({
-              component: "AdultJS",
-              param: {
-                name:    "adultjs_version",
-                type:    "select",
-                values:  "v 1.3.2",
-                default: "v 1.3.2"
-              },
-              field: {
-                name:        "Версия плагина",
-                description: "AdultJS v 1.3.2 — debug"
-              },
-              onRender: function (e) {
-                // Делаем поле нередактируемым: убираем интерактивность
-                e.find(".selector").removeClass("selector");
-              }
             }),
 
             // --------------------------------------------------------
@@ -1766,9 +1730,7 @@ function _toPrimitive(e, t) {
     // --- Ebun ---
     { enable: !0, displayname: "Ebun", host: "https://www1.ebun.tv", menu: { route: { sort: "{host}/{sort}/{page}/", cat: "{host}/categories/{cat}/{page}/", catsort: "{host}/categories/{cat}/{sort}/{page}/" }, sort: { "Новинки": "", "Топ рейтинга": "top-rated", "Популярнаe": "most-popular" }, categories: { "Русское": "russkoe", "Анал": "anal", "Зрелые": "zrelye", "Мамки": "mamki" } }, list: { uri: "latest-updates/{page}/" }, search: { uri: "search/{search}/{page}/" }, contentParse: { nodes: "//div[contains(@class, 'item th-item item_new')]", name: { node: ".//div[@class='item-title']" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img", attribute: "data-src" }, duration: { node: ".//div[@class='meta-time']" } }, view: { iframe: { pattern: '<iframe[^>]+ src="([^"]+)"' }, regexMatch: { matches: ["video_alt_url", "video_url"], pattern: "{value}:[\\t ]+'([^']+)'" } } },
     // --- JopaOnline ---
-    // [FIX v1.3.2] JopaOnline сменил JS-плеер. Добавлен nodeFile как дополнительный способ извлечения URL видео (og:video мета-тег)
-    // Старый паттерн video_alt_{value} оставлен как fallback.
-    { enable: !0, displayname: "JopaOnline", host: "https://jopaonline.mobi", menu: { route: { sort: "{host}/{sort}/{page}", cat: "{host}/categories/{cat}/{page}", catsort: "{host}/categories/{cat}/{sort}/{page}" }, sort: { "Новинки": "", "Топ рейтинга": "toprated", "Популярнаe": "popular" }, categories: { "Мамки": "mamki", "Русское": "russkoe", "Зрелые": "zrelye", "Анал": "anal" } }, list: { uri: "{page}" }, search: { uri: "search/{search}/{page}" }, contentParse: { nodes: "//div[@class='th']", name: { node: ".//p" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img", attribute: "src" }, duration: { node: ".//div[@class='th-duration']" }, preview: { node: ".//img", attribute: "data-preview" } }, view: { related: !0, nodeFile: { node: "//meta[@property='og:video']", attribute: "content" }, regexMatch: { matches: ["url3", "url2", "url"], pattern: "video_alt_{value}:[\\t ]+'([^']+)'" } } },
+    { enable: !0, displayname: "JopaOnline", host: "https://jopaonline.mobi", menu: { route: { sort: "{host}/{sort}/{page}", cat: "{host}/categories/{cat}/{page}", catsort: "{host}/categories/{cat}/{sort}/{page}" }, sort: { "Новинки": "", "Топ рейтинга": "toprated", "Популярнаe": "popular" }, categories: { "Мамки": "mamki", "Русское": "russkoe", "Зрелые": "zrelye", "Анал": "anal" } }, list: { uri: "{page}" }, search: { uri: "search/{search}/{page}" }, contentParse: { nodes: "//div[@class='th']", name: { node: ".//p" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img", attribute: "src" }, duration: { node: ".//div[@class='th-duration']" }, preview: { node: ".//img", attribute: "data-preview" } }, view: { related: !0, regexMatch: { matches: ["url3", "url2", "url"], pattern: "video_alt_{value}:[\\t ]+'([^']+)'" } } },
     // --- NoodleMagazine ---
     { enable: !0, displayname: "NoodleMagazine", host: "https://adult.noodlemagazine.com", menu: { route: { sort: "{host}/{sort}/week?p={page}" }, sort: { "Новинки": "", "Популярное": "popular" } }, list: { uri: "now?p={page}" }, search: { uri: "video/{search}?p={page}" }, contentParse: { nodes: "//div[contains(@class, 'item')]", name: { node: ".//div[@class='title']" }, href: { node: ".//a", attribute: "href" }, img: { node: ".//img", attribute: "data-src" }, duration: { node: ".//div[@class='m_time']" }, preview: { node: ".//div", attribute: "data-trailer_url" } }, view: { related: !0, regexMatch: { pattern: '"file":"([^"]+)"' } } },
     // --- Porndig ---
@@ -1970,20 +1932,14 @@ function _toPrimitive(e, t) {
     }
 
     // ----------------------------------------------------------
-    // [STATUS_STORE] v1.3.1 — персистентное хранилище статусов
-    //
-    // Бэкенд: Lampa.Storage — данные сохраняются в localStorage
-    // и переживают перезапуск плагина и приложения.
-    //
-    // Ключ хранилища: "adultjs_site_status"
-    // Формат значения: JSON-объект { "xvideos.com": "green", ... }
-    //
-    // Значение статуса: "green" | "yellow" | "red"
-    // По умолчанию (не проверялся): "green"
+    // [STATUS_STORE] v1.3.0 — хранилище статусов источников
+    // Ключ: имя источника (строчными буквами)
+    // Значение: "green" | "yellow" | "red"
+    // Изначально все источники — "green"
+    // Обновляется модулем AdultJS_Debugger после runAll()
     // ----------------------------------------------------------
     window.AdultJS_Status = window.AdultJS_Status || (function () {
-
-      var STORAGE_KEY = "adultjs_site_status";
+      var _store = {};
 
       // Значок для каждого статуса
       var _dot = {
@@ -1992,49 +1948,24 @@ function _toPrimitive(e, t) {
         red:    "🔴"
       };
 
-      // Читаем сохранённые статусы из Lampa.Storage
-      function _load() {
-        try {
-          var raw = Lampa.Storage.get(STORAGE_KEY, "{}");
-          return (typeof raw === "string") ? JSON.parse(raw) : (raw || {});
-        } catch(e) {
-          return {};
-        }
-      }
-
-      // Записываем статусы в Lampa.Storage
-      function _save(store) {
-        try {
-          Lampa.Storage.set(STORAGE_KEY, JSON.stringify(store));
-        } catch(e) {}
-      }
-
       return {
-        // Установить статус источника и сохранить в Storage
+        // Установить статус источника
         set: function (name, status) {
-          var store = _load();
-          store[name.toLowerCase()] = status;
-          _save(store);
+          _store[name.toLowerCase()] = status;
         },
         // Получить значок для отображения рядом с названием
         dot: function (name) {
-          var store = _load();
-          var s = store[name.toLowerCase()];
+          var s = _store[name.toLowerCase()];
+          // Если статус не установлен — считаем зелёным (не проверялся)
           return _dot[s] || _dot.green;
         },
         // Получить текущий статус (green/yellow/red)
         get: function (name) {
-          var store = _load();
-          return store[name.toLowerCase()] || "green";
+          return _store[name.toLowerCase()] || "green";
         },
-        // Сбросить все статусы (перед новой проверкой)
+        // Сбросить все статусы (например, перед новой проверкой)
         reset: function () {
-          _save({});
-        },
-        // Инвалидировать кэш меню → при следующем открытии
-        // l.menu перечитает значки из Storage
-        invalidateMenu: function () {
-          window._adultjs_menu_dirty = true;
+          _store = {};
         }
       };
     })();
@@ -2084,8 +2015,7 @@ function _toPrimitive(e, t) {
   //   1) Удалить блок [DEBUG_MENU_ITEM]    — e.push в window.AdultJS.Menu
   //   2) Удалить блок [DEBUG_MENU_HANDLER] — if (t.debug_action) в onSelect
   //   3) Удалить весь блок от этой строки до [DEBUG_MODULE_END]
-  //   4) Удалить [STATUS_STORE] из block_14 (window.AdultJS_Status)
-  //   5) Сохранить файл как AdultJS.txt (без -debug суффикса)
+  //   4) Сохранить файл как AdultJS.txt (без -debug суффикса)
   // ============================================================
   window.AdultJS_Debugger = (function () {
 
@@ -2114,6 +2044,7 @@ function _toPrimitive(e, t) {
       try { Lampa.Noty.show(msg); } catch(e) {}
     }
 
+
     // Проверка доступности одного источника (GET первой страницы)
     // Возвращает Promise<{name, ok, cards, error}>
     function checkSource(sourceObj) {
@@ -2123,6 +2054,7 @@ function _toPrimitive(e, t) {
       // Для nexthub-источников строим реальный URL первой страницы
       var testUrl = url;
       if (url.startsWith("nexthub://")) {
+        // Ищем конфиг в P по displayname
         var cfg = P.find(function(c) {
           return ("nexthub://" + c.displayname) === url
               || c.displayname.toLowerCase() === name.toLowerCase();
@@ -2138,7 +2070,7 @@ function _toPrimitive(e, t) {
             testUrl = cfg.host.replace(/\/?$/, "/") + testUrl.replace(/^\//, "");
           }
         } else {
-          testUrl = "";
+          testUrl = ""; // не можем определить
         }
       }
 
@@ -2164,6 +2096,8 @@ function _toPrimitive(e, t) {
             return;
           }
           return resp.text().then(function(html) {
+            // Считаем количество карточек по признаку наличия тегов с ссылками на видео
+            // Простая эвристика: ищем href="/video" или data-src= в тексте
             var cardCount = 0;
             try {
               var cfg2 = P.find(function(c) { return c.displayname.toLowerCase() === name.toLowerCase(); });
@@ -2175,6 +2109,7 @@ function _toPrimitive(e, t) {
                 );
                 cardCount = nodes.snapshotLength;
               } else {
+                // fallback: считаем вхождения data-src=
                 var matches = html.match(/data-src=/g);
                 cardCount = matches ? matches.length : 0;
               }
@@ -2192,76 +2127,40 @@ function _toPrimitive(e, t) {
     }
 
     // --------------------------------------------------------
-    // Очередь уведомлений: пауза 3 сек между сообщениями,
-    // пауза 5 сек после последнего (для чтения).
+    // Очередь уведомлений с паузой NOTIFY_PAUSE_MS между ними.
+    // Гарантирует что каждое Lampa.Noty успевает отобразиться
+    // и не перекрывается следующим мгновенно.
     // --------------------------------------------------------
-    var NOTIFY_PAUSE_MS = 3000;
-    var NOTIFY_LAST_MS  = 5000;
+    // Пауза между сообщениями: 3 сек
+    // Пауза после последнего (чтобы успеть прочитать): 5 сек
+    // Lampa.Noty не имеет встроенного параметра времени показа,
+    // поэтому последнее сообщение висит пока пользователь не
+    // нажмёт кнопку или пока Lampa сама не скроет Noty.
+    // Задержка 5 сек гарантирует что следующих вызовов нет.
+    var NOTIFY_PAUSE_MS  = 3000;
+    var NOTIFY_LAST_MS   = 5000;
 
     function notifyQueue(messages) {
       if (!messages || messages.length === 0) return;
       var i = 0;
       function showNext() {
         if (i >= messages.length) return;
-        var item   = messages[i];
+        var item = messages[i];
         var isLast = (i === messages.length - 1);
         i++;
         try { Lampa.Noty.show(item.text); } catch(e) {}
+        // После последнего — пауза 5 сек, между остальными — 3 сек
         setTimeout(showNext, isLast ? NOTIFY_LAST_MS : NOTIFY_PAUSE_MS);
       }
       showNext();
     }
 
-    // ----------------------------------------------------------
-    // [STATUS_UPDATE] v1.3.1 — обновление статусов в Lampa.Storage
-    //
-    // Логика определения цвета:
-    //   🔴 red    — сайт недоступен (HTTP-ошибка, таймаут, сетевая ошибка)
-    //   🟡 yellow — сайт доступен, но карточек < 3 (возможна проблема парсинга)
-    //   🟢 green  — сайт доступен, карточек >= 3
-    //
-    // Оптимизация: пишем весь объект за один вызов Storage.set
-    // вместо N отдельных вызовов (уменьшает количество JSON.stringify)
-    // ----------------------------------------------------------
-    function applyStatuses(results) {
-      if (!window.AdultJS_Status) return;
-
-      // Читаем текущее состояние (могут быть статусы от прошлой проверки)
-      var STORAGE_KEY = "adultjs_site_status";
-      var store = {};
-      try {
-        var raw = Lampa.Storage.get(STORAGE_KEY, "{}");
-        store = (typeof raw === "string") ? JSON.parse(raw) : (raw || {});
-      } catch(e) { store = {}; }
-
-      // Обновляем статусы батчем
-      results.forEach(function(r) {
-        var status;
-        if (!r.ok) {
-          status = "red";
-        } else if (r.cards >= 0 && r.cards < 3) {
-          status = "yellow";
-        } else {
-          status = "green";
-        }
-        store[r.name.toLowerCase()] = status;
-      });
-
-      // Один вызов записи в Storage
-      try {
-        Lampa.Storage.set(STORAGE_KEY, JSON.stringify(store));
-      } catch(e) {}
-    }
-
     // Запуск диагностики всех источников последовательно
     function runAll() {
       var sources = getAllSources();
-      var total   = sources.length;
-      var idx     = 0;
+      var total = sources.length;
+      var idx = 0;
       var results = [];
-
-      // Сбрасываем все статусы перед новой проверкой
-      if (window.AdultJS_Status) { window.AdultJS_Status.reset(); }
 
       notify("🔍 Диагностика AdultJS: проверяем " + total + " источников...");
 
@@ -2271,50 +2170,43 @@ function _toPrimitive(e, t) {
           var failed = results.filter(function(r) { return !r.ok; });
           var warned = results.filter(function(r) { return r.ok && r.cards >= 0 && r.cards < 3; });
 
-          // ------------------------------------------------
-          // Обновляем значки статуса в Lampa.Storage
-          // и инвалидируем кэш меню — при следующем открытии
-          // меню сайтов значки будут прочитаны из Storage свежо
-          // ------------------------------------------------
-          applyStatuses(results);
-          if (window.AdultJS_Status) { window.AdultJS_Status.invalidateMenu(); }
-
-          // ------------------------------------------------
-          // Сообщение A: итоговая сводка
-          // ------------------------------------------------
+          // --------------------------------------------------
+          // Сообщение A: итоговая сводка одной строкой
+          // --------------------------------------------------
           var summary = "✅ Готово: " + ok.length + " OK"
             + (failed.length ? " | ❌ " + failed.length + " ошибок"         : "")
             + (warned.length ? " | ⚠️ "  + warned.length + " предупреждений" : "")
             + " (всего: " + total + ")";
 
-          // ------------------------------------------------
-          // Сообщение B: детали ошибок и предупреждений
-          // ------------------------------------------------
+          // --------------------------------------------------
+          // Сообщение B: все ошибки + предупреждения одним блоком
+          // Формируется только если есть что показывать
+          // --------------------------------------------------
           var detailLines = [];
           failed.forEach(function(r) {
-            detailLines.push("🔴 " + r.name + ": " + r.error);
+            detailLines.push("❌ " + r.name + ": " + r.error);
           });
           warned.forEach(function(r) {
-            detailLines.push("🟡 " + r.name + ": мало карточек (" + r.cards + ") — проблема парсинга");
+            detailLines.push("⚠️ " + r.name + ": мало карточек (" + r.cards + ") — проблема парсинга");
           });
 
+          // --------------------------------------------------
+          // Очередь: [A] сводка → пауза 3 сек → [B] детали
+          // Lampa.Noty.show не имеет встроенного timeout API,
+          // поэтому используем notifyQueue с NOTIFY_PAUSE_MS.
+          // Последнее сообщение висит 5 сек (NOTIFY_LAST_MS)
+          // за счёт того что после него нет следующего вызова.
+          // --------------------------------------------------
           var queue = [{ text: summary }];
           if (detailLines.length > 0) {
             queue.push({ text: detailLines.join("\n") });
           }
 
-          // ------------------------------------------------
-          // Подсказка: объясняем значки пользователю
-          // ------------------------------------------------
-          queue.push({
-            text: "🟢 — ОК  🟡 — мало карточек  🔴 — недоступен\nЗначки обновлены в меню «Сайты»"
-          });
-
           notifyQueue(queue);
           return;
         }
 
-        // Тихая обработка во время проверки — TV не засоряем
+        // Во время проверки TV не засоряем — тихая обработка
         var src = sources[idx];
         idx++;
 
@@ -2327,17 +2219,19 @@ function _toPrimitive(e, t) {
       checkNext();
     }
 
+
     // Публичный API модуля отладки
     return {
-      runAll:       runAll,
-      checkSource:  checkSource,
+      runAll: runAll,
+      checkSource: checkSource,
       getAllSources: getAllSources
     };
 
   })();
   // ============================================================
   // [DEBUG_MODULE_END] AdultJS_Debugger v1.2.0-debug
-// [BLOCK:15:END]
+  // [BLOCK:15:END]
   // ============================================================
 
 }();
+
