@@ -1,6 +1,6 @@
 // =============================================================================
 // AdultJS Plugin for Lampa (Android TV)
-// VERSION: 3.0.0
+// VERSION: 3.0.1
 // CHANGELOG:
 //   v1.0.0 — Оригинальная версия
 //   v1.1.0 — Добавлен источник TrahKino (trahkino.me)
@@ -12,7 +12,9 @@
 //   v3.0.0 — Реструктуризация кода согласно стандарту разделов
 //             Версия вынесена в название компонента настроек
 //             В настройках оставлен один пункт: Предпросмотр при наведении
-// ROLLBACK:   git checkout v1.2.0 -- AdultJS.txt
+//   v3.0.1 — Исправлен StreamLinks XVideos: добавлен перебор регулярок HLS
+//             (сайт сменил одинарные кавычки на двойные в setVideoHLS)
+// ROLLBACK:   git checkout v3.0.0 -- AdultJS.txt
 // =============================================================================
 "use strict";
 
@@ -23,27 +25,21 @@
 function _toConsumableArray(e) {
   return _arrayWithoutHoles(e) || _iterableToArray(e) || _unsupportedIterableToArray(e) || _nonIterableSpread()
 }
-
 function _nonIterableSpread() {
   throw new TypeError("Invalid attempt to spread non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method.")
 }
-
 function _iterableToArray(e) {
   if ("undefined" != typeof Symbol && null != e[Symbol.iterator] || null != e["@@iterator"]) return Array.from(e)
 }
-
 function _arrayWithoutHoles(e) {
   if (Array.isArray(e)) return _arrayLikeToArray(e)
 }
-
 function _slicedToArray(e, t) {
   return _arrayWithHoles(e) || _iterableToArrayLimit(e, t) || _unsupportedIterableToArray(e, t) || _nonIterableRest()
 }
-
 function _nonIterableRest() {
   throw new TypeError("Invalid attempt to destructure non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method.")
 }
-
 function _iterableToArrayLimit(e, t) {
   var a = null == e ? null : "undefined" != typeof Symbol && e[Symbol.iterator] || e["@@iterator"];
   if (null != a) {
@@ -63,11 +59,9 @@ function _iterableToArrayLimit(e, t) {
     return s
   }
 }
-
 function _arrayWithHoles(e) {
   if (Array.isArray(e)) return e
 }
-
 function _createForOfIteratorHelper(e, t) {
   var a = "undefined" != typeof Symbol && e[Symbol.iterator] || e["@@iterator"];
   if (!a) {
@@ -94,7 +88,6 @@ function _createForOfIteratorHelper(e, t) {
     }
   }
 }
-
 function _unsupportedIterableToArray(e, t) {
   if (e) {
     if ("string" == typeof e) return _arrayLikeToArray(e, t);
@@ -104,25 +97,21 @@ function _unsupportedIterableToArray(e, t) {
       "Arguments" === a || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(a) ? _arrayLikeToArray(e, t) : void 0
   }
 }
-
 function _arrayLikeToArray(e, t) {
   (null == t || t > e.length) && (t = e.length);
   for (var a = 0, n = Array(t); a < t; a++) n[a] = e[a];
   return n
 }
-
 function _typeof(e) {
   return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ?
     function(e) { return typeof e } :
     function(e) { return e && "function" == typeof Symbol && e.constructor === Symbol && e !== Symbol.prototype ? "symbol" : typeof e },
     _typeof(e)
 }
-
 function _regenerator() {
   var e, t, a = "function" == typeof Symbol ? Symbol : {},
     n = a.iterator || "@@iterator",
     r = a.toStringTag || "@@toStringTag";
-
   function i(a, n, r, i) {
     var l = n && n.prototype instanceof s ? n : s,
       c = Object.create(l.prototype);
@@ -186,7 +175,6 @@ function _regenerator() {
     _regeneratorDefine2(p, "toString", (function() { return "[object Generator]" })),
     (_regenerator = function() { return { w: i, m: d } })()
 }
-
 function _regeneratorDefine2(e, t, a, n) {
   var r = Object.defineProperty;
   try { r({}, "", {}) } catch (e) { r = 0 }
@@ -200,12 +188,10 @@ function _regeneratorDefine2(e, t, a, n) {
     }
   }, _regeneratorDefine2(e, t, a, n)
 }
-
 function asyncGeneratorStep(e, t, a, n, r, i, o) {
   try { var s = e[i](o), l = s.value } catch (e) { return void a(e) }
   s.done ? t(l) : Promise.resolve(l).then(n, r)
 }
-
 function _asyncToGenerator(e) {
   return function() {
     var t = this, a = arguments;
@@ -217,7 +203,6 @@ function _asyncToGenerator(e) {
     }))
   }
 }
-
 function ownKeys(e, t) {
   var a = Object.keys(e);
   if (Object.getOwnPropertySymbols) {
@@ -226,7 +211,6 @@ function ownKeys(e, t) {
   }
   return a
 }
-
 function _objectSpread(e) {
   for (var t = 1; t < arguments.length; t++) {
     var a = null != arguments[t] ? arguments[t] : {};
@@ -236,17 +220,14 @@ function _objectSpread(e) {
   }
   return e
 }
-
 function _defineProperty(e, t, a) {
   return (t = _toPropertyKey(t)) in e ?
     Object.defineProperty(e, t, { value: a, enumerable: !0, configurable: !0, writable: !0 }) :
     e[t] = a, e
 }
-
 function _classCallCheck(e, t) {
   if (!(e instanceof t)) throw new TypeError("Cannot call a class as a function")
 }
-
 function _defineProperties(e, t) {
   for (var a = 0; a < t.length; a++) {
     var n = t[a];
@@ -254,17 +235,14 @@ function _defineProperties(e, t) {
       Object.defineProperty(e, _toPropertyKey(n.key), n)
   }
 }
-
 function _createClass(e, t, a) {
   return t && _defineProperties(e.prototype, t), a && _defineProperties(e, a),
     Object.defineProperty(e, "prototype", { writable: !1 }), e
 }
-
 function _toPropertyKey(e) {
   var t = _toPrimitive(e, "string");
   return "symbol" == _typeof(t) ? t : t + ""
 }
-
 function _toPrimitive(e, t) {
   if ("object" != _typeof(e) || !e) return e;
   var a = e[Symbol.toPrimitive];
@@ -289,14 +267,10 @@ function _toPrimitive(e, t) {
 
   // ---------------------------------------------------------------------------
   // FALLBACK HOST RESOLVER
-  // Механизм резервного домена. Использование: если host недоступен,
-  // автоматически подставляется fallback_host.
-  // Для добавления fallback к новому источнику — добавьте поле fallback_host
-  // в конфиг P[]. [FALLBACK_HOOK] — здесь можно добавить HEAD-запрос.
+  // Для добавления fallback к источнику — добавьте поле fallback_host в P[].
+  // [FALLBACK_HOOK] — здесь можно добавить HEAD-запрос к host.
   // ---------------------------------------------------------------------------
-  function resolveFallbackHost(cfg) {
-    return cfg.host;
-  }
+  function resolveFallbackHost(cfg) { return cfg.host; }
 
   // ---------------------------------------------------------------------------
   // HTTP CLIENT
@@ -307,7 +281,9 @@ function _toPrimitive(e, t) {
       key: "ensureHeaders",
       value: function(e) {
         var t = e ? _objectSpread({}, e) : {};
-        return t["user-agent"] || t["User-Agent"] || (t["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"), t
+        return t["user-agent"] || t["User-Agent"] ||
+          (t["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"),
+          t
       }
     }, {
       key: "Get",
@@ -347,7 +323,11 @@ function _toPrimitive(e, t) {
       }
     }]);
   }();
-  _hc.isAndroid = "undefined" != typeof window && void 0 !== window.Lampa && void 0 !== window.Lampa.Platform && "function" == typeof window.Lampa.Platform.is && window.Lampa.Platform.is("android");
+  _hc.isAndroid = "undefined" != typeof window &&
+    void 0 !== window.Lampa &&
+    void 0 !== window.Lampa.Platform &&
+    "function" == typeof window.Lampa.Platform.is &&
+    window.Lampa.Platform.is("android");
   var l = _hc;
 
   // ---------------------------------------------------------------------------
@@ -381,7 +361,8 @@ function _toPrimitive(e, t) {
 
   var h = _createClass((function e(t, a) {
     _classCallCheck(this, e),
-      a ? (this.total_pages = 1, this.list = t.recomends) : (this.qualitys = t.qualitys, this.recomends = t.recomends)
+      a ? (this.total_pages = 1, this.list = t.recomends) :
+          (this.qualitys = t.qualitys, this.recomends = t.recomends)
   }));
 
   var m = _createClass((function e(t, a) {
@@ -413,31 +394,37 @@ function _toPrimitive(e, t) {
       key: "Playlist",
       value: function(e) {
         var t = [];
-        return e && 0 !== e.length ? (e.split(/class="(ls_thumb js-ls_thumb|mls_item mls_so_)/).forEach((function(e) {
-          var a = c.extract(e, /data-chathost="([^"]+)"/);
-          if (a) {
-            var n = c.extract(e, /data-esid="([^"]+)"/);
-            if (n) {
-              var r = c.extract(e, /this.src='\/\/([^']+\.(jpg))'/);
-              if (r || (r = c.extract(e, /src="\/\/([^"]+)"/)), r) {
-                var i = c.extract(e, /lst_topic lst_data">(.*?)</);
-                i || (i = a);
-                var o = null;
-                e.includes("__hd_plus __rt") ? o = "HD+" : e.includes("__hd __rtl") && (o = "HD"),
-                  t.push(new u(i, "https://" + n + ".bcvcdn.com/hls/stream_" + a + "/public-aac/stream_" + a + "/chunks.m3u8", "https://" + r, null, null, o, !1, !1, null))
+        return e && 0 !== e.length ? (
+          e.split(/class="(ls_thumb js-ls_thumb|mls_item mls_so_)"/).forEach((function(e) {
+            var a = c.extract(e, /data-chathost="([^"]+)"/);
+            if (a) {
+              var n = c.extract(e, /data-esid="([^"]+)"/);
+              if (n) {
+                var r = c.extract(e, /this.src='\/\/([^']+\.(jpg))'/);
+                if (r || (r = c.extract(e, /src="\/\/([^"]+)"/)), r) {
+                  var i = c.extract(e, /lst_topic lst_data">(.*?)</);
+                  i || (i = a);
+                  var o = null;
+                  e.includes("__hd_plus __rt") ? o = "HD+" : e.includes("__hd __rtl") && (o = "HD"),
+                    t.push(new u(i,
+                      "https://" + n + ".bcvcdn.com/hls/stream_" + a + "/public-aac/stream_" + a + "/chunks.m3u8",
+                      "https://" + r, null, null, o, !1, !1, null))
+                }
               }
             }
-          }
-        })), t) : t
+          })), t) : t
       }
     }, {
       key: "Menu",
       value: function(t) {
         var a = e.host + "/",
           n = [
-            new p("Новые", a + "new-models"), new p("Пары", a + "couples"),
-            new p("Девушки", a + "female"), new p("Русские модели", a + "female/tags/russian"),
-            new p("Парни", a + "male"), new p("Транссексуалы", a + "trans")
+            new p("Новые", a + "new-models"),
+            new p("Пары", a + "couples"),
+            new p("Девушки", a + "female"),
+            new p("Русские модели", a + "female/tags/russian"),
+            new p("Парни", a + "male"),
+            new p("Транссексуалы", a + "trans")
           ],
           r = n.find((function(e) { return t.includes(e.playlist_url.replace(a, "")) }));
         return [new p("Сортировка: " + (r ? r.title : "Новые"), "submenu", void 0, n)]
@@ -449,6 +436,8 @@ function _toPrimitive(e, t) {
 
   // ---------------------------------------------------------------------------
   // SOURCE: xvideos.com — www.xv-ru.com
+  // [v3.0.1] StreamLinks: добавлен перебор регулярок для извлечения HLS-URL
+  //          Сайт изменил синтаксис: одинарные кавычки → двойные в setVideoHLS
   // ---------------------------------------------------------------------------
   var _XVideosClass = function() {
     function e() { _classCallCheck(this, e) }
@@ -456,7 +445,7 @@ function _toPrimitive(e, t) {
       key: "Invoke",
       value: (function() {
         var _inv = _asyncToGenerator(_regenerator().m((function t(a) {
-          var n, r, i, o, s, c, u, p;
+          var n, r, i, o, s, pg, url, html;
           return _regenerator().w((function(t) {
             for (;;) switch (t.n) {
               case 0:
@@ -465,12 +454,15 @@ function _toPrimitive(e, t) {
               case 1:
                 return n = t.v, t.a(2, new h(this.StreamLinks(n), a.includes("&related")));
               case 2:
-                return r = new URL(a, e.host), i = r.searchParams.get("search") || "",
-                  o = r.searchParams.get("sort") || "", s = r.searchParams.get("c") || "",
-                  c = parseInt(r.searchParams.get("pg") || "1", 10),
-                  u = this.buildUrl(e.host, i, o, s, c), t.n = 3, l.Get(u);
+                return r = new URL(a, e.host),
+                  i = r.searchParams.get("search") || "",
+                  o = r.searchParams.get("sort") || "",
+                  s = r.searchParams.get("c") || "",
+                  pg = parseInt(r.searchParams.get("pg") || "1", 10),
+                  url = this.buildUrl(e.host, i, o, s, pg),
+                  t.n = 3, l.Get(url);
               case 3:
-                return p = t.v, t.a(2, { menu: this.Menu(o, s), list: this.Playlist(p) });
+                return html = t.v, t.a(2, { menu: this.Menu(o, s), list: this.Playlist(html) });
               case 4:
                 return t.a(2)
             }
@@ -488,7 +480,10 @@ function _toPrimitive(e, t) {
       }
     }, {
       key: "getLastMonth",
-      value: function() { var e = new Date; return e.setMonth(e.getMonth() - 1), e.toISOString().slice(0, 7) }
+      value: function() {
+        var e = new Date;
+        return e.setMonth(e.getMonth() - 1), e.toISOString().slice(0, 7)
+      }
     }, {
       key: "Playlist",
       value: function(t) {
@@ -497,12 +492,19 @@ function _toPrimitive(e, t) {
           var i = a[r],
             o = /<a href="\/(video[^"]+|search-video\/[^"]+)" title="([^"]+)"/.exec(i);
           if (o && o[1] && o[2] || (o = /<a href="\/(video[^"]+)"[^>]+>([^<]+)/.exec(i)) && o[1] && o[2]) {
-            var s = c.extract(i, /<span class="video-hd-mark">([^<]+)<\/span>/),
-              lv = c.extract(i, /<span class="duration">([^<]+)<\/span>/),
-              pv = c.extract(i, /data-src="([^"]+)"/),
-              dv = (pv = pv ? (pv = (pv = pv.replace(/\/videos\/thumbs([0-9]+)\//, "/videos/thumbs$1lll/")).replace(/\.THUMBNUM\.(jpg|png)$/i, ".1.$1")).replace("thumbs169l/", "thumbs169lll/").replace("thumbs169ll/", "thumbs169lll/") : "").replace(/\/thumbs[^/]+\//, "/videopreview/");
-            dv = (dv = dv.replace(/\/[^/]+$/, "")).replace(/-[0-9]+$/, ""),
-              n.push(new u(o[2], "".concat(e.host, "/").concat(o[1]), pv, dv + "_169.mp4", lv || null, s || null, !0, !0, null))
+            var s  = c.extract(i, /<span class="video-hd-mark">([^<]+)<\/span>/),
+              dur  = c.extract(i, /<span class="duration">([^<]+)<\/span>/),
+              img  = c.extract(i, /data-src="([^"]+)"/),
+              prev = (img = img ?
+                (img = (img = img
+                  .replace(/\/videos\/thumbs([0-9]+)\//, "/videos/thumbs$1lll/"))
+                  .replace(/\.THUMBNUM\.(jpg|png)$/i, ".1.$1"))
+                  .replace("thumbs169l/", "thumbs169lll/")
+                  .replace("thumbs169ll/", "thumbs169lll/") : "")
+                  .replace(/\/thumbs[^/]+\//, "/videopreview/");
+            prev = (prev = prev.replace(/\/[^/]+$/, "")).replace(/-[0-9]+$/, ""),
+              n.push(new u(o[2], "".concat(e.host, "/").concat(o[1]),
+                img, prev + "_169.mp4", dur || null, s || null, !0, !0, null))
           }
         }
         return n
@@ -512,56 +514,72 @@ function _toPrimitive(e, t) {
       value: function(t, a) {
         var n, r = e.host,
           i = [new p("Поиск", r, "search_on")],
-          o = new p("Сортировка: ".concat("like" === t ? "Понравившиеся" : "top" === t ? "Лучшие" : "Новое"), "submenu", void 0,
-            [new p("Новое", r + "?c=".concat(a)), new p("Лучшие", r + "?sort=top&c=".concat(a))]);
+          o = new p(
+            "Сортировка: ".concat("like" === t ? "Понравившиеся" : "top" === t ? "Лучшие" : "Новое"),
+            "submenu", void 0,
+            [new p("Новое", r + "?c=".concat(a)), new p("Лучшие", r + "?sort=top&c=".concat(a))]
+          );
         i.push(o);
         var s = [
-          new p("Все", r + "?sort=".concat(t)),
-          new p("Азиат", r + "?sort=".concat(t, "&c=Asian_Woman-32")),
-          new p("Анал", r + "?sort=".concat(t, "&c=Anal-12")),
-          new p("Арабки", r + "?sort=".concat(t, "&c=Arab-159")),
-          new p("Бисексуалы", r + "?sort=".concat(t, "&c=Bi_Sexual-62")),
-          new p("Блондинки", r + "?sort=".concat(t, "&c=Blonde-20")),
-          new p("Большие Попы", r + "?sort=".concat(t, "&c=Big_Ass-24")),
-          new p("Большие Сиськи", r + "?sort=".concat(t, "&c=Big_Tits-23")),
-          new p("Большие яйца", r + "?sort=".concat(t, "&c=Big_Cock-34")),
-          new p("Брюнетки", r + "?sort=".concat(t, "&c=Brunette-25")),
-          new p("В масле", r + "?sort=".concat(t, "&c=Oiled-22")),
-          new p("Веб камеры", r + "?sort=".concat(t, "&c=Cam_Porn-58")),
-          new p("Гэнгбэнг", r + "?sort=".concat(t, "&c=Gangbang-69")),
-          new p("Зияющие отверстия", r + "?sort=".concat(t, "&c=Gapes-167")),
-          new p("Зрелые", r + "?sort=".concat(t, "&c=Mature-38")),
-          new p("Индийский", r + "?sort=".concat(t, "&c=Indian-89")),
-          new p("Испорченная семья", r + "?sort=".concat(t, "&c=Fucked_Up_Family-81")),
-          new p("Кончает внутрь", r + "?sort=".concat(t, "&c=Creampie-40")),
+          new p("Все",                   r + "?sort=".concat(t)),
+          new p("Азиат",                 r + "?sort=".concat(t, "&c=Asian_Woman-32")),
+          new p("Анал",                  r + "?sort=".concat(t, "&c=Anal-12")),
+          new p("Арабки",                r + "?sort=".concat(t, "&c=Arab-159")),
+          new p("Бисексуалы",            r + "?sort=".concat(t, "&c=Bi_Sexual-62")),
+          new p("Блондинки",             r + "?sort=".concat(t, "&c=Blonde-20")),
+          new p("Большие Попы",          r + "?sort=".concat(t, "&c=Big_Ass-24")),
+          new p("Большие Сиськи",        r + "?sort=".concat(t, "&c=Big_Tits-23")),
+          new p("Большие яйца",          r + "?sort=".concat(t, "&c=Big_Cock-34")),
+          new p("Брюнетки",              r + "?sort=".concat(t, "&c=Brunette-25")),
+          new p("В масле",               r + "?sort=".concat(t, "&c=Oiled-22")),
+          new p("Веб камеры",            r + "?sort=".concat(t, "&c=Cam_Porn-58")),
+          new p("Гэнгбэнг",              r + "?sort=".concat(t, "&c=Gangbang-69")),
+          new p("Зияющие отверстия",     r + "?sort=".concat(t, "&c=Gapes-167")),
+          new p("Зрелые",                r + "?sort=".concat(t, "&c=Mature-38")),
+          new p("Индийский",             r + "?sort=".concat(t, "&c=Indian-89")),
+          new p("Испорченная семья",     r + "?sort=".concat(t, "&c=Fucked_Up_Family-81")),
+          new p("Кончает внутрь",        r + "?sort=".concat(t, "&c=Creampie-40")),
           new p("Куколд / Горячая Жена", r + "?sort=".concat(t, "&c=Cuckold-237")),
-          new p("Латинки", r + "?sort=".concat(t, "&c=Latina-16")),
-          new p("Лесбиянки", r + "?sort=".concat(t, "&c=Lesbian-26")),
-          new p("Любительское порно", r + "?sort=".concat(t, "&c=Amateur-65")),
-          new p("Мамочки. МИЛФ", r + "?sort=".concat(t, "&c=Milf-19")),
-          new p("Межрассовые", r + "?sort=".concat(t, "&c=Interracial-27")),
-          new p("Минет", r + "?sort=".concat(t, "&c=Blowjob-15")),
-          new p("Нижнее бельё", r + "?sort=".concat(t, "&c=Lingerie-83")),
-          new p("Попки", r + "?sort=".concat(t, "&c=Ass-14")),
-          new p("Рыжие", r + "?sort=".concat(t, "&c=Redhead-31")),
-          new p("Сквиртинг", r + "?sort=".concat(t, "&c=Squirting-56")),
-          new p("Соло", r + "?sort=".concat(t, "&c=Solo_and_Masturbation-33")),
-          new p("Сперма", r + "?sort=".concat(t, "&c=Cumshot-18")),
-          new p("Тинейджеры", r + "?sort=".concat(t, "&c=Teen-13")),
-          new p("Фемдом", r + "?sort=".concat(t, "&c=Femdom-235")),
-          new p("Фистинг", r + "?sort=".concat(t, "&c=Fisting-165")),
-          new p("Черные Женщины", r + "?sort=".concat(t, "&c=bbw-51")),
-          new p("Черный", r + "?sort=".concat(t, "&c=Black_Woman-30")),
-          new p("Чулки,колготки", r + "?sort=".concat(t, "&c=Stockings-28")),
-          new p("ASMR", r + "?sort=".concat(t, "&c=ASMR-229"))
+          new p("Латинки",               r + "?sort=".concat(t, "&c=Latina-16")),
+          new p("Лесбиянки",             r + "?sort=".concat(t, "&c=Lesbian-26")),
+          new p("Любительское порно",    r + "?sort=".concat(t, "&c=Amateur-65")),
+          new p("Мамочки. МИЛФ",         r + "?sort=".concat(t, "&c=Milf-19")),
+          new p("Межрассовые",           r + "?sort=".concat(t, "&c=Interracial-27")),
+          new p("Минет",                 r + "?sort=".concat(t, "&c=Blowjob-15")),
+          new p("Нижнее бельё",          r + "?sort=".concat(t, "&c=Lingerie-83")),
+          new p("Попки",                 r + "?sort=".concat(t, "&c=Ass-14")),
+          new p("Рыжие",                 r + "?sort=".concat(t, "&c=Redhead-31")),
+          new p("Сквиртинг",             r + "?sort=".concat(t, "&c=Squirting-56")),
+          new p("Соло",                  r + "?sort=".concat(t, "&c=Solo_and_Masturbation-33")),
+          new p("Сперма",                r + "?sort=".concat(t, "&c=Cumshot-18")),
+          new p("Тинейджеры",            r + "?sort=".concat(t, "&c=Teen-13")),
+          new p("Фемдом",                r + "?sort=".concat(t, "&c=Femdom-235")),
+          new p("Фистинг",               r + "?sort=".concat(t, "&c=Fisting-165")),
+          new p("Черные Женщины",        r + "?sort=".concat(t, "&c=bbw-51")),
+          new p("Черный",                r + "?sort=".concat(t, "&c=Black_Woman-30")),
+          new p("Чулки,колготки",        r + "?sort=".concat(t, "&c=Stockings-28")),
+          new p("ASMR",                  r + "?sort=".concat(t, "&c=ASMR-229"))
         ];
-        return i.push(new p("Категория: ".concat((null === (n = s.find((function(e) { return e.playlist_url.endsWith("c=".concat(a)) }))) || void 0 === n ? void 0 : n.title) || "все"), "submenu", void 0, s)), i
+        return i.push(new p(
+          "Категория: ".concat(
+            (null === (n = s.find((function(e) { return e.playlist_url.endsWith("c=".concat(a)) }))) || void 0 === n
+              ? void 0 : n.title) || "все"),
+          "submenu", void 0, s)), i
       }
     }, {
       key: "StreamLinks",
       value: function(t) {
-        var a = c.extract(t, /html5player\.setVideoHLS$'([^']+)'$;/);
-        if (!a) return new m({}, []);
+        // [v3.0.1] Перебор вариантов синтаксиса setVideoHLS:
+        //   - одинарные кавычки (старый формат)
+        //   - двойные кавычки (новый формат xv-ru.com)
+        //   - универсальная регулярка с пробелами вокруг скобок
+        var a = c.extract(t, /html5player\.setVideoHLS$'([^']+)'$/)
+              || c.extract(t, /html5player\.setVideoHLS$"([^"]+)"$/)
+              || c.extract(t, /setVideoHLS\s*$\s*['"]([^'"]+)['"]\s*$/);
+        if (!a) {
+          console.warn("AdultJS XVideos: HLS URL не найден на странице");
+          return new m({}, []);
+        }
         var n = [], r = c.extract(t, /video_related=([^\n\r]+);window/);
         if (r && r.startsWith("[") && r.endsWith("]")) try {
           var i, o = _createForOfIteratorHelper(JSON.parse(r));
@@ -569,9 +587,10 @@ function _toPrimitive(e, t) {
             for (o.s(); !(i = o.n()).done;) {
               var s = i.value;
               if (s.tf && s.u && s.if) {
-                var lv = s.if.replace(/\/thumbs[^/]+\//, "/videopreview/");
-                lv = (lv = lv.replace(/\/[^/]+$/, "")).replace(/-[0-9]+$/, ""),
-                  n.push(new u(s.tf, "".concat(e.host).concat(s.u), s.if, lv + "_169.mp4", s.d || "", null, !0, !0, null))
+                var prev = s.if.replace(/\/thumbs[^/]+\//, "/videopreview/");
+                prev = (prev = prev.replace(/\/[^/]+$/, "")).replace(/-[0-9]+$/, ""),
+                  n.push(new u(s.tf, "".concat(e.host).concat(s.u),
+                    s.if, prev + "_169.mp4", s.d || "", null, !0, !0, null))
               }
             }
           } catch (e) { o.e(e) } finally { o.f() }
@@ -592,7 +611,7 @@ function _toPrimitive(e, t) {
       key: "Invoke",
       value: (function() {
         var _inv = _asyncToGenerator(_regenerator().m((function t(a) {
-          var n, r, i, o, s, cv;
+          var n, r, i, o, s, html;
           return _regenerator().w((function(t) {
             for (;;) switch (t.n) {
               case 0:
@@ -601,11 +620,13 @@ function _toPrimitive(e, t) {
               case 1:
                 return n = t.v, t.a(2, new h(this.StreamLinks(n), a.includes("&related")));
               case 2:
-                return r = new URL(a, e.host), i = r.searchParams.get("search") || "",
+                return r = new URL(a, e.host),
+                  i = r.searchParams.get("search") || "",
                   o = parseInt(r.searchParams.get("pg") || "1", 10),
-                  s = this.buildUrl(e.host, i, o), t.n = 3, l.Get(s);
+                  s = this.buildUrl(e.host, i, o),
+                  t.n = 3, l.Get(s);
               case 3:
-                return cv = t.v, t.a(2, { menu: this.Menu(), list: this.Playlist(cv) });
+                return html = t.v, t.a(2, { menu: this.Menu(), list: this.Playlist(html) });
               case 4:
                 return t.a(2)
             }
@@ -618,8 +639,7 @@ function _toPrimitive(e, t) {
       value: function(e, t, a) {
         if (t) return "".concat(e, "/search/").concat(encodeURIComponent(t), "/").concat(a);
         var n = new Date; n.setMonth(n.getMonth() - 1);
-        var r = n.toISOString().slice(0, 7);
-        return "".concat(e, "/best/").concat(r, "/").concat(a)
+        return "".concat(e, "/best/").concat(n.toISOString().slice(0, 7), "/").concat(a)
       }
     }, {
       key: "Playlist",
@@ -630,22 +650,28 @@ function _toPrimitive(e, t) {
             o = /<a href="\/(video-[^"]+)" title="([^"]+)"/.exec(i),
             s = c.extract(i, /<span class="superfluous"> - <\/span>([^<]+)<\/span>/);
           if (o && o[1] && o[2]) {
-            var lv = c.extract(i, /<\/span>([^<]+)<span class="video-hd">/),
-              pv = c.extract(i, /data-src="([^"]+)"/),
-              dv = (pv = pv ? pv.replace(".THUMBNUM.", ".1.") : "").replace(/\/thumbs[^/]+\//, "/videopreview/");
-            dv = (dv = dv.replace(/\/[^/]+$/, "")).replace(/-[0-9]+$/, ""),
-              n.push(new u(o[2], "".concat(e.host, "/").concat(o[1]), pv, dv + "_169.mp4", lv || null, s || null, !0, !0, null))
+            var dur  = c.extract(i, /<\/span>([^<]+)<span class="video-hd">/),
+              img    = c.extract(i, /data-src="([^"]+)"/),
+              prev   = (img = img ? img.replace(".THUMBNUM.", ".1.") : "")
+                         .replace(/\/thumbs[^/]+\//, "/videopreview/");
+            prev = (prev = prev.replace(/\/[^/]+$/, "")).replace(/-[0-9]+$/, ""),
+              n.push(new u(o[2], "".concat(e.host, "/").concat(o[1]),
+                img, prev + "_169.mp4", dur || null, s || null, !0, !0, null))
           }
         }
         return n
       }
     }, {
       key: "Menu",
-      value: function() { var t = e.host + "/xnx"; return [new p("Поиск", t, "search_on")] }
+      value: function() {
+        return [new p("Поиск", e.host + "/xnx", "search_on")]
+      }
     }, {
       key: "StreamLinks",
       value: function(t) {
-        var a = c.extract(t, /html5player\.setVideoHLS$'([^']+)'$;/);
+        var a = c.extract(t, /html5player\.setVideoHLS$'([^']+)'$/)
+              || c.extract(t, /html5player\.setVideoHLS$"([^"]+)"$/)
+              || c.extract(t, /setVideoHLS\s*$\s*['"]([^'"]+)['"]\s*$/);
         if (!a) return new m({}, []);
         var n = [], r = c.extract(t, /video_related=([^\n\r]+);window/);
         if (r && r.startsWith("[") && r.endsWith("]")) try {
@@ -653,7 +679,8 @@ function _toPrimitive(e, t) {
           try {
             for (o.s(); !(i = o.n()).done;) {
               var s = i.value;
-              s.tf && s.u && s.i && n.push(new u(s.tf, "".concat(e.host).concat(s.u), s.i, null, "", null, !0, !0, null))
+              s.tf && s.u && s.i &&
+                n.push(new u(s.tf, "".concat(e.host).concat(s.u), s.i, null, "", null, !0, !0, null))
             }
           } catch (e) { o.e(e) } finally { o.f() }
         } catch (e) {}
@@ -673,7 +700,7 @@ function _toPrimitive(e, t) {
       key: "Invoke",
       value: (function() {
         var _inv = _asyncToGenerator(_regenerator().m((function t(a) {
-          var n, r, i, o, s, cv, uv;
+          var n, r, i, o, s, url, html;
           return _regenerator().w((function(t) {
             for (;;) switch (t.n) {
               case 0:
@@ -682,11 +709,14 @@ function _toPrimitive(e, t) {
               case 1:
                 return n = t.v, t.a(2, new h(this.StreamLinks(n), a.includes("&related")));
               case 2:
-                return r = new URL(a, e.host), i = r.searchParams.get("search") || "",
-                  o = r.searchParams.get("sort") || "", s = parseInt(r.searchParams.get("pg") || "1", 10),
-                  cv = this.buildUrl(e.host, i, o, s), t.n = 3, l.Get(cv);
+                return r = new URL(a, e.host),
+                  i = r.searchParams.get("search") || "",
+                  o = r.searchParams.get("sort") || "",
+                  s = parseInt(r.searchParams.get("pg") || "1", 10),
+                  url = this.buildUrl(e.host, i, o, s),
+                  t.n = 3, l.Get(url);
               case 3:
-                return uv = t.v, t.a(2, { menu: this.Menu(o), list: this.Playlist(uv) });
+                return html = t.v, t.a(2, { menu: this.Menu(o), list: this.Playlist(html) });
               case 4:
                 return t.a(2)
             }
@@ -699,21 +729,24 @@ function _toPrimitive(e, t) {
       value: function(e, t, a, n) {
         var r = "".concat(e, "/");
         return t ? r += "s/".concat(encodeURIComponent(t), "/").concat(n, "/") :
-          (r += "".concat(a || "new_videos", "/").concat(n, "/"), "most_popular" === a && (r += "?p=m")), r
+          (r += "".concat(a || "new_videos", "/").concat(n, "/"),
+           "most_popular" === a && (r += "?p=m")), r
       }
     }, {
       key: "Playlist",
       value: function(t) {
         if (!t) return [];
         for (var a = t.split('class="video-item responsive-page"'), n = [], r = 1; r < a.length; r++) {
-          var i = a[r], o = /<a href="\/([^\"]+)" title="([^"]+)"/.exec(i);
+          var i = a[r],
+            o = /<a href="\/([^\"]+)" title="([^"]+)"/.exec(i);
           if (o && o[1] && o[2]) {
-            var s = c.extract(i, /<span class="video-badge h">([^<]+)<\/span>/),
-              lv = c.extract(i, /<span class="video-badge l">([^<]+)<\/span>/),
-              pv = c.extract(i, /data-src="([^"]+)"/);
-            pv = pv ? pv.replace(/\/w:[0-9]00\//, "/w:300/") : "";
-            var dv = c.extract(i, /data-preview="([^"]+)"/);
-            n.push(new u(o[2], "".concat(e.host, "/").concat(o[1]), pv, dv || null, lv || null, s || null, !0, !0, null))
+            var s   = c.extract(i, /<span class="video-badge h">([^<]+)<\/span>/),
+              dur   = c.extract(i, /<span class="video-badge l">([^<]+)<\/span>/),
+              img   = c.extract(i, /data-src="([^"]+)"/);
+            img = img ? img.replace(/\/w:[0-9]00\//, "/w:300/") : "";
+            var prev = c.extract(i, /data-preview="([^"]+)"/);
+            n.push(new u(o[2], "".concat(e.host, "/").concat(o[1]),
+              img, prev || null, dur || null, s || null, !0, !0, null))
           }
         }
         return n
@@ -724,8 +757,11 @@ function _toPrimitive(e, t) {
         var a = e.host + "/sbg";
         return [
           new p("Поиск", a, "search_on"),
-          new p("Сортировка: ".concat(t || "новое"), "submenu", void 0,
-            [new p("Новое", a), new p("Трендовое", a + "?sort=trending_videos"), new p("Популярное", a + "?sort=most_popular")])
+          new p("Сортировка: ".concat(t || "новое"), "submenu", void 0, [
+            new p("Новое", a),
+            new p("Трендовое", a + "?sort=trending_videos"),
+            new p("Популярное", a + "?sort=most_popular")
+          ])
         ]
       }
     }, {
@@ -751,19 +787,21 @@ function _toPrimitive(e, t) {
       key: "Invoke",
       value: (function() {
         var _inv = _asyncToGenerator(_regenerator().m((function t(a) {
-          var n, r, i, o, s, cv, uv;
+          var n, r, i, o, s, html;
           return _regenerator().w((function(t) {
             for (;;) switch (t.n) {
               case 0:
                 if (n = new URL(a, e.host), !a.includes("baba=")) { t.n = 2; break }
-                return cv = h, t.n = 1, this.StreamLinks(n.searchParams.get("baba"));
+                return t.n = 1, this.StreamLinks(n.searchParams.get("baba"));
               case 1:
-                return uv = t.v, t.a(2, new cv(uv, !1));
+                return s = t.v, t.a(2, new h(s, !1));
               case 2:
-                return r = n.searchParams.get("sort") || "", i = parseInt(n.searchParams.get("pg") || "1", 10),
-                  o = this.buildUrl(e.host, r, i), t.n = 3, l.Get(o);
+                return r = n.searchParams.get("sort") || "",
+                  i = parseInt(n.searchParams.get("pg") || "1", 10),
+                  o = this.buildUrl(e.host, r, i),
+                  t.n = 3, l.Get(o);
               case 3:
-                return s = t.v, t.a(2, { menu: this.Menu(r), list: this.Playlist(s) });
+                return html = t.v, t.a(2, { menu: this.Menu(r), list: this.Playlist(html) });
               case 4:
                 return t.a(2)
             }
@@ -788,7 +826,8 @@ function _toPrimitive(e, t) {
             if (o) {
               var s = c.extract(i, /"img":"([^"]+)"/);
               s && (s = s.replace(/\\/g, ""),
-                n.push(new u(o.trim(), "".concat(e.host, "?baba=").concat(o.trim()), s, null, null, null, !0, !1, null)))
+                n.push(new u(o.trim(), "".concat(e.host, "?baba=").concat(o.trim()),
+                  s, null, null, null, !0, !1, null)))
             }
           }
         }
@@ -798,8 +837,15 @@ function _toPrimitive(e, t) {
       key: "Menu",
       value: function(t) {
         var a, n = e.host + "/chu",
-          r = [new p("Лучшие", n), new p("Девушки", n + "?sort=f"), new p("Пары", n + "?sort=c"), new p("Парни", n + "?sort=m"), new p("Транссексуалы", n + "?sort=t")],
-          i = (null === (a = r.find((function(e) { return e.playlist_url.endsWith("=".concat(t)) }))) || void 0 === a ? void 0 : a.title) || "Лучшие";
+          r = [
+            new p("Лучшие", n),
+            new p("Девушки", n + "?sort=f"),
+            new p("Пары", n + "?sort=c"),
+            new p("Парни", n + "?sort=m"),
+            new p("Транссексуалы", n + "?sort=t")
+          ],
+          i = (null === (a = r.find((function(e) { return e.playlist_url.endsWith("=".concat(t)) }))) || void 0 === a
+            ? void 0 : a.title) || "Лучшие";
         return [new p("Сортировка: ".concat(i), "submenu", void 0, r)]
       }
     }, {
@@ -838,21 +884,24 @@ function _toPrimitive(e, t) {
       key: "Invoke",
       value: (function() {
         var _inv = _asyncToGenerator(_regenerator().m((function t(a) {
-          var n, r, i, o, s, cv, uv, pv, dv, mv;
+          var n, r, i, o, s, url, html, res, isRel;
           return _regenerator().w((function(t) {
             for (;;) switch (t.n) {
               case 0:
                 if (!a.includes("/video")) { t.n = 2; break }
-                return pv = h, t.n = 1, this.StreamLinks(e.host, a);
+                return t.n = 1, this.StreamLinks(e.host, a);
               case 1:
-                return dv = t.v, mv = a.includes("&related"), t.a(2, new pv(dv, mv));
+                return res = t.v, isRel = a.includes("&related"), t.a(2, new h(res, isRel));
               case 2:
-                return n = new URL(a, e.host), r = n.searchParams.get("search") || "",
-                  i = n.searchParams.get("sort") || "", o = n.searchParams.get("c") || "",
+                return n = new URL(a, e.host),
+                  r = n.searchParams.get("search") || "",
+                  i = n.searchParams.get("sort") || "",
+                  o = n.searchParams.get("c") || "",
                   s = parseInt(n.searchParams.get("pg") || "1", 10),
-                  cv = this.buildUrl(e.host, r, i, o, s), t.n = 3, l.Get(cv);
+                  url = this.buildUrl(e.host, r, i, o, s),
+                  t.n = 3, l.Get(url);
               case 3:
-                return uv = t.v, t.a(2, { menu: this.Menu(r, i, o), list: this.Playlist(uv) });
+                return html = t.v, t.a(2, { menu: this.Menu(r, i, o), list: this.Playlist(html) });
               case 4:
                 return t.a(2)
             }
@@ -864,27 +913,34 @@ function _toPrimitive(e, t) {
       key: "buildUrl",
       value: function(e, t, a, n, r) {
         var i = "".concat(e, "/");
-        return t ? (i += "search/".concat(encodeURIComponent(t), "/"), r > 1 && (i += "".concat(r, "/")), a && (i += "".concat(a, "/"))) :
-          n ? (i += "cat/".concat(n, "/"), r > 1 && (i += "".concat(r, "/"))) :
-          (r > 1 && (i += "".concat(r, "/")), a && (i += "".concat(a, "/"))), i
+        return t ?
+          (i += "search/".concat(encodeURIComponent(t), "/"),
+           r > 1 && (i += "".concat(r, "/")),
+           a && (i += "".concat(a, "/"))) :
+          n ?
+          (i += "cat/".concat(n, "/"), r > 1 && (i += "".concat(r, "/"))) :
+          (r > 1 && (i += "".concat(r, "/")), a && (i += "".concat(a, "/"))),
+          i
       }
     }, {
       key: "Playlist",
       value: function(t) {
         if (!t) return [];
         var a = t;
-        a.includes('class="toptopbelinset"') && (a = a.split('class="toptopbelinset"')[1]),
-          a.includes('class="relatedtext"') && (a = a.split('class="relatedtext"')[1]);
+        a.includes('class="toptopbelinset"') && (a = a.split('class="toptopbelinset"')[1]);
+        a.includes('class="relatedtext"')     && (a = a.split('class="relatedtext"')[1]);
         for (var n = a.split(/<div class="mb (hdy)?"/), r = [], i = 1; i < n.length; i++) {
-          var o = n[i], s = /<p class="mbtit">\s*<a href="\/([^"]+)">([^<]+)<\/a>/i.exec(o);
+          var o = n[i],
+            s = /<p class="mbtit">\s*<a href="\/([^"]+)">([^<]+)<\/a>/i.exec(o);
           if (s && s[1] && s[2]) {
-            var lv = c.extract(o, /<div class="mvhdico"([^>]+)?><span>([^"<]+)/, 2),
-              pv = c.extract(o, / data-src="([^"]+)"/);
-            pv || (pv = c.extract(o, /<img src="([^"]+)"/));
-            var dv = c.extract(o, /data-id="([^"]+)"/),
-              hv = pv && dv ? pv.replace(/\/[^/]+$/, "") + "/".concat(dv, "-preview.webm") : null,
-              mv = c.extract(o, /<span class="mbtim"([^>]+)?>([^<]+)<\/span>/, 2);
-            r.push(new u(s[2], "".concat(e.host, "/").concat(s[1]), pv || "", hv, mv || null, lv || null, !0, !0, null))
+            var hd   = c.extract(o, /<div class="mvhdico"([^>]+)?><span>([^"<]+)/, 2),
+              img    = c.extract(o, / data-src="([^"]+)"/);
+            img || (img = c.extract(o, /<img src="([^"]+)"/));
+            var id   = c.extract(o, /data-id="([^"]+)"/),
+              prev   = img && id ? img.replace(/\/[^/]+$/, "") + "/".concat(id, "-preview.webm") : null,
+              dur    = c.extract(o, /<span class="mbtim"([^>]+)?>([^<]+)<\/span>/, 2);
+            r.push(new u(s[2], "".concat(e.host, "/").concat(s[1]),
+              img || "", prev, dur || null, hd || null, !0, !0, null))
           }
         }
         return r
@@ -893,57 +949,68 @@ function _toPrimitive(e, t) {
       key: "Menu",
       value: function(t, a, n) {
         var r, i = e.host, o = [new p("Поиск", i, "search_on")];
-        if (t) return (o.push(new p("Сортировка: ".concat(a || "новинки"), "submenu", void 0,
-          [new p("Новинки", i + "?search=".concat(encodeURIComponent(t))),
-            new p("Топ просмотра", i + "?sort=most-viewed&search=".concat(encodeURIComponent(t))),
-            new p("Топ рейтинга", i + "?sort=top-rated&search=".concat(encodeURIComponent(t))),
-            new p("Длинные ролики", i + "?sort=longest&search=".concat(encodeURIComponent(t))),
-            new p("Короткие ролики", i + "?sort=shortest&search=".concat(encodeURIComponent(t)))])), o);
-        n || o.push(new p("Сортировка: ".concat(a || "новинки"), "submenu", void 0,
-          [new p("Новинки", i), new p("Топ просмотра", i + "?sort=most-viewed"),
-            new p("Топ рейтинга", i + "?sort=top-rated"), new p("Длинные ролики", i + "?sort=longest"),
-            new p("Короткие ролики", i + "?sort=shortest")]));
+        if (t) return (o.push(new p("Сортировка: ".concat(a || "новинки"), "submenu", void 0, [
+          new p("Новинки",        i + "?search=".concat(encodeURIComponent(t))),
+          new p("Топ просмотра",  i + "?sort=most-viewed&search=".concat(encodeURIComponent(t))),
+          new p("Топ рейтинга",   i + "?sort=top-rated&search=".concat(encodeURIComponent(t))),
+          new p("Длинные ролики", i + "?sort=longest&search=".concat(encodeURIComponent(t))),
+          new p("Короткие ролики",i + "?sort=shortest&search=".concat(encodeURIComponent(t)))
+        ])), o);
+        n || o.push(new p("Сортировка: ".concat(a || "новинки"), "submenu", void 0, [
+          new p("Новинки",        i),
+          new p("Топ просмотра",  i + "?sort=most-viewed"),
+          new p("Топ рейтинга",   i + "?sort=top-rated"),
+          new p("Длинные ролики", i + "?sort=longest"),
+          new p("Короткие ролики",i + "?sort=shortest")
+        ]));
         var s = [
-          new p("Все", i), new p("4K UHD", i + "?c=4k-porn"), new p("60 FPS", i + "?c=60fps"),
-          new p("Amateur", i + "?c=amateur"), new p("Anal", i + "?c=anal"), new p("Asian", i + "?c=asian"),
-          new p("ASMR", i + "?c=asmr"), new p("BBW", i + "?c=bbw"), new p("BDSM", i + "?c=bdsm"),
-          new p("Big Ass", i + "?c=big-ass"), new p("Big Dick", i + "?c=big-dick"),
-          new p("Big Tits", i + "?c=big-tits"), new p("Bisexual", i + "?c=bisexual"),
-          new p("Blonde", i + "?c=blonde"), new p("Blowjob", i + "?c=blowjob"),
-          new p("Bondage", i + "?c=bondage"), new p("Brunette", i + "?c=brunette"),
-          new p("Bukkake", i + "?c=bukkake"), new p("Creampie", i + "?c=creampie"),
-          new p("Cumshot", i + "?c=cumshot"), new p("Double Penetration", i + "?c=double-penetration"),
-          new p("Ebony", i + "?c=ebony"), new p("Fat", i + "?c=fat"), new p("Fetish", i + "?c=fetish"),
-          new p("Fisting", i + "?c=fisting"), new p("Footjob", i + "?c=footjob"),
-          new p("For Women", i + "?c=for-women"), new p("Gay", i + "?c=gay"),
-          new p("Group Sex", i + "?c=group-sex"), new p("Handjob", i + "?c=handjob"),
-          new p("Hardcore", i + "?c=hardcore"), new p("Hentai", i + "?c=hentai"),
-          new p("Homemade", i + "?c=homemade"), new p("Hotel", i + "?c=hotel"),
-          new p("Housewives", i + "?c=housewives"), new p("Indian", i + "?c=indian"),
-          new p("Interracial", i + "?c=interracial"), new p("Japanese", i + "?c=japanese"),
-          new p("Latina", i + "?c=latina"), new p("Lesbian", i + "?c=lesbians"),
-          new p("Lingerie", i + "?c=lingerie"), new p("Massage", i + "?c=massage"),
-          new p("Masturbation", i + "?c=masturbation"), new p("Mature", i + "?c=mature"),
-          new p("MILF", i + "?c=milf"), new p("Nurses", i + "?c=nurse"), new p("Office", i + "?c=office"),
-          new p("Older Men", i + "?c=old-man"), new p("Orgy", i + "?c=orgy"),
-          new p("Outdoor", i + "?c=outdoor"), new p("Petite", i + "?c=petite"),
-          new p("Pornstar", i + "?c=pornstar"), new p("POV", i + "?c=pov-porn"),
-          new p("Public", i + "?c=public"), new p("Redhead", i + "?c=redhead"),
-          new p("Shemale", i + "?c=shemale"), new p("Sleep", i + "?c=sleep"),
-          new p("Small Tits", i + "?c=small-tits"), new p("Squirt", i + "?c=squirt"),
-          new p("Striptease", i + "?c=striptease"), new p("Students", i + "?c=students"),
-          new p("Swinger", i + "?c=swingers"), new p("Teen", i + "?c=teens"),
-          new p("Threesome", i + "?c=threesome"), new p("Toys", i + "?c=toys"),
+          new p("Все", i),
+          new p("4K UHD", i + "?c=4k-porn"),          new p("60 FPS", i + "?c=60fps"),
+          new p("Amateur", i + "?c=amateur"),          new p("Anal", i + "?c=anal"),
+          new p("Asian", i + "?c=asian"),              new p("ASMR", i + "?c=asmr"),
+          new p("BBW", i + "?c=bbw"),                  new p("BDSM", i + "?c=bdsm"),
+          new p("Big Ass", i + "?c=big-ass"),          new p("Big Dick", i + "?c=big-dick"),
+          new p("Big Tits", i + "?c=big-tits"),        new p("Bisexual", i + "?c=bisexual"),
+          new p("Blonde", i + "?c=blonde"),            new p("Blowjob", i + "?c=blowjob"),
+          new p("Bondage", i + "?c=bondage"),          new p("Brunette", i + "?c=brunette"),
+          new p("Bukkake", i + "?c=bukkake"),          new p("Creampie", i + "?c=creampie"),
+          new p("Cumshot", i + "?c=cumshot"),          new p("Double Penetration", i + "?c=double-penetration"),
+          new p("Ebony", i + "?c=ebony"),              new p("Fat", i + "?c=fat"),
+          new p("Fetish", i + "?c=fetish"),            new p("Fisting", i + "?c=fisting"),
+          new p("Footjob", i + "?c=footjob"),          new p("For Women", i + "?c=for-women"),
+          new p("Gay", i + "?c=gay"),                  new p("Group Sex", i + "?c=group-sex"),
+          new p("Handjob", i + "?c=handjob"),          new p("Hardcore", i + "?c=hardcore"),
+          new p("Hentai", i + "?c=hentai"),            new p("Homemade", i + "?c=homemade"),
+          new p("Hotel", i + "?c=hotel"),              new p("Housewives", i + "?c=housewives"),
+          new p("Indian", i + "?c=indian"),            new p("Interracial", i + "?c=interracial"),
+          new p("Japanese", i + "?c=japanese"),        new p("Latina", i + "?c=latina"),
+          new p("Lesbian", i + "?c=lesbians"),         new p("Lingerie", i + "?c=lingerie"),
+          new p("Massage", i + "?c=massage"),          new p("Masturbation", i + "?c=masturbation"),
+          new p("Mature", i + "?c=mature"),            new p("MILF", i + "?c=milf"),
+          new p("Nurses", i + "?c=nurse"),             new p("Office", i + "?c=office"),
+          new p("Older Men", i + "?c=old-man"),        new p("Orgy", i + "?c=orgy"),
+          new p("Outdoor", i + "?c=outdoor"),          new p("Petite", i + "?c=petite"),
+          new p("Pornstar", i + "?c=pornstar"),        new p("POV", i + "?c=pov-porn"),
+          new p("Public", i + "?c=public"),            new p("Redhead", i + "?c=redhead"),
+          new p("Shemale", i + "?c=shemale"),          new p("Sleep", i + "?c=sleep"),
+          new p("Small Tits", i + "?c=small-tits"),    new p("Squirt", i + "?c=squirt"),
+          new p("Striptease", i + "?c=striptease"),    new p("Students", i + "?c=students"),
+          new p("Swinger", i + "?c=swingers"),         new p("Teen", i + "?c=teens"),
+          new p("Threesome", i + "?c=threesome"),      new p("Toys", i + "?c=toys"),
           new p("Uncategorized", i + "?c=uncategorized"), new p("Uniform", i + "?c=uniform"),
-          new p("Vintage", i + "?c=vintage"), new p("Webcam", i + "?c=webcam")
+          new p("Vintage", i + "?c=vintage"),          new p("Webcam", i + "?c=webcam")
         ];
-        return o.push(new p("Категория: ".concat((null === (r = s.find((function(e) { return e.playlist_url.endsWith("c=".concat(n)) }))) || void 0 === r ? void 0 : r.title) || "все"), "submenu", void 0, s)), o
+        return o.push(new p(
+          "Категория: ".concat(
+            (null === (r = s.find((function(e) { return e.playlist_url.endsWith("c=".concat(n)) }))) || void 0 === r
+              ? void 0 : r.title) || "все"),
+          "submenu", void 0, s)), o
       }
     }, {
       key: "StreamLinks",
       value: (function() {
-        var _sl = _asyncToGenerator(_regenerator().m((function e(t, a) {
-          var n, r, i, o, s, uv, pv, dv;
+        var _sl = _asyncToGenerator(_regenerator().m((function ep(t, a) {
+          var n, r, i, o, s, xhrUrl, xhrRes, qualitys, rx, match;
           return _regenerator().w((function(e) {
             for (;;) switch (e.n) {
               case 0:
@@ -955,31 +1022,40 @@ function _toPrimitive(e, t) {
                 if (n = e.v) { e.n = 3; break }
                 return e.a(2, new m({}, []));
               case 3:
-                if (r = c.extract(n, /vid ?= ?'([^']+)'/), i = c.extract(n, /hash ?= ?'([^']+)'/), r && i) { e.n = 4; break }
+                if (r = c.extract(n, /vid ?= ?'([^']+)'/),
+                    i = c.extract(n, /hash ?= ?'([^']+)'/),
+                    r && i) { e.n = 4; break }
                 return e.a(2, new m({}, []));
               case 4:
-                return o = "".concat(t, "/xhr/video/").concat(r, "?hash=").concat(this.convertHash(i), "&domain=").concat(t.replace(/^https?:\/\//, ""), "&fallback=false&embed=false&supportedFormats=dash,mp4&_=").concat(Math.floor(Date.now() / 1e3)),
+                return o = "".concat(t, "/xhr/video/").concat(r, "?hash=")
+                    .concat(this.convertHash(i), "&domain=")
+                    .concat(t.replace(/^https?:\/\//, ""), "&fallback=false&embed=false&supportedFormats=dash,mp4&_=")
+                    .concat(Math.floor(Date.now() / 1e3)),
                   e.n = 5, l.Get(o);
               case 5:
                 if (s = e.v) { e.n = 6; break }
                 return e.a(2, new m({}, []));
               case 6:
-                for (uv = {}, pv = /"src":\s*"(https?:\/\/[^/]+\/[^"]+-([0-9]+p)\.mp4)",/g; null !== (dv = pv.exec(s));) uv[dv[2]] = dv[1];
-                return e.a(2, new m(uv, this.Playlist(n)))
+                qualitys = {};
+                rx = /"src":\s*"(https?:\/\/[^/]+\/[^"]+-([0-9]+p)\.mp4)",/g;
+                while (null !== (match = rx.exec(s))) qualitys[match[2]] = match[1];
+                return e.a(2, new m(qualitys, this.Playlist(n)))
             }
-          }), e, this)
+          }), ep, this)
         })));
         return function(e, a) { return _sl.apply(this, arguments) }
       }())
     }, {
       key: "convertHash",
       value: function(e) {
-        return this.base36(e.substring(0, 8)) + this.base36(e.substring(8, 16)) + this.base36(e.substring(16, 24)) + this.base36(e.substring(24, 32))
+        return this.base36(e.substring(0, 8)) + this.base36(e.substring(8, 16)) +
+               this.base36(e.substring(16, 24)) + this.base36(e.substring(24, 32))
       }
     }, {
       key: "base36",
       value: function(e) {
-        for (var t = "", a = parseInt(e, 16); a > 0;) t = "0123456789abcdefghijklmnopqrstuvwxyz"[a % 36] + t, a = Math.floor(a / 36);
+        for (var t = "", a = parseInt(e, 16); a > 0;)
+          t = "0123456789abcdefghijklmnopqrstuvwxyz"[a % 36] + t, a = Math.floor(a / 36);
         return t || "0"
       }
     }]);
@@ -989,28 +1065,25 @@ function _toPrimitive(e, t) {
 
   // ===========================================================================
   // SECTION 4: РЕДАКТИРУЕМЫЕ ИСТОЧНИКИ — NextHub P[]
-  // Движок NextHub + массив конфигураций P[]
-  // Каждый источник: многострочный блок с комментарием домена.
-  // Блоки categories: { } оставлены без дополнительного форматирования.
   // ===========================================================================
 
   // ---------------------------------------------------------------------------
   // NEXTHUB ENGINE — вспомогательные функции (не редактировать)
   // ---------------------------------------------------------------------------
-  function k(e, t) {
+  function _tplReplace(e, t) {
     return e.replace(/\{([^}]+)\}/g, (function(e, a) {
       var n; return null !== (n = t[a]) && void 0 !== n ? n : ""
     }))
   }
-  function w(e, t) {
+  function _joinUrl(e, t) {
     var a = e.replace(/\/+$/, ""), n = t.replace(/^\/+/, "");
     return a + (n ? "/" + n : "")
   }
-  function _(e) { return (new DOMParser).parseFromString(e, "text/html") }
-  function x(e, t, a) {
+  function _parseHtml(e) { return (new DOMParser).parseFromString(e, "text/html") }
+  function _xpathNode(e, t, a) {
     return e.evaluate(t, a || e, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue
   }
-  function C(e, t, a) {
+  function _getAttr(e, t, a) {
     if (!e) return "";
     if (Array.isArray(t)) {
       var n, r = _createForOfIteratorHelper(t);
@@ -1026,37 +1099,36 @@ function _toPrimitive(e, t) {
   }
 
   // ---------------------------------------------------------------------------
-  // NEXTHUB ENGINE — класс (не редактировать)
+  // NEXTHUB ENGINE — основной класс (не редактировать)
   // ---------------------------------------------------------------------------
-  var S = _createClass((function e(t) {
+  var _NextHubClass = _createClass((function e(t) {
     _classCallCheck(this, e), this.cfgs = t
   }), [{
     key: "buildListUrl",
     value: function(e, t, a, n) {
       var r, i, o, s, lv,
-        cv = n && "" !== n.trim(),
-        uv = Object.keys((null === (r = e.menu) || void 0 === r ? void 0 : r.sort) || {}).find((function(t) {
+        iscat  = n && "" !== n.trim(),
+        defSort = Object.keys((null === (r = e.menu) || void 0 === r ? void 0 : r.sort) || {}).find((function(t) {
           var a, n = null === (a = e.menu) || void 0 === a || null === (a = a.sort) || void 0 === a ? void 0 : a[t];
           return !n || "" === n
         })),
-        pv = a && "" !== a.trim() && a !== uv;
+        hasSort = a && "" !== a.trim() && a !== defSort;
       if (null !== (i = e.menu) && void 0 !== i && i.route)
-        if (cv && pv && e.menu.route.catsort) s = e.menu.route.catsort;
-        else if (cv && pv && !e.menu.route.catsort) s = e.menu.route.cat;
-        else if (cv && e.menu.route.cat) s = e.menu.route.cat;
-        else if (pv && e.menu.route.sort) s = e.menu.route.sort;
+        if (iscat && hasSort && e.menu.route.catsort)    s = e.menu.route.catsort;
+        else if (iscat && hasSort && !e.menu.route.catsort) s = e.menu.route.cat;
+        else if (iscat && e.menu.route.cat)              s = e.menu.route.cat;
+        else if (hasSort && e.menu.route.sort)           s = e.menu.route.sort;
         else { var dv; s = 1 === t && null != (null === (dv = e.list) || void 0 === dv ? void 0 : dv.firstpage) ? e.list.firstpage : e.list ? e.list.uri : "{host}" }
       else s = 1 === t && null != (null === (lv = e.list) || void 0 === lv ? void 0 : lv.firstpage) ? e.list.firstpage : e.list ? e.list.uri : "{host}";
-      var hv = (pv && null !== (o = e.menu) && void 0 !== o && o.sort ? e.menu.sort[a] : "").replace(/\{page\}/g, String(t)),
-        mv = k(s = s.replace(/\{page\}/g, String(t)), { host: e.host, sort: hv || "", cat: n || "", page: String(t) });
-      return s.startsWith("{host}") || mv.startsWith("http") || (mv = w(e.host, mv)), mv
+      var sortVal = (hasSort && null !== (o = e.menu) && void 0 !== o && o.sort ? e.menu.sort[a] : "").replace(/\{page\}/g, String(t)),
+        url = _tplReplace(s = s.replace(/\{page\}/g, String(t)), { host: e.host, sort: sortVal || "", cat: n || "", page: String(t) });
+      return s.startsWith("{host}") || url.startsWith("http") || (url = _joinUrl(e.host, url)), url
     }
   }, {
     key: "buildSearchUrl",
     value: function(e, t, a) {
       if (!e.search) return e.host;
-      var n = k(e.search.uri, { search: encodeURIComponent(t), page: String(a) });
-      return w(e.host, n)
+      return _joinUrl(e.host, _tplReplace(e.search.uri, { search: encodeURIComponent(t), page: String(a) }))
     }
   }, {
     key: "buildModelUrl",
@@ -1069,148 +1141,169 @@ function _toPrimitive(e, t) {
     key: "buildMenu",
     value: function(e, t, a) {
       var n, r, i,
-        o = arguments.length > 3 && void 0 !== arguments[3] && arguments[3],
-        s = arguments.length > 4 ? arguments[4] : void 0,
-        lv = [];
-      if (o || lv.push(new p("Поиск", "nexthub://".concat(e.displayname, "?mode=search"), "search_on")),
-        o && null !== (n = e.view) && void 0 !== n && n.related && s) {
-        var cv, uv = null === (cv = s.split("/").pop()) || void 0 === cv || null === (cv = cv.split("?")[0]) || void 0 === cv ? void 0 : cv.split("&")[0],
-          dv = "".concat(e.host, "/").concat(uv),
-          hv = "nexthub://".concat(e.displayname, "?mode=related&href=").concat(encodeURIComponent(dv));
-        lv.push(new p("Похожие", hv))
+        isRelated = arguments.length > 3 && void 0 !== arguments[3] && arguments[3],
+        relHref   = arguments.length > 4 ? arguments[4] : void 0,
+        items = [];
+      if (isRelated || items.push(new p("Поиск", "nexthub://".concat(e.displayname, "?mode=search"), "search_on")),
+        isRelated && null !== (n = e.view) && void 0 !== n && n.related && relHref) {
+        var cv, uv = null === (cv = relHref.split("/").pop()) || void 0 === cv ||
+                     null === (cv = cv.split("?")[0]) || void 0 === cv ? void 0 : cv.split("&")[0],
+          relUrl = "nexthub://".concat(e.displayname, "?mode=related&href=").concat(
+            encodeURIComponent("".concat(e.host, "/").concat(uv)));
+        items.push(new p("Похожие", relUrl))
       }
       if (null !== (r = e.menu) && void 0 !== r && r.sort) {
-        for (var mv = [], gv = 0, yv = Object.entries(e.menu.sort); gv < yv.length; gv++) {
-          var vv, bv = _slicedToArray(yv[gv], 2), fv = bv[0],
-            kv = (bv[1], "nexthub://".concat(e.displayname, "?mode=list&sort=").concat(encodeURIComponent(fv)));
-          a && null !== (vv = e.menu) && void 0 !== vv && null !== (vv = vv.route) && void 0 !== vv && vv.catsort && (kv += "&cat=".concat(encodeURIComponent(a))),
-            mv.push(new p(fv, kv))
+        var sorts = [];
+        for (var g = 0, y = Object.entries(e.menu.sort); g < y.length; g++) {
+          var vv, bv = _slicedToArray(y[g], 2), sortKey = bv[0],
+            sortUrl = "nexthub://".concat(e.displayname, "?mode=list&sort=").concat(encodeURIComponent(sortKey));
+          a && null !== (vv = e.menu) && void 0 !== vv && null !== (vv = vv.route) && void 0 !== vv && vv.catsort &&
+            (sortUrl += "&cat=".concat(encodeURIComponent(a))),
+            sorts.push(new p(sortKey, sortUrl))
         }
-        var wv = mv.find((function(e) { return e.title === t })) || mv[0];
-        lv.push(new p("Сортировка: " + wv.title, "submenu", void 0, mv))
+        var curSort = sorts.find((function(e) { return e.title === t })) || sorts[0];
+        items.push(new p("Сортировка: " + curSort.title, "submenu", void 0, sorts))
       }
       if (null !== (i = e.menu) && void 0 !== i && i.categories) {
-        for (var _v = [], xv = 0, Cv = Object.entries(e.menu.categories); xv < Cv.length; xv++) {
-          var Sv, Pv = _slicedToArray(Cv[xv], 2), zv = Pv[0], Lv = Pv[1],
-            jv = "nexthub://".concat(e.displayname, "?mode=list&cat=").concat(encodeURIComponent(Lv));
-          if (null !== (Sv = e.menu) && void 0 !== Sv && null !== (Sv = Sv.route) && void 0 !== Sv && Sv.catsort) {
-            var Mv, Tv = Object.keys((null === (Mv = e.menu) || void 0 === Mv ? void 0 : Mv.sort) || {}).find((function(t) {
+        var cats = [];
+        for (var x = 0, C = Object.entries(e.menu.categories); x < C.length; x++) {
+          var sv, Pv = _slicedToArray(C[x], 2), catName = Pv[0], catVal = Pv[1],
+            catUrl = "nexthub://".concat(e.displayname, "?mode=list&cat=").concat(encodeURIComponent(catVal));
+          if (null !== (sv = e.menu) && void 0 !== sv && null !== (sv = sv.route) && void 0 !== sv && sv.catsort) {
+            var Mv, defSortKey = Object.keys((null === (Mv = e.menu) || void 0 === Mv ? void 0 : Mv.sort) || {}).find((function(t) {
               var a, n = null === (a = e.menu) || void 0 === a || null === (a = a.sort) || void 0 === a ? void 0 : a[t];
               return !n || "" === n
             }));
-            t && t !== Tv && (jv += "&sort=".concat(encodeURIComponent(t)))
+            t && t !== defSortKey && (catUrl += "&sort=".concat(encodeURIComponent(t)))
           }
-          _v.push(new p(zv, jv))
+          cats.push(new p(catName, catUrl))
         }
-        var Av = "Все";
+        var curCatLabel = "Все";
         if (a) {
-          var Iv = Object.entries(e.menu.categories).find((function(e) {
-            var t = _slicedToArray(e, 2); t[0]; return t[1] === a
+          var found = Object.entries(e.menu.categories).find((function(e) {
+            return _slicedToArray(e, 2)[1] === a
           }));
-          Iv && (Av = Iv[0])
+          found && (curCatLabel = found[0])
         }
-        lv.push(new p("Категория: " + Av, "submenu", void 0, _v))
+        items.push(new p("Категория: " + curCatLabel, "submenu", void 0, cats))
       }
-      return lv
+      return items
     }
   }, {
     key: "toPlaylist",
     value: function(e, t) {
       var a, n = t.contentParse,
-        r = (function(e, t, a) {
+        nodes = (function(e, t, a) {
           for (var n = e.evaluate(t, a || e, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null), r = [], i = 0; i < n.snapshotLength; i++) r.push(n.snapshotItem(i));
           return r
         })(e, n.nodes),
-        i = [], o = _createForOfIteratorHelper(r);
+        items = [], it = _createForOfIteratorHelper(nodes);
       try {
-        for (o.s(); !(a = o.n()).done;) {
-          var s, lv = a.value,
-            cv = n.name ? x(e, n.name.node, lv) : null,
-            uv = x(e, n.href.node, lv),
-            dv = n.img ? x(e, n.img.node, lv) : null,
-            hv = n.duration ? x(e, n.duration.node, lv) : null,
-            mv = n.preview ? x(e, n.preview.node, lv) : null,
-            gv = cv ? (cv.textContent || "").trim() : (null == uv ? void 0 : uv.getAttribute("title")) || "",
-            yv = uv && uv.getAttribute(n.href.attribute || "href") || "",
-            vv = n.img ? C(dv, n.img.attributes || n.img.attribute || "src") : "",
-            bv = n.preview ? C(mv, n.preview.attribute || "data-preview") : null,
-            fv = hv ? (hv.textContent || "").trim() : null;
-          if (vv && ((vv = vv.replace(/&amp;/g, "&").replace(/\\/g, "")).startsWith("../") ?
-            vv = "".concat(t.host, "/").concat(vv.replace("../", "")) :
-            vv.startsWith("//") ? vv = "https:".concat(vv) :
-            vv.startsWith("/") ? vv = t.host + vv :
-            vv.startsWith("http") || (vv = "".concat(t.host, "/").concat(vv))),
-            yv && gv && vv) {
-            var kv = yv.startsWith("http") ? yv : t.host.replace(/\/?$/, "/") + yv.replace(/^\/?/, ""),
-              wv = null;
+        for (it.s(); !(a = it.n()).done;) {
+          var s, node = a.value,
+            nameEl  = n.name     ? _xpathNode(e, n.name.node, node)     : null,
+            hrefEl  = _xpathNode(e, n.href.node, node),
+            imgEl   = n.img      ? _xpathNode(e, n.img.node, node)      : null,
+            durEl   = n.duration ? _xpathNode(e, n.duration.node, node) : null,
+            prevEl  = n.preview  ? _xpathNode(e, n.preview.node, node)  : null,
+            title   = nameEl ? (nameEl.textContent || "").trim() : (null == hrefEl ? void 0 : hrefEl.getAttribute("title")) || "",
+            href    = hrefEl && hrefEl.getAttribute(n.href.attribute || "href") || "",
+            img     = n.img ? _getAttr(imgEl, n.img.attributes || n.img.attribute || "src") : "",
+            preview = n.preview ? _getAttr(prevEl, n.preview.attribute || "data-preview") : null,
+            dur     = durEl ? (durEl.textContent || "").trim() : null;
+          if (img && (
+            (img = img.replace(/&amp;/g, "&").replace(/\\/g, "")).startsWith("../") ?
+              img = "".concat(t.host, "/").concat(img.replace("../", "")) :
+            img.startsWith("//") ? img = "https:".concat(img) :
+            img.startsWith("/")  ? img = t.host + img :
+            img.startsWith("http") || (img = "".concat(t.host, "/").concat(img))),
+            href && title && img) {
+            var fullUrl = href.startsWith("http") ? href : t.host.replace(/\/?$/, "/") + href.replace(/^\/?/, ""),
+              model = null;
             if (n.model) {
-              var _v = n.model.name ? x(e, n.model.name.node, lv) : null,
-                xv = n.model.href ? x(e, n.model.href.node, lv) : null;
-              if (_v && xv && n.model.href) {
-                var Cv = (_v.textContent || "").trim(),
-                  Sv = xv.getAttribute(n.model.href.attribute || "href") || "";
-                Cv && Sv && (wv = { uri: "nexthub://".concat(t.displayname.toLowerCase(), "?mode=model&model=").concat(encodeURIComponent(Sv)), name: Cv })
+              var mnEl = n.model.name ? _xpathNode(e, n.model.name.node, node) : null,
+                mhEl   = n.model.href ? _xpathNode(e, n.model.href.node, node) : null;
+              if (mnEl && mhEl && n.model.href) {
+                var mName = (mnEl.textContent || "").trim(),
+                  mHref   = mhEl.getAttribute(n.model.href.attribute || "href") || "";
+                mName && mHref && (model = {
+                  uri: "nexthub://".concat(t.displayname.toLowerCase(), "?mode=model&model=").concat(encodeURIComponent(mHref)),
+                  name: mName
+                })
               }
             }
-            i.push(new u(gv, kv, vv, bv, fv, null, !0, (null === (s = t.view) || void 0 === s ? void 0 : s.related) || !1, wv))
+            items.push(new u(title, fullUrl, img, preview, dur, null, !0,
+              (null === (s = t.view) || void 0 === s ? void 0 : s.related) || !1, model))
           }
         }
-      } catch (e) { o.e(e) } finally { o.f() }
-      return i
+      } catch (e) { it.e(e) } finally { it.f() }
+      return items
     }
   }, {
     key: "extractStreams",
     value: (function() {
       var _es = _asyncToGenerator(_regenerator().m((function e(t, a) {
-        var n, r, i, o, s, cv, uv, pv, dv, hv, gv, yv, vv, bv, fv, kv, wv, _v, xv, Cv, Sv, Pv, zv, Lv, jv, Mv, Tv;
+        var n, r, i, o, s, iframeRx, iframeM, iframeSrc, iframeUrl, evalFn, evalRes,
+          nodeFileDoc, nodeFileEl, nodeFileVal, matchArr, mIt, mItRes, mKey, mRx, mVal,
+          mFound, mResult, mFormat, relDoc, relItems, O;
         return _regenerator().w((function(e) {
           for (;;) switch (e.n) {
             case 0:
               if (s = {}, null === (n = a.view) || void 0 === n || null === (n = n.iframe) || void 0 === n || !n.pattern) { e.n = 2; break }
-              if (cv = new RegExp(a.view.iframe.pattern, "g"), !(uv = cv.exec(t)) || !uv[1]) { e.n = 2; break }
-              return pv = uv[1], dv = pv.startsWith("http") ? pv : a.host + pv, e.n = 1, l.Get(dv, void 0, a.charset);
+              if (iframeRx = new RegExp(a.view.iframe.pattern, "g"), !(iframeM = iframeRx.exec(t)) || !iframeM[1]) { e.n = 2; break }
+              return iframeSrc = iframeM[1],
+                iframeUrl = iframeSrc.startsWith("http") ? iframeSrc : a.host + iframeSrc,
+                e.n = 1, l.Get(iframeUrl, void 0, a.charset);
             case 1:
               t = e.v;
             case 2:
               if (null === (r = a.view) || void 0 === r || !r.eval) { e.n = 3; break }
               try {
-                hv = new Function("html", a.view.eval), (gv = hv(t)) && (s.auto = gv.replace(/&amp;/g, "&").replace(/\\/g, ""))
+                evalFn = new Function("html", a.view.eval),
+                  (evalRes = evalFn(t)) && (s.auto = evalRes.replace(/&amp;/g, "&").replace(/\\/g, ""))
               } catch (e) { console.error("Eval execution error:", e) }
               e.n = 15; break;
             case 3:
               if (null === (i = a.view) || void 0 === i || !i.nodeFile) { e.n = 4; break }
-              yv = _(t), (vv = x(yv, a.view.nodeFile.node)) && (bv = C(vv, a.view.nodeFile.attribute)) && (s.auto = bv.replace(/&amp;/g, "&").replace(/\\/g, "")),
+              nodeFileDoc = _parseHtml(t),
+                (nodeFileEl = _xpathNode(nodeFileDoc, a.view.nodeFile.node)) &&
+                (nodeFileVal = _getAttr(nodeFileEl, a.view.nodeFile.attribute)) &&
+                (s.auto = nodeFileVal.replace(/&amp;/g, "&").replace(/\\/g, "")),
                 e.n = 15; break;
             case 4:
-              if (null !== (fv = a.view) && void 0 !== fv && null !== (fv = fv.regexMatch) && void 0 !== fv && fv.pattern) { e.n = 5; break }
+              if (null !== (o = a.view) && void 0 !== o && null !== (o = o.regexMatch) && void 0 !== o && o.pattern) { e.n = 5; break }
               return e.a(2, new m(s, []));
             case 5:
-              kv = a.view.regexMatch.matches || [""], wv = _createForOfIteratorHelper(kv), e.p = 6, wv.s();
+              matchArr = a.view.regexMatch.matches || [""], mIt = _createForOfIteratorHelper(matchArr), e.p = 6, mIt.s();
             case 7:
-              if ((_v = wv.n()).done) { e.n = 12; break }
-              xv = _v.value, (Cv = a.view.regexMatch.pattern).includes("{value}") && (Cv = Cv.replace("{value}", xv)),
-                Sv = new RegExp(Cv, "g"), Pv = void 0, zv = !1;
+              if ((mItRes = mIt.n()).done) { e.n = 12; break }
+              mKey = mItRes.value,
+                (mRx = a.view.regexMatch.pattern).includes("{value}") && (mRx = mRx.replace("{value}", mKey)),
+                mVal = new RegExp(mRx, "g"), mResult = void 0, mFound = !1;
             case 8:
-              if (!(Pv = Sv.exec(t))) { e.n = 10; break }
-              if (Lv = Pv[1]) { e.n = 9; break }
+              if (!(mResult = mVal.exec(t))) { e.n = 10; break }
+              if (mFormat = mResult[1]) { e.n = 9; break }
               return e.a(3, 8);
             case 9:
-              jv = Lv, a.view.regexMatch.format && (jv = a.view.regexMatch.format.replace("{host}", a.host).replace("{value}", Lv)),
-                s.auto = jv.replace(/&amp;/g, "&").replace(/\\/g, ""), zv = !0, e.n = 8; break;
+              mFormat = mResult[1],
+                a.view.regexMatch.format && (mFormat = a.view.regexMatch.format.replace("{host}", a.host).replace("{value}", mResult[1])),
+                s.auto = mFormat.replace(/&amp;/g, "&").replace(/\\/g, ""), mFound = !0, e.n = 8; break;
             case 10:
-              if (!zv) { e.n = 11; break }
+              if (!mFound) { e.n = 11; break }
               return e.a(3, 12);
             case 11:
               e.n = 7; break;
             case 12:
               e.n = 14; break;
             case 13:
-              e.p = 13, Tv = e.v, wv.e(Tv);
+              e.p = 13, O = e.v, mIt.e(O);
             case 14:
-              return e.p = 14, wv.f(), e.f(14);
+              return e.p = 14, mIt.f(), e.f(14);
             case 15:
-              return Mv = [], null !== (o = a.view) && void 0 !== o && o.related && (jv = _(t), Mv.push.apply(Mv, _toConsumableArray(this.toPlaylist(jv, a)))),
-                e.a(2, new m(s, Mv))
+              return relItems = [],
+                null !== (o = a.view) && void 0 !== o && o.related &&
+                  (relDoc = _parseHtml(t), relItems.push.apply(relItems, _toConsumableArray(this.toPlaylist(relDoc, a)))),
+                e.a(2, new m(s, relItems))
           }
         }), e, this, [[6, 13, 14, 15]])
       })));
@@ -1220,49 +1313,60 @@ function _toPrimitive(e, t) {
     key: "Invoke",
     value: (function() {
       var _inv = _asyncToGenerator(_regenerator().m((function e(t) {
-        var a, n, r, i, o, s, cv, uv, pv, dv, mv, gv, yv, vv, bv, fv, kv, wv, _v, xv, Cv, Sv;
+        var a, hostname, cfg, mode, hrefParam, hrefDecoded, hrefClean, hrefHtml, streams,
+          modelParam, modelPage, modelUrl, modelHtml, modelDoc,
+          searchArr, searchQ, searchPage, searchUrl, searchHtml, searchDoc,
+          sort, cat, pg, listUrl, listHtml, listDoc;
         return _regenerator().w((function(e) {
           for (;;) switch (e.n) {
             case 0:
               if (a = new URL(t),
-                n = a.hostname || a.pathname.replace(/^\//, "") || t.replace("nexthub://", "").split("?")[0],
-                r = this.cfgs.find((function(e) { return e.displayname.toLowerCase() === n.toLowerCase() }))) { e.n = 1; break }
+                hostname = a.hostname || a.pathname.replace(/^\//, "") || t.replace("nexthub://", "").split("?")[0],
+                cfg = this.cfgs.find((function(e) { return e.displayname.toLowerCase() === hostname.toLowerCase() }))) { e.n = 1; break }
               return e.a(2, "unknown nexthub site");
             case 1:
               if (console.log("NextHub: Invoke ".concat(t)),
-                "view" !== (i = a.searchParams.get("mode") || "list") && "related" !== i) { e.n = 5; break }
-              if (o = a.searchParams.get("href")) { e.n = 2; break }
+                "view" !== (mode = a.searchParams.get("mode") || "list") && "related" !== mode) { e.n = 5; break }
+              if (hrefParam = a.searchParams.get("href")) { e.n = 2; break }
               return e.a(2, "no href param");
             case 2:
-              return s = decodeURIComponent(o), cv = s.replace("&related?pg=1", ""),
-                e.n = 3, l.Get(cv, void 0, r.charset);
+              return hrefDecoded = decodeURIComponent(hrefParam),
+                hrefClean = hrefDecoded.replace("&related?pg=1", ""),
+                e.n = 3, l.Get(hrefClean, void 0, cfg.charset);
             case 3:
-              return uv = e.v, e.n = 4, this.extractStreams(uv, r);
+              return hrefHtml = e.v, e.n = 4, this.extractStreams(hrefHtml, cfg);
             case 4:
-              return pv = e.v, e.a(2, new h(pv, "related" === i || s.includes("&related")));
+              return streams = e.v, e.a(2, new h(streams, "related" === mode || hrefDecoded.includes("&related")));
             case 5:
-              if ("model" !== i) { e.n = 8; break }
-              if (dv = a.searchParams.get("model")) { e.n = 6; break }
+              if ("model" !== mode) { e.n = 8; break }
+              if (modelParam = a.searchParams.get("model")) { e.n = 6; break }
               return e.a(2, "no model param");
             case 6:
-              return mv = Number(a.searchParams.get("pg") || "1"), gv = this.buildModelUrl(r, dv, mv),
-                e.n = 7, l.Get(gv, void 0, r.charset);
+              return modelPage = Number(a.searchParams.get("pg") || "1"),
+                modelUrl = this.buildModelUrl(cfg, modelParam, modelPage),
+                e.n = 7, l.Get(modelUrl, void 0, cfg.charset);
             case 7:
-              return yv = e.v, vv = _(yv), e.a(2, { menu: this.buildMenu(r, void 0, void 0, !1), list: this.toPlaylist(vv, r) });
+              return modelHtml = e.v, modelDoc = _parseHtml(modelHtml),
+                e.a(2, { menu: this.buildMenu(cfg, void 0, void 0, !1), list: this.toPlaylist(modelDoc, cfg) });
             case 8:
-              if ("search" !== i) { e.n = 10; break }
-              return bv = a.searchParams.getAll("search"),
-                fv = bv.find((function(e) { return "" !== e.trim() })) || "",
-                kv = Number(a.searchParams.get("pg") || "1"),
-                wv = this.buildSearchUrl(r, fv, kv), e.n = 9, l.Get(wv, void 0, r.charset);
+              if ("search" !== mode) { e.n = 10; break }
+              return searchArr = a.searchParams.getAll("search"),
+                searchQ = searchArr.find((function(e) { return "" !== e.trim() })) || "",
+                searchPage = Number(a.searchParams.get("pg") || "1"),
+                searchUrl = this.buildSearchUrl(cfg, searchQ, searchPage),
+                e.n = 9, l.Get(searchUrl, void 0, cfg.charset);
             case 9:
-              return _v = e.v, xv = _(_v), e.a(2, { menu: this.buildMenu(r, void 0, void 0, !1), list: this.toPlaylist(xv, r) });
+              return searchHtml = e.v, searchDoc = _parseHtml(searchHtml),
+                e.a(2, { menu: this.buildMenu(cfg, void 0, void 0, !1), list: this.toPlaylist(searchDoc, cfg) });
             case 10:
-              return Cv = a.searchParams.get("sort") || "", Sv = a.searchParams.get("cat") || "",
-                _v = Number(a.searchParams.get("pg") || "1"),
-                xv = this.buildListUrl(r, _v, Cv, Sv), e.n = 11, l.Get(xv, void 0, r.charset);
+              return sort = a.searchParams.get("sort") || "",
+                cat  = a.searchParams.get("cat") || "",
+                pg   = Number(a.searchParams.get("pg") || "1"),
+                listUrl = this.buildListUrl(cfg, pg, sort, cat),
+                e.n = 11, l.Get(listUrl, void 0, cfg.charset);
             case 11:
-              return kv = e.v, wv = _(kv), e.a(2, { menu: this.buildMenu(r, Cv, Sv, !1), list: this.toPlaylist(wv, r) });
+              return listHtml = e.v, listDoc = _parseHtml(listHtml),
+                e.a(2, { menu: this.buildMenu(cfg, sort, cat, !1), list: this.toPlaylist(listDoc, cfg) });
             case 12:
               return e.a(2)
           }
@@ -1271,7 +1375,8 @@ function _toPrimitive(e, t) {
       return function(t) { return _inv.apply(this, arguments) }
     }())
   }]);
-  S.host = "nexthub://";
+  _NextHubClass.host = "nexthub://";
+  var S = _NextHubClass;
 
   // ---------------------------------------------------------------------------
   // NEXTHUB CONFIGS ARRAY P[]
@@ -1297,17 +1402,17 @@ function _toPrimitive(e, t) {
       host: "https://rt.pornhub.com",
       menu: {
         route: {
-          sort: "{host}/video?o={sort}&page={page}",
-          model: "{host}{model}/videos?page={page}",
-          cat: "{host}/video?c={cat}&page={page}",
+          sort:    "{host}/video?o={sort}&page={page}",
+          model:   "{host}{model}/videos?page={page}",
+          cat:     "{host}/video?c={cat}&page={page}",
           catsort: "{host}/video?c={cat}&o={sort}&page={page}"
         },
         sort: {
           "Недавно в Избранном": "",
-          "Новые": "cm",
-          "Популярные": "mv",
-          "Лучшие": "tr",
-          "Горячие": "ht"
+          "Новые":               "cm",
+          "Популярные":          "mv",
+          "Лучшие":              "tr",
+          "Горячие":             "ht"
         },
         categories: {
           "Все": "", "Азиатки": "1", "Анальный секс": "35", "Арабское": "98", "БДСМ": "10",
@@ -1330,14 +1435,14 @@ function _toPrimitive(e, t) {
           "Gaming": "881", "Podcast": "891"
         }
       },
-      list: { uri: "video?page={page}" },
+      list:   { uri: "video?page={page}" },
       search: { uri: "video/search?search={search}&page={page}" },
       contentParse: {
-        nodes: "//li[contains(@class,'videoblock')] | //div[contains(@class,'video-list') or contains(@class,'videos')]//li[contains(@class,'videoblock')] | //ul[@id='videoCategory']//li[contains(@class,'videoblock')]",
-        name: { node: ".//a[@data-event='thumb_click'] | .//a[@class='gtm-event-thumb-click'] | .//span[@class='title']//a" },
-        href: { node: ".//a[contains(@class,'linkVideoThumb')] | .//a[contains(@class,'title')]", attribute: "href" },
-        img: { node: ".//img | .//a[contains(@class,'linkVideoThumb')]//img", attributes: ["data-mediumthumb", "data-thumb_url", "data-image", "src"] },
-        preview: { node: ".//img | .//a[contains(@class,'linkVideoThumb')]//img", attribute: "data-mediabook" },
+        nodes:    "//li[contains(@class,'videoblock')] | //div[contains(@class,'video-list') or contains(@class,'videos')]//li[contains(@class,'videoblock')] | //ul[@id='videoCategory']//li[contains(@class,'videoblock')]",
+        name:     { node: ".//a[@data-event='thumb_click'] | .//a[@class='gtm-event-thumb-click'] | .//span[@class='title']//a" },
+        href:     { node: ".//a[contains(@class,'linkVideoThumb')] | .//a[contains(@class,'title')]", attribute: "href" },
+        img:      { node: ".//img | .//a[contains(@class,'linkVideoThumb')]//img", attributes: ["data-mediumthumb", "data-thumb_url", "data-image", "src"] },
+        preview:  { node: ".//img | .//a[contains(@class,'linkVideoThumb')]//img", attribute: "data-mediabook" },
         duration: { node: ".//*[contains(@class,'duration')]" },
         model: {
           name: { node: ".//a[contains(@href,'/model/')]" },
@@ -1365,14 +1470,14 @@ function _toPrimitive(e, t) {
       host: "https://ru.xhamster.com",
       menu: {
         route: {
-          sort: "{host}/{sort}/{page}",
-          cat: "{host}/categories/{cat}/{page}",
+          sort:    "{host}/{sort}/{page}",
+          cat:     "{host}/categories/{cat}/{page}",
           catsort: "{host}/categories/{cat}/{sort}/{page}"
         },
         sort: {
           "В тренде": "",
           "Новейшее": "newest",
-          "Лучшие": "best/weekly"
+          "Лучшие":   "best/weekly"
         },
         categories: {
           "Все": "", "Русское": "russian", "Секс втроем": "threesome", "Азиатское": "asian",
@@ -1399,14 +1504,14 @@ function _toPrimitive(e, t) {
           "Хенджоб": "handjob", "Хентай": "hentai", "Японское": "japanese"
         }
       },
-      list: { uri: "{host}/{page}", firstpage: "{host}" },
+      list:   { uri: "{host}/{page}", firstpage: "{host}" },
       search: { uri: "search/{search}/{page}" },
       contentParse: {
-        nodes: "//div[contains(@class,'thumb-list__item')] | //div[contains(@class,'thumb-list-mobile-item')]",
-        name: { node: ".//a[contains(@class,'video-thumb-info__name')]" },
-        href: { node: ".//a[contains(@class,'video-thumb-info__name')]", attribute: "href" },
-        img: { node: ".//img", attributes: ["srcset", "src"] },
-        preview: { node: ".//a", attribute: "data-previewvideo" },
+        nodes:    "//div[contains(@class,'thumb-list__item')] | //div[contains(@class,'thumb-list-mobile-item')]",
+        name:     { node: ".//a[contains(@class,'video-thumb-info__name')]" },
+        href:     { node: ".//a[contains(@class,'video-thumb-info__name')]", attribute: "href" },
+        img:      { node: ".//img", attributes: ["srcset", "src"] },
+        preview:  { node: ".//a", attribute: "data-previewvideo" },
         duration: { node: ".//div[@data-role='video-duration'] | .//time[contains(@class,'video-thumb__time')]" }
       },
       view: {
@@ -1427,14 +1532,14 @@ function _toPrimitive(e, t) {
       host: "https://wes.lenkino.adult",
       menu: {
         route: {
-          cat: "{host}/{cat}/page/{page}",
-          sort: "{host}/{sort}/page/{page}",
+          cat:     "{host}/{cat}/page/{page}",
+          sort:    "{host}/{sort}/page/{page}",
           catsort: "{host}/{cat}-top/page/{page}",
-          model: "{model}/page/{page}"
+          model:   "{model}/page/{page}"
         },
         sort: {
-          "Новые": "",
-          "Лучшие": "top-porno",
+          "Новые":   "",
+          "Лучшие":  "top-porno",
           "Горячие": "hot-porno"
         },
         categories: {
@@ -1476,15 +1581,15 @@ function _toPrimitive(e, t) {
           "Сперма на попе": "cum-on-ass", "Сперма на пизде": "cum-on-pussy"
         }
       },
-      list: { uri: "page/{page}" },
+      list:   { uri: "page/{page}" },
       search: { uri: "search/{search}/page/{page}" },
       contentParse: {
-        nodes: "//div[@class='item']",
-        name: { node: ".//div[@class='itm-tit']" },
-        href: { node: ".//a", attribute: "href" },
-        img: { node: ".//img[@class='lzy']", attribute: "data-srcset" },
+        nodes:    "//div[@class='item']",
+        name:     { node: ".//div[@class='itm-tit']" },
+        href:     { node: ".//a", attribute: "href" },
+        img:      { node: ".//img[@class='lzy']", attribute: "data-srcset" },
         duration: { node: ".//div[@class='itm-dur fnt-cs']" },
-        preview: { node: ".//img[@class='lzy']", attribute: "data-preview" },
+        preview:  { node: ".//img[@class='lzy']", attribute: "data-preview" },
         model: {
           name: { node: ".//a[@class='itm-opt-mdl len_pucl']" },
           href: { node: ".//a[@class='itm-opt-mdl len_pucl']", attribute: "href" }
@@ -1512,11 +1617,11 @@ function _toPrimitive(e, t) {
       menu: {
         route: {
           sort: "{host}/{sort}/{page}/",
-          cat: "{host}/categories/{cat}/{page}/"
+          cat:  "{host}/categories/{cat}/{page}/"
         },
         sort: {
-          "Новое": "latest-updates",
-          "Лучшее": "top-rated",
+          "Новое":      "latest-updates",
+          "Лучшее":     "top-rated",
           "Популярное": "most-popular"
         },
         categories: {
@@ -1537,13 +1642,13 @@ function _toPrimitive(e, t) {
           "Мультики": "multiki", "В туалете": "v-tualete"
         }
       },
-      list: { uri: "latest-updates/{page}/", firstpage: "{host}" },
+      list:   { uri: "latest-updates/{page}/", firstpage: "{host}" },
       search: { uri: "search/{page}/?q={search}" },
       contentParse: {
-        nodes: "//div[contains(@class,'item')]",
-        name: { node: ".//strong[contains(@class,'title')]" },
-        href: { node: ".//a", attribute: "href" },
-        img: { node: ".//img", attributes: ["data-original", "data-src", "src"] },
+        nodes:    "//div[contains(@class,'item')]",
+        name:     { node: ".//strong[contains(@class,'title')]" },
+        href:     { node: ".//a", attribute: "href" },
+        img:      { node: ".//img", attributes: ["data-original", "data-src", "src"] },
         duration: { node: ".//div[contains(@class,'duration')]" }
       },
       view: {
@@ -1570,19 +1675,19 @@ function _toPrimitive(e, t) {
           sort: "{host}/{sort}/week?p={page}"
         },
         sort: {
-          "Новинки": "",
+          "Новинки":    "",
           "Популярное": "popular"
         }
       },
-      list: { uri: "now?p={page}" },
+      list:   { uri: "now?p={page}" },
       search: { uri: "video/{search}?p={page}" },
       contentParse: {
-        nodes: "//div[contains(@class, 'item')]",
-        name: { node: ".//div[@class='title']" },
-        href: { node: ".//a", attribute: "href" },
-        img: { node: ".//img", attribute: "data-src" },
+        nodes:    "//div[contains(@class, 'item')]",
+        name:     { node: ".//div[@class='title']" },
+        href:     { node: ".//a", attribute: "href" },
+        img:      { node: ".//img", attribute: "data-src" },
         duration: { node: ".//div[@class='m_time']" },
-        preview: { node: ".//div", attribute: "data-trailer_url" }
+        preview:  { node: ".//div", attribute: "data-trailer_url" }
       },
       view: {
         related: !0,
@@ -1602,12 +1707,12 @@ function _toPrimitive(e, t) {
   // SECTION 5: РОУТИНГ — НЕ РЕДАКТИРОВАТЬ
   // ===========================================================================
 
-  var z = new d;   // BongaCams
-  var L = new g;   // XVideos
-  var j = new y;   // XNXX
-  var M = new v;   // SpankBang
-  var T = new b;   // Chaturbate
-  var A = new f;   // EPorner
+  var z = new d;    // BongaCams
+  var L = new g;    // XVideos
+  var j = new y;    // XNXX
+  var M = new v;    // SpankBang
+  var T = new b;    // Chaturbate
+  var A = new f;    // EPorner
   var I = new S(P); // NextHub
 
   !function() {
@@ -1656,7 +1761,7 @@ function _toPrimitive(e, t) {
               return e.a(2, "unknown site")
           }
         }), e)
-      })))).apply(this, arguments)
+      }))).apply(this, arguments)
     }
 
     window.AdultJS = {
@@ -1690,7 +1795,7 @@ function _toPrimitive(e, t) {
       lampac_adultName: {
         ru: "Adult JS",
         en: "Adult 18+",
-        uk: "Для взрослих",
+        uk: "Для дорослих",
         zh: "Adult 18+"
       }
     });
@@ -1719,28 +1824,45 @@ function _toPrimitive(e, t) {
       sourceTitle: function(e) { return Lampa.Utils.capitalizeFirstLetter(e.split(".")[0]) },
       play: function(e) {
         var t = Lampa.Controller.enabled().name;
-        if (e.json) Lampa.Loading.start((function() { _req.clear(), Lampa.Loading.stop() })),
+        if (e.json) {
+          Lampa.Loading.start((function() { _req.clear(), Lampa.Loading.stop() })),
           _invoke.qualitys(e.video, (function(a) {
             if (a.error) return Lampa.Noty.show(Lampa.Lang.translate("torrent_parser_nofiles")), void Lampa.Loading.stop();
             var n = a.qualitys || a, i = a.recomends || [];
             Lampa.Loading.stop();
-            var o = { title: e.name, url: getBestQuality(n), url_reserve: !!a.qualitys_proxy && getBestQuality(a.qualitys_proxy), quality: n, headers: a.headers_stream };
+            var o = {
+              title: e.name,
+              url: getBestQuality(n),
+              url_reserve: !!a.qualitys_proxy && getBestQuality(a.qualitys_proxy),
+              quality: n,
+              headers: a.headers_stream
+            };
             Lampa.Player.play(o),
-              i.length ? (i.forEach((function(e) {
-                e.title = Lampa.Utils.shortText(e.name, 50),
-                  e.icon = '<img class="size-youtube" src="' + e.picture + '" />',
+              i.length ? (
+                i.forEach((function(e) {
+                  e.title    = Lampa.Utils.shortText(e.name, 50),
+                  e.icon     = '<img class="size-youtube" src="' + e.picture + '" />',
                   e.template = "selectbox_icon",
-                  e.url = function(t) {
+                  e.url      = function(t) {
                     e.json ? _invoke.qualitys(e.video, (function(a) {
                       e.quality = a.qualitys, e.url = getBestQuality(a.qualitys),
                         a.qualitys_proxy && (e.url_reserve = getBestQuality(a.qualitys_proxy)), t()
                     })) : (e.url = e.video, t())
                   }
-              })), Lampa.Player.playlist(i)) : Lampa.Player.playlist([o]),
+                })),
+                Lampa.Player.playlist(i)
+              ) : Lampa.Player.playlist([o]),
               Lampa.Player.callback((function() { Lampa.Controller.toggle(t) }))
-          }), (function() { Lampa.Noty.show(Lampa.Lang.translate("torrent_parser_nofiles")), Lampa.Loading.stop() }));
-        else {
-          var a = { title: e.name, url: getBestQuality(e.qualitys) || e.video, url_reserve: getBestQuality(e.qualitys_proxy) || e.video_reserve || "", quality: e.qualitys };
+          }), (function() {
+            Lampa.Noty.show(Lampa.Lang.translate("torrent_parser_nofiles")), Lampa.Loading.stop()
+          }))
+        } else {
+          var a = {
+            title: e.name,
+            url: getBestQuality(e.qualitys) || e.video,
+            url_reserve: getBestQuality(e.qualitys_proxy) || e.video_reserve || "",
+            quality: e.qualitys
+          };
           Lampa.Player.play(a), Lampa.Player.playlist([a]),
             Lampa.Player.callback((function() { Lampa.Controller.toggle(t) }))
         }
@@ -1755,19 +1877,22 @@ function _toPrimitive(e, t) {
         hidePreview(), _previewTimer = setTimeout((function() {
           if (n.preview && Lampa.Storage.field("sisi_preview")) {
             var t, r = e.find("video"), i = e.find(".sisi-video-preview");
-            r || (r = document.createElement("video"),
-              (i = document.createElement("div")).addClass("sisi-video-preview"),
-              i.style.position = "absolute", i.style.width = "100%", i.style.height = "100%",
-              i.style.left = "0", i.style.top = "0", i.style.overflow = "hidden",
-              i.style.borderRadius = "1em", r.style.position = "absolute",
-              r.style.width = "100%", r.style.height = "100%", r.style.left = "0",
-              r.style.top = "0", r.style.objectFit = "cover",
-              i.append(r), e.find(".card__view").append(i),
-              r.src = n.preview,
-              r.addEventListener("ended", (function() { i.addClass("hide") })),
-              r.load()), _previewEl = i;
-            try { t = r.play() } catch (e) {}
-            void 0 !== t && t.then((function() {})).catch((function(e) {})), i.removeClass("hide")
+            r.length || (
+              r = $(document.createElement("video")),
+              i = $(document.createElement("div")),
+              i.addClass("sisi-video-preview"),
+              i.css({ position: "absolute", width: "100%", height: "100%", left: 0, top: 0, overflow: "hidden", borderRadius: "1em" }),
+              r.css({ position: "absolute", width: "100%", height: "100%", left: 0, top: 0, objectFit: "cover" }),
+              i.append(r),
+              e.find(".card__view").append(i),
+              r.attr("src", n.preview),
+              r[0].addEventListener("ended", (function() { i.addClass("hide") })),
+              r[0].load()
+            ),
+            _previewEl = i;
+            try { t = r[0].play() } catch (e) {}
+            void 0 !== t && t.then((function() {})).catch((function(e) {})),
+              i.removeClass("hide")
           }
         }), 1500)
       },
@@ -1778,11 +1903,12 @@ function _toPrimitive(e, t) {
       menu: function(t, a) {
         var n = [];
         a.related && n.push({ title: "Похожие", related: !0 }),
-          a.model && n.push({ title: a.model.name, model: !0 }),
+          a.model   && n.push({ title: a.model.name, model: !0 }),
           Lampa.Select.show({
             title: "Меню", items: n,
             onSelect: function(t) {
-              t.model ? Lampa.Activity.push({ url: a.model.uri, title: "Модель - " + a.model.name, component: "sisi_view_" + PLUGIN_ID, page: 1 }) :
+              t.model ?
+                Lampa.Activity.push({ url: a.model.uri, title: "Модель - " + a.model.name, component: "sisi_view_" + PLUGIN_ID, page: 1 }) :
                 t.related && Lampa.Activity.push({ url: a.video + "&related", title: "Похожие - " + a.title, component: "sisi_view_" + PLUGIN_ID, page: 1 })
             },
             onBack: function() { Lampa.Controller.toggle("content") }
@@ -1791,8 +1917,7 @@ function _toPrimitive(e, t) {
     };
 
     _invoke = new function() {
-      var self = this, req = new Lampa.Reguest;
-      var _menu;
+      var self = this, req = new Lampa.Reguest, _menu;
       this.menu = function(e, t) {
         if (_menu) return e(_menu);
         var a = AdultJS.Menu();
@@ -1801,8 +1926,11 @@ function _toPrimitive(e, t) {
       this.view = function(e, t, a) {
         AdultJS.Invoke(Lampa.Utils.addUrlComponent(e.url, "pg=" + (e.page || 1)))
           .then((function(e) {
-            e.list ? (e.results = helper.fixList(e.list), e.collection = !0,
-              e.total_pages = e.total_pages || 30, helper.fixCards(e.results), delete e.list, t(e)) : a()
+            e.list ? (
+              e.results = helper.fixList(e.list), e.collection = !0,
+              e.total_pages = e.total_pages || 30,
+              helper.fixCards(e.results), delete e.list, t(e)
+            ) : a()
           })).catch((function() { console.log("AdultJS", "no load", e.url), a() }))
       };
       this.playlist = function(t, a, n) {
@@ -1810,35 +1938,41 @@ function _toPrimitive(e, t) {
           var status = new Lampa.Status(_menu.length);
           status.onComplite = function(e) {
             var t = [];
-            _menu.forEach((function(a) { e[a.playlist_url] && e[a.playlist_url].results.length && t.push(e[a.playlist_url]) })),
+            _menu.forEach((function(a) {
+              e[a.playlist_url] && e[a.playlist_url].results.length && t.push(e[a.playlist_url])
+            })),
               t.length ? a(t) : n()
           };
-          _menu.forEach((function(a, idx) {
+          _menu.forEach((function(a) {
             var r = -1 !== a.playlist_url.indexOf("?") ? "&" : "?",
               i = -1 !== t.indexOf("?") || -1 !== t.indexOf("&") ? t.substring(1) : t,
               cancelled = !1,
               timer = setTimeout((function() { cancelled = !0, status.error() }), 8e3);
             AdultJS.Invoke(a.playlist_url + r + i)
               .then((function(t) {
-                clearTimeout(timer), cancelled || (t.list ? (t.title = helper.sourceTitle(a.title),
+                clearTimeout(timer), cancelled || (t.list ? (
+                  t.title = helper.sourceTitle(a.title),
                   t.results = helper.fixList(t.list), t.url = a.playlist_url,
                   t.collection = !0, t.line_type = "none",
                   t.card_events = {
-                    onMenu: helper.menu,
+                    onMenu:  helper.menu,
                     onEnter: function(e, t) { helper.hidePreview(), helper.play(t) }
                   },
-                  helper.fixCards(t.results), delete t.list, status.append(a.playlist_url, t)) : status.error())
+                  helper.fixCards(t.results), delete t.list,
+                  status.append(a.playlist_url, t)
+                ) : status.error())
               })).catch((function() {
-                console.log("AdultJS", "no load", a.playlist_url + r + i), clearTimeout(timer), status.error()
+                console.log("AdultJS", "no load", a.playlist_url + r + i),
+                  clearTimeout(timer), status.error()
               }))
           }))
         };
         _menu ? run() : self.menu(run, n)
       };
-      this.main = function(e, t, a) { this.playlist("", t, a) };
+      this.main   = function(e, t, a) { this.playlist("", t, a) };
       this.search = function(e, t, a) { this.playlist("?search=" + encodeURIComponent(e.query), t, a) };
       this.qualitys = function(e, t, a) {
-        AdultJS.Invoke(e).then(t).catch((function(t) { console.log("AdultJS", "no load", e), a() }))
+        AdultJS.Invoke(e).then(t).catch((function() { console.log("AdultJS", "no load", e), a() }))
       };
       this.clear = function() { req.clear() }
     };
@@ -1846,19 +1980,25 @@ function _toPrimitive(e, t) {
     function buildMainComponent(t) {
       var a = new Lampa.InteractionMain(t);
       a.create = function() {
-        return this.activity.loader(!0), _invoke.main(t, this.build.bind(this), this.empty.bind(this)), this.render()
+        return this.activity.loader(!0),
+          _invoke.main(t, this.build.bind(this), this.empty.bind(this)),
+          this.render()
       };
       a.empty = function(e) {
-        var t = this, a = new Lampa.Empty({ descr: "string" == typeof e ? e : Lampa.Lang.translate("empty_text_two") });
+        var self = this,
+          empty = new Lampa.Empty({ descr: "string" == typeof e ? e : Lampa.Lang.translate("empty_text_two") });
         Lampa.Activity.all().forEach((function(e) {
-          t.activity == e.activity && e.activity.render().find(".activity__body > div")[0].appendChild(a.render(!0))
+          self.activity == e.activity &&
+            e.activity.render().find(".activity__body > div")[0].appendChild(empty.render(!0))
         })),
-          this.start = a.start.bind(a), this.activity.loader(!1), this.activity.toggle()
+          this.start = empty.start.bind(empty),
+          this.activity.loader(!1),
+          this.activity.toggle()
       };
       a.onMore = function(t) {
         Lampa.Activity.push({ url: t.url, title: t.title, component: "sisi_view_" + PLUGIN_ID, page: 2 })
       };
-      a.onAppend = function(e, t) {
+      a.onAppend = function(e) {
         e.onAppend = function(e) {
           var t = e.onFocus;
           e.onFocus = function(e, a) { t(e, a), helper.preview(e, a) }
@@ -1868,12 +2008,12 @@ function _toPrimitive(e, t) {
     }
 
     function buildViewComponent(t) {
-      var a, n = new Lampa.InteractionCategory(t);
+      var menuData, n = new Lampa.InteractionCategory(t);
       n.create = function() {
-        var e = this;
+        var self = this;
         this.activity.loader(!0),
           _invoke.view(t, (function(t) {
-            (a = t.menu) && a.forEach((function(e) {
+            (menuData = t.menu) && menuData.forEach((function(e) {
               var t = e.title.split(":");
               e.title = t[0].trim(),
                 t[1] && (e.subtitle = Lampa.Utils.capitalizeFirstLetter(t[1].trim().replace(/all/i, "Любой"))),
@@ -1881,29 +2021,36 @@ function _toPrimitive(e, t) {
                   e.title = Lampa.Utils.capitalizeFirstLetter(e.title.trim().replace(/all/i, "Любой"))
                 }))
             })),
-              e.build(t), n.render().find(".category-full").addClass("mapping--grid cols--3")
+              self.build(t),
+              n.render().find(".category-full").addClass("mapping--grid cols--3")
           }), this.empty.bind(this))
       };
       n.nextPageReuest = function(e, t, a) { _invoke.view(e, t.bind(this), a.bind(this)) };
       n.cardRender = function(e, t, a) {
-        a.onMenu = function(e, t) { return helper.menu(e, t) },
-          a.onEnter = function() { helper.hidePreview(), helper.play(t) };
-        var n = a.onFocus;
-        a.onFocus = function(e, a) { n(e, a), helper.preview(e, t) }
+        a.onMenu  = function(e, t) { return helper.menu(e, t) };
+        a.onEnter = function() { helper.hidePreview(), helper.play(t) };
+        var onFocus = a.onFocus;
+        a.onFocus = function(e, a) { onFocus(e, a), helper.preview(e, t) }
       };
       n.filter = function() {
-        if (a) {
-          var r = a.filter((function(e) { return !e.search_on })),
-            i = a.find((function(e) { return e.search_on }));
+        if (menuData) {
+          var r = menuData.filter((function(e) { return !e.search_on })),
+            i   = menuData.find((function(e) { return e.search_on }));
           if (i || (i = t.search_start), !r.length && !i) return;
           i && Lampa.Arrays.insert(r, 0, {
             title: "Найти",
             onSelect: function() {
               $("body").addClass("ambience--enable"),
-                Lampa.Input.edit({ title: "Поиск", value: "", free: !0, nosave: !0 }, (function(t) {
-                  if ($("body").removeClass("ambience--enable"), Lampa.Controller.toggle("content"), t) {
+                Lampa.Input.edit({ title: "Поиск", value: "", free: !0, nosave: !0 }, (function(e) {
+                  $("body").removeClass("ambience--enable"), Lampa.Controller.toggle("content");
+                  if (e) {
                     var a = -1 !== i.playlist_url.indexOf("?") ? "&" : "?";
-                    Lampa.Activity.push({ url: i.playlist_url + a + "search=" + encodeURIComponent(t), title: "Поиск - " + t, component: "sisi_view_" + PLUGIN_ID, search_start: i, page: 1 })
+                    Lampa.Activity.push({
+                      url: i.playlist_url + a + "search=" + encodeURIComponent(e),
+                      title: "Поиск - " + e,
+                      component: "sisi_view_" + PLUGIN_ID,
+                      search_start: i, page: 1
+                    })
                   }
                 }))
             }
@@ -1912,11 +2059,13 @@ function _toPrimitive(e, t) {
             title: "Фильтр", items: r,
             onBack: function() { Lampa.Controller.toggle("content") },
             onSelect: function(r) {
-              a.forEach((function(e) { e.selected = e == r })),
+              menuData.forEach((function(e) { e.selected = e == r })),
                 r.submenu ? Lampa.Select.show({
                   title: r.title, items: r.submenu,
-                  onBack: function() { n.filter() },
-                  onSelect: function(a) { Lampa.Activity.push({ title: t.title, url: a.playlist_url, component: "sisi_view_" + PLUGIN_ID, page: 1 }) }
+                  onBack:   function() { n.filter() },
+                  onSelect: function(a) {
+                    Lampa.Activity.push({ title: t.title, url: a.playlist_url, component: "sisi_view_" + PLUGIN_ID, page: 1 })
+                  }
                 }) : n.filter()
             }
           })
@@ -1929,30 +2078,43 @@ function _toPrimitive(e, t) {
     window["plugin_adultjs_" + PLUGIN_ID + "_ready"] || function() {
 
       function mountUI() {
-        // Кнопка в боковом меню
-        var $btn = $('<li class="menu__item selector" data-action="adultjs">\n            <div class="menu__ico">\n                <svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" width="512" height="512" x="0" y="0" viewBox="0 0 29.461 29.461" style="enable-background:new 0 0 512 512" xml:space="preserve" class=""><g><path d="M28.855 13.134c-.479 0-.91-.197-1.371-.452-1.671 7.509-10.383 11.899-12.765 12.972-2.514-1.125-12.034-5.916-12.963-14.188-.043.029-.088.056-.132.084-.411.269-.797.523-1.299.523-.064 0-.121-.029-.184-.038C1.586 22.377 14.72 27.47 14.72 27.47s12.227-4.74 14.386-14.362a1.397 1.397 0 0 1-.251.026z" fill="currentColor" ></path><path d="M29.379 8.931C28.515-.733 16.628.933 14.721 6.432 12.814.932.928-.733.062 8.931c-.397 4.426 1.173.063 3.508 1.205 1.008.494 1.99 2.702 3.356 2.974 1.998.397 3.109-1.551 4.27-1.631 3.174-.222 2.394 6.596 5.424 5.586 1.961-.653 2.479-3.016 4.171-2.806 1.582.195 3.296-3.711 4.78-3.571 2.471.23 4.305 3.786 3.808-1.757z" fill="currentColor" ></path><path d="M14.894 21.534c2.286 0-.929-3.226-.588-4.511-1.994 1.276-1.697 4.511.588 4.511z" fill="currentColor"></path></g></svg>\n            </div>\n            <div class="menu__text">' + Lampa.Lang.translate("lampac_adultName") + "</div>\n        </li>"),
-          $badge = $("<div>JS</div>");
-        $badge.css({ position: "absolute", right: "-0.4em", bottom: "-0.4em", color: "#fff", fontSize: "0.6em", borderRadius: "0.5em", fontWeight: 900, textTransform: "uppercase" }),
-          $btn.find(".menu__ico").css("position", "relative").append($badge);
+        var $btn = $([
+          '<li class="menu__item selector" data-action="adultjs">',
+          '  <div class="menu__ico">',
+          '    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29.461 29.461" width="512" height="512">',
+          '      <path d="M28.855 13.134c-.479 0-.91-.197-1.371-.452-1.671 7.509-10.383 11.899-12.765 12.972-2.514-1.125-12.034-5.916-12.963-14.188-.043.029-.088.056-.132.084-.411.269-.797.523-1.299.523-.064 0-.121-.029-.184-.038C1.586 22.377 14.72 27.47 14.72 27.47s12.227-4.74 14.386-14.362a1.397 1.397 0 0 1-.251.026z" fill="currentColor"/>',
+          '      <path d="M29.379 8.931C28.515-.733 16.628.933 14.721 6.432 12.814.932.928-.733.062 8.931c-.397 4.426 1.173.063 3.508 1.205 1.008.494 1.99 2.702 3.356 2.974 1.998.397 3.109-1.551 4.27-1.631 3.174-.222 2.394 6.596 5.424 5.586 1.961-.653 2.479-3.016 4.171-2.806 1.582.195 3.296-3.711 4.78-3.571 2.471.23 4.305 3.786 3.808-1.757z" fill="currentColor"/>',
+          '      <path d="M14.894 21.534c2.286 0-.929-3.226-.588-4.511-1.994 1.276-1.697 4.511.588 4.511z" fill="currentColor"/>',
+          '    </svg>',
+          '  </div>',
+          '  <div class="menu__text">' + Lampa.Lang.translate("lampac_adultName") + '</div>',
+          '</li>'
+        ].join(""));
+
+        $btn.find(".menu__ico").css("position", "relative").append(
+          $("<div>JS</div>").css({
+            position: "absolute", right: "-0.4em", bottom: "-0.4em",
+            color: "#fff", fontSize: "0.6em", borderRadius: "0.5em",
+            fontWeight: 900, textTransform: "uppercase"
+          })
+        );
 
         $btn.on("hover:enter", (function() {
-          Lampa.ParentalControl || (Lampa.ParentalControl = { query: function(e, t) { "function" == typeof e && e() } }),
-            Lampa.ParentalControl.query((function() {
-              _invoke.menu((function(t) {
-                var a = [];
-                t.forEach((function(e) { e.title = helper.sourceTitle(e.title) })),
-                  a = a.concat(t),
-                  Lampa.Select.show({
-                    title: "Сайты", items: a,
-                    onSelect: function(t) {
-                      t.playlist_url ?
-                        Lampa.Activity.push({ url: t.playlist_url, title: t.title, component: "sisi_view_" + PLUGIN_ID, page: 1 }) :
-                        Lampa.Activity.push({ url: "", title: Lampa.Lang.translate("lampac_adultName"), component: "sisi_" + PLUGIN_ID, page: 1 })
-                    },
-                    onBack: function() { Lampa.Controller.toggle("menu") }
-                  })
-              }), (function() {}))
+          Lampa.ParentalControl || (Lampa.ParentalControl = { query: function(e) { "function" == typeof e && e() } });
+          Lampa.ParentalControl.query((function() {
+            _invoke.menu((function(t) {
+              t.forEach((function(e) { e.title = helper.sourceTitle(e.title) }));
+              Lampa.Select.show({
+                title: "Сайты", items: t,
+                onSelect: function(t) {
+                  t.playlist_url ?
+                    Lampa.Activity.push({ url: t.playlist_url, title: t.title, component: "sisi_view_" + PLUGIN_ID, page: 1 }) :
+                    Lampa.Activity.push({ url: "", title: Lampa.Lang.translate("lampac_adultName"), component: "sisi_" + PLUGIN_ID, page: 1 })
+                },
+                onBack: function() { Lampa.Controller.toggle("menu") }
+              })
             }), (function() {}))
+          }), (function() {}))
         }));
 
         $(".menu .menu__list").eq(0).append($btn);
@@ -1960,31 +2122,51 @@ function _toPrimitive(e, t) {
         // Кнопка фильтра в шапке
         !function() {
           var _actObj, _hideTimer,
-            $filter = $('<div class="head__action head__settings selector">\n            <svg height="36" viewBox="0 0 38 36" fill="none" xmlns="http://www.w3.org/2000/svg">\n                <rect x="1.5" y="1.5" width="35" height="33" rx="1.5" stroke="currentColor" stroke-width="3"></rect>\n                <rect x="7" y="8" width="24" height="3" rx="1.5" fill="currentColor"></rect>\n                <rect x="7" y="16" width="24" height="3" rx="1.5" fill="currentColor"></rect>\n                <rect x="7" y="25" width="24" height="3" rx="1.5" fill="currentColor"></rect>\n                <circle cx="13.5" cy="17.5" r="3.5" fill="currentColor"></circle>\n                <circle cx="23.5" cy="26.5" r="3.5" fill="currentColor"></circle>\n                <circle cx="21.5" cy="9.5" r="3.5" fill="currentColor"></circle>\n            </svg>\n        </div>');
+            $filter = $([
+              '<div class="head__action head__settings selector">',
+              '  <svg height="36" viewBox="0 0 38 36" fill="none" xmlns="http://www.w3.org/2000/svg">',
+              '    <rect x="1.5" y="1.5" width="35" height="33" rx="1.5" stroke="currentColor" stroke-width="3"/>',
+              '    <rect x="7" y="8"  width="24" height="3" rx="1.5" fill="currentColor"/>',
+              '    <rect x="7" y="16" width="24" height="3" rx="1.5" fill="currentColor"/>',
+              '    <rect x="7" y="25" width="24" height="3" rx="1.5" fill="currentColor"/>',
+              '    <circle cx="13.5" cy="17.5" r="3.5" fill="currentColor"/>',
+              '    <circle cx="23.5" cy="26.5" r="3.5" fill="currentColor"/>',
+              '    <circle cx="21.5" cy="9.5"  r="3.5" fill="currentColor"/>',
+              '  </svg>',
+              '</div>'
+            ].join(""));
           $filter.hide().on("hover:enter", (function() {
-            _actObj && (Lampa.Manifest.app_digital >= 300 ? _actObj.activity.component.filter() : _actObj.activity.component().filter())
-          })),
-            $(".head .open--search").after($filter),
-            Lampa.Listener.follow("activity", (function(r) {
-              "start" == r.type && (_actObj = r.object), clearTimeout(_hideTimer),
-                _hideTimer = setTimeout((function() { _actObj && _actObj.component !== "sisi_view_" + PLUGIN_ID && ($filter.hide(), _actObj = !1) }), 1e3),
-                "start" == r.type && r.component == "sisi_view_" + PLUGIN_ID && ($filter.show(), _actObj = r.object)
-            }))
+            _actObj && (Lampa.Manifest.app_digital >= 300
+              ? _actObj.activity.component.filter()
+              : _actObj.activity.component().filter())
+          }));
+          $(".head .open--search").after($filter);
+          Lampa.Listener.follow("activity", (function(r) {
+            "start" == r.type && (_actObj = r.object),
+              clearTimeout(_hideTimer),
+              _hideTimer = setTimeout((function() {
+                _actObj && _actObj.component !== "sisi_view_" + PLUGIN_ID && ($filter.hide(), _actObj = !1)
+              }), 1e3),
+              "start" == r.type && r.component == "sisi_view_" + PLUGIN_ID && ($filter.show(), _actObj = r.object)
+          }))
         }();
 
-        // Регистрация настроек (только если ещё не зарегистрировано)
+        // Регистрация настроек
         window.sisi_add_param_ready || (window.sisi_add_param_ready = !0,
           Lampa.SettingsApi.addComponent({
             component: "AdultJS",
-            // v3.0.0: название компонента содержит номер версии
-            name: Lampa.Lang.translate("lampac_adultName") + " v3.0.0",
+            // v3.0.0+: название содержит версию
+            name: Lampa.Lang.translate("lampac_adultName") + " v3.0.1",
             icon: '<svg width="200" height="243" viewBox="0 0 200 243" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M187.714 130.727C206.862 90.1515 158.991 64.2019 100.983 64.2019C42.9759 64.2019 -4.33044 91.5669 10.875 130.727C26.0805 169.888 63.2501 235.469 100.983 234.997C138.716 234.526 168.566 171.303 187.714 130.727Z" stroke="currentColor" stroke-width="15"/><path d="M102.11 62.3146C109.995 39.6677 127.46 28.816 169.692 24.0979C172.514 56.1811 135.338 64.2018 102.11 62.3146Z" stroke="currentColor" stroke-width="15"/><path d="M90.8467 62.7863C90.2285 34.5178 66.0667 25.0419 31.7127 33.063C28.8904 65.1461 68.8826 62.7863 90.8467 62.7863Z" stroke="currentColor" stroke-width="15"/><path d="M100.421 58.5402C115.627 39.6677 127.447 13.7181 85.2149 9C82.3926 41.0832 83.5258 35.4214 100.421 58.5402Z" stroke="currentColor" stroke-width="15"/><rect x="39.0341" y="98.644" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="90.8467" y="92.0388" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="140.407" y="98.644" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="116.753" y="139.22" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="64.9404" y="139.22" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="93.0994" y="176.021" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/></svg>'
           }),
-          // v3.0.0: единственный пункт настроек — Предпросмотр при наведении
+          // v3.0.0+: единственный пункт — Предпросмотр при наведении
           Lampa.SettingsApi.addParam({
             component: "AdultJS",
             param: { name: "sisi_preview", type: "trigger", values: "", default: !0 },
-            field: { name: "Предпросмотр при наведении", description: "Показывать предпросмотр при наведении на карточку" },
+            field: {
+              name: "Предпросмотр при наведении",
+              description: "Показывать предпросмотр при наведении на карточку"
+            },
             onRender: function(e) {}
           })
         )
@@ -1993,7 +2175,9 @@ function _toPrimitive(e, t) {
       window["plugin_adultjs_" + PLUGIN_ID + "_ready"] = !0;
       Lampa.Component.add("sisi_" + PLUGIN_ID, buildMainComponent);
       Lampa.Component.add("sisi_view_" + PLUGIN_ID, buildViewComponent);
-      window.appready ? mountUI() : Lampa.Listener.follow("app", (function(e) { "ready" == e.type && mountUI() }))
+      window.appready
+        ? mountUI()
+        : Lampa.Listener.follow("app", (function(e) { "ready" == e.type && mountUI() }))
 
     }()
   }()
