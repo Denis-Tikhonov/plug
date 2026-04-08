@@ -18,7 +18,7 @@
             if (level < this.currentLevel) return;
             var timestamp = new Date().toLocaleTimeString();
             var levelStr = Object.keys(this.levels).find(k => this.levels[k] === level);
-            console.log(`[${timestamp}] [AdultJS] [${component}] ${levelStr}: ${msg}`, data || '');
+            console.log(`[${timestamp}] [SS] [${component}] ${levelStr}: ${msg}`, data || '');
             
             if (level >= 2) { // Сохраняем только WARN и ERROR для экономии памяти
                 var logs = Lampa.Storage.get('adult_debug_logs', []);
