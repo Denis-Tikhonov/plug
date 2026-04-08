@@ -268,6 +268,14 @@ function _toPrimitive(e, t) {
   // Источник кода парсеров: debug v1.3.2 (проверено рабочее состояние)
   // ===========================================================================
 
+  // ---------------------------------------------------------------------------
+  // FALLBACK HOST RESOLVER
+  // v3.0.2: зарезервировано, не реализовано
+  // Для активации: реализовать HEAD-проверку в resolveFallbackHost
+  // ---------------------------------------------------------------------------
+  function resolveFallbackHost(cfg) {
+    return cfg.host;
+    // [FALLBACK_HOOK] — здесь можно добавить HEAD-запрос
   }
 
   // ---------------------------------------------------------------------------
@@ -514,7 +522,42 @@ function _toPrimitive(e, t) {
         var s = [
           new p("Все", r + "?sort=".concat(t)),
           new p("Азиат", r + "?sort=".concat(t, "&c=Asian_Woman-32")),
-         
+          new p("Анал", r + "?sort=".concat(t, "&c=Anal-12")),
+          new p("Арабки", r + "?sort=".concat(t, "&c=Arab-159")),
+          new p("Бисексуалы", r + "?sort=".concat(t, "&c=Bi_Sexual-62")),
+          new p("Блондинки", r + "?sort=".concat(t, "&c=Blonde-20")),
+          new p("Большие Попы", r + "?sort=".concat(t, "&c=Big_Ass-24")),
+          new p("Большие Сиськи", r + "?sort=".concat(t, "&c=Big_Tits-23")),
+          new p("Большие яйца", r + "?sort=".concat(t, "&c=Big_Cock-34")),
+          new p("Брюнетки", r + "?sort=".concat(t, "&c=Brunette-25")),
+          new p("В масле", r + "?sort=".concat(t, "&c=Oiled-22")),
+          new p("Веб камеры", r + "?sort=".concat(t, "&c=Cam_Porn-58")),
+          new p("Гэнгбэнг", r + "?sort=".concat(t, "&c=Gangbang-69")),
+          new p("Зияющие отверстия", r + "?sort=".concat(t, "&c=Gapes-167")),
+          new p("Зрелые", r + "?sort=".concat(t, "&c=Mature-38")),
+          new p("Индийский", r + "?sort=".concat(t, "&c=Indian-89")),
+          new p("Испорченная семья", r + "?sort=".concat(t, "&c=Fucked_Up_Family-81")),
+          new p("Кончает внутрь", r + "?sort=".concat(t, "&c=Creampie-40")),
+          new p("Куколд / Горячая Жена", r + "?sort=".concat(t, "&c=Cuckold-237")),
+          new p("Латинки", r + "?sort=".concat(t, "&c=Latina-16")),
+          new p("Лесбиянки", r + "?sort=".concat(t, "&c=Lesbian-26")),
+          new p("Любительское порно", r + "?sort=".concat(t, "&c=Amateur-65")),
+          new p("Мамочки. МИЛФ", r + "?sort=".concat(t, "&c=Milf-19")),
+          new p("Межрассовые", r + "?sort=".concat(t, "&c=Interracial-27")),
+          new p("Минет", r + "?sort=".concat(t, "&c=Blowjob-15")),
+          new p("Нижнее бельё", r + "?sort=".concat(t, "&c=Lingerie-83")),
+          new p("Попки", r + "?sort=".concat(t, "&c=Ass-14")),
+          new p("Рыжие", r + "?sort=".concat(t, "&c=Redhead-31")),
+          new p("Сквиртинг", r + "?sort=".concat(t, "&c=Squirting-56")),
+          new p("Соло", r + "?sort=".concat(t, "&c=Solo_and_Masturbation-33")),
+          new p("Сперма", r + "?sort=".concat(t, "&c=Cumshot-18")),
+          new p("Тинейджеры", r + "?sort=".concat(t, "&c=Teen-13")),
+          new p("Фемдом", r + "?sort=".concat(t, "&c=Femdom-235")),
+          new p("Фистинг", r + "?sort=".concat(t, "&c=Fisting-165")),
+          new p("Черные Женщины", r + "?sort=".concat(t, "&c=bbw-51")),
+          new p("Черный", r + "?sort=".concat(t, "&c=Black_Woman-30")),
+          new p("Чулки,колготки", r + "?sort=".concat(t, "&c=Stockings-28")),
+          new p("ASMR", r + "?sort=".concat(t, "&c=ASMR-229"))
         ];
         return i.push(new p("Категория: ".concat(
           (null === (n = s.find(function (e) { return e.playlist_url.endsWith("c=".concat(a)) }))
@@ -1328,7 +1371,7 @@ function _toPrimitive(e, t) {
       menu: {
         route: { sort: "{host}/video?o={sort}&page={page}", model: "{host}{model}/videos?page={page}", cat: "{host}/video?c={cat}&page={page}", catsort: "{host}/video?c={cat}&o={sort}&page={page}" },
         sort: { "Недавно в Избранном": "", "Новые": "cm", "Популярные": "mv", "Лучшие": "tr", "Горячие": "ht" },
-        categories: { "Все": "", "Азиатки": "1" }
+        categories: { "Все": "", "Азиатки": "1", "Анальный секс": "35", "Арабское": "98", "БДСМ": "10", "Бисексуалы": "76", "Блондинки": "9", "Большая грудь": "8", "Большие члены": "7", "Бразильское": "102", "Британское": "96", "Брызги": "69", "Брюнетки": "11", "Буккаке": "14", "В школе": "88", "Веб-камера": "61", "Вечеринки": "53", "Гонзо": "41", "Грубый секс": "67", "Групповуха": "80", "Девушки (соло)": "492", "Двойное проникновение": "72", "Дрочит": "20", "Европейцы": "55", "Жесткий секс": "21", "Женский оргазм": "502", "За кадром": "141", "Звезды": "12", "Золотой дождь": "211", "Зрелые": "28", "Игрушки": "23", "Индийское": "101", "Итальянское": "97", "Кастинги": "90", "Кончают": "16", "Корейское": "103", "Косплей": "241", "Кунилингус": "131", "Курящие": "91", "Латинки": "26", "Лесбиянки": "27", "Любительское": "3", "Маленькая грудь": "59", "Мамочки": "29", "Массаж": "78", "Мастурбация": "22", "Межрассовый Секс": "25", "Минет": "13", "Музыка": "121", "Мулаты": "17", "Мультики": "86", "Мускулистые Мужчины": "512", "На публике": "24", "Немецкое": "95", "Ноги": "93", "Няни": "89", "Парни (соло)": "92", "Пародия": "201", "Попки": "4", "Приколы": "32", "Проверенное Любительское": "138", "Проверенные Модели": "139", "Проверенные Пары": "482", "Реальный секс": "31", "Ретро": "43", "Рогоносцы": "242", "Ролевые Игры": "81", "Русское": "99", "Секс втроем": "65", "60FPS": "105", "Gaming": "881", "Podcast": "891" }
       },
       list: { uri: "video?page={page}" },
       search: { uri: "video/search?search={search}&page={page}" },
@@ -1353,7 +1396,8 @@ function _toPrimitive(e, t) {
       enable: !0, displayname: "Xhamster", host: "https://ru.xhamster.com",
       menu: {
         route: { sort: "{host}/{sort}/{page}", cat: "{host}/categories/{cat}/{page}", catsort: "{host}/categories/{cat}/{sort}/{page}" },
-        sort: { "В тренде": "", "Новейшее": "newest" }
+        sort: { "В тренде": "", "Новейшее": "newest", "Лучшие": "best/weekly" },
+        categories: { "Все": "", "Русское": "russian", "Секс втроем": "threesome", "Азиатское": "asian", "Анал": "anal", "Арабское": "arab", "АСМР": "asmr", "Бабки": "granny", "БДСМ": "bdsm", "Би": "bisexual", "Большие жопы": "big-ass", "Большие задницы": "pawg", "Большие сиськи": "big-tits", "Большой член": "big-cock", "Британское": "british", "В возрасте": "mature", "Вебкамера": "webcam", "Винтаж": "vintage", "Волосатые": "hairy", "Голые мужчины одетые женщины": "cfnm", "Групповой секс": "group-sex", "Гэнгбэнг": "gangbang", "Дилдо": "dildo", "Домашнее порно": "homemade", "Дрочка ступнями": "footjob", "Женское доминирование": "femdom", "Жиробасина": "ssbbw", "Жопа": "ass", "Застряла": "stuck", "Знаменитость": "celebrity", "Игра": "game", "История": "story", "Кастинг": "casting", "Комический": "comic", "Кончина": "cumshot", "Кремовый пирог": "creampie", "Латина": "latina", "Лесбиянка": "lesbian", "Лизать киску": "eating-pussy", "Любительское порно": "amateur", "Массаж": "massage", "Медсестра": "nurse", "Межрасовый секс": "interracial", "МИЛФ": "milf", "Милые": "cute", "Минет": "blowjob", "Миниатюрная": "petite", "Миссионерская поза": "missionary", "Монахиня": "nun", "Мультфильмы": "cartoon", "Негритянки": "black", "Немецкое": "german", "Офис": "office", "Первый раз": "first-time", "Пляж": "beach", "Порно для женщин": "porn-for-women", "Реслинг": "wrestling", "Рогоносцы": "cuckold", "Романтический": "romantic", "Свингеры": "swingers", "Сквирт": "squirting", "Старик": "old-man", "Старые с молодыми": "old-young", "Тинейджеры (18+)": "teen", "Толстушки": "bbw", "Тренажерный зал": "gym", "Узкая киска": "tight-pussy", "Французское": "french", "Футанари": "futanari", "Хардкор": "hardcore", "Хенджоб": "handjob", "Хентай": "hentai", "Японское": "japanese" }
       },
       list: { uri: "{host}/{page}", firstpage: "{host}" },
       search: { uri: "search/{search}/{page}" },
@@ -1377,7 +1421,7 @@ function _toPrimitive(e, t) {
       menu: {
         route: { cat: "{host}/{cat}/page/{page}", sort: "{host}/{sort}/page/{page}", catsort: "{host}/{cat}-top/page/{page}", model: "{model}/page/{page}" },
         sort: { "Новые": "", "Лучшие": "top-porno", "Горячие": "hot-porno" },
-        categories: { "Русское порно": "a1-russian", "Порно зрелых": "milf-porn" }
+        categories: { "Русское порно": "a1-russian", "Порно зрелых": "milf-porn", "Красивый секс": "beautiful", "Мачеха": "stepmom", "Анал": "anal-porno", "Большие сиськи": "big-tits", "Эротика": "erotic", "Лесби": "lesbi-porno", "Групповуха": "group-videos", "POV": "pov", "БДСМ": "bdsm", "Вебкамера": "webcam", "Ган банг": "gangbang", "Домашнее порно": "amateur", "ЖМЖ": "threesome-ffm", "Кастинг": "casting", "Куни": "cunnilingus", "Массаж": "massage", "Мастурбация": "masturbation", "Минет": "blowjob", "Соло": "solo", "Хардкор": "hardcore", "МЖМ": "threesome-mmf", "Чешское порно": "czech", "Русское домашнее": "russian-amateur", "Молодые": "teen", "Старые с молодыми": "old-young", "Студенты": "student", "Азиатки": "asian", "Латинки": "latina", "Медсестра": "nurse", "Секретарша": "secretary", "Няня": "babysitter", "Черлидерша": "cheerleader", "Студентка": "schoolgirl", "Горничная": "maid", "Учительница": "teacher", "Блондинки": "blonde", "Брюнетки": "brunette", "Рыжие": "redhead", "Короткие волосы": "short-hair", "Длинные волосы": "long-hair", "Косички": "pigtails", "В ванной": "bathroom", "В машине": "car", "В офисе": "office", "В спальне": "bedroom", "В спортзале": "gym", "На кухне": "kitchen", "На пляже": "beach", "На природе": "outdoor", "На диване": "sofa", "На столе": "table", "Двойное проникновение": "double-penetration", "Крупным планом": "close-up", "Лижет попу": "rimjob", "Между сисек": "titjob", "Наездница": "cowgirl", "Оргазмы": "orgasm", "Поза 69": "69", "Раком": "doggy-style", "Сквирт": "squirt", "Стриптиз": "striptease", "Большие жопы": "big-ass", "Большой чёрный член": "bbc", "Большие члены": "big-cock", "Гибкие": "flexible", "Красивая грудь": "nice-tits", "Маленькие сиськи": "small-tits", "Натуральные сиськи": "natural-tits", "Красивые попки": "nice-ass", "Бритые письки": "shaved", "Волосатая пизда": "hairy", "Толстые": "bbw", "Худые": "skinny", "Силиконовые сиськи": "fake-tits", "Загорелые": "tanned", "В красивом белье": "lingerie", "В чулках": "stockings", "На каблуках": "heels", "Латекс": "latex", "С вибратором": "vibrator", "Дилдо": "dildo", "Евро": "european", "Куколд": "cuckold", "Межрассовое": "interracial", "На публике": "public", "Страпон": "strapon", "Фистинг": "fisting", "Футфетиш": "footjob", "Негры": "black", "Негритянки": "ebony", "Буккаке": "bukkake", "Сперма": "cumshot", "Сперма вытекает": "creampie", "Сперма на лице": "facial", "Глотает сперму": "cum-swallow" }
       },
       list: { uri: "page/{page}" },
       search: { uri: "search/{search}/page/{page}" },
@@ -1544,7 +1588,7 @@ function _toPrimitive(e, t) {
       menu: {
         route: { sort: "{host}/{sort}/{page}/", cat: "{host}/categories/{cat}/{page}/" },
         sort: { "Новое": "latest-updates", "Лучшее": "top-rated", "Популярное": "most-popular" },
-        categories: { "Все": "", "Любительское": "lyubitelskiy-seks" }
+        categories: { "Все": "", "Любительское": "lyubitelskiy-seks", "Большие сиськи": "bolshie-siski", "Большие попки": "bolshie-popki", "Минет": "minet", "Блондинки": "blondinki", "Брюнетки": "bryunetki", "Хардкор": "hardkor", "Милфы": "milfy", "Красотки": "krasotki", "Большие члены": "bolshie-hui", "Наездница": "naezdnica", "Маленькие сиськи": "malenkie-siski", "Бритые киски": "britye-kiski", "Красивое": "krasivyy-seks", "Азиатки": "aziatki", "Кончают внутрь": "konchayut-vnutr", "Медсестра": "medsestra", "Анал": "anal", "МЖМ": "mjm", "Раком": "rakom", "Дрочка члена": "drochka-chlena", "Жесть": "jest", "На кровати": "na-krovati", "Реальное": "realnyy-seks", "Женский оргазм": "jenskiy-orgazm", "В нижнем белье": "v-nijnem-bele", "Японки": "yaponki", "Домашнее": "domashka", "Full HD": "full-hd", "Жёны": "jeny", "В чулках": "v-chulkah", "На каблуках": "na-kablukah", "В очках": "v-ochkah", "Толстушки": "tolstye", "В ванной": "v-vannoy", "Ролевые игры": "rolevye-igry", "Пьяные": "pyanye", "Стриптиз": "striptiz", "Мультики": "multiki", "В туалете": "v-tualete" }
       },
       list: { uri: "latest-updates/{page}/", firstpage: "{host}" },
       search: { uri: "search/{page}/?q={search}" },
@@ -1586,7 +1630,8 @@ function _toPrimitive(e, t) {
       enable: !0, displayname: "GoPorn", host: "https://go.porn",
       menu: {
         route: { sort: "{host}/{sort}?page={page}", cat: "{host}/categories/{cat}/?page={page}" },
-        sort: { "В тренде": "trending", "Новые": "latest", "Webcam": "webcam" }
+        sort: { "В тренде": "trending", "Новые": "latest", "Популярные": "most-viewed" },
+        categories: { "Все": "", "Amateur": "amateur", "Anal": "anal", "Asian": "asian", "BBW": "bbw", "Big Ass": "big-ass", "Big Tits": "big-tits", "Blonde": "blonde", "Blowjob": "blowjob", "Brunette": "brunette", "Creampie": "creampie", "Cumshot": "cumshot", "Ebony": "ebony", "Gangbang": "gangbang", "Hardcore": "hardcore", "Hentai": "hentai", "Homemade": "homemade", "Indian": "indian", "Interracial": "interracial", "Japanese": "japanese", "Latina": "latina", "Lesbian": "lesbian", "Mature": "mature", "MILF": "milf", "Outdoor": "outdoor", "Petite": "petite", "POV": "pov", "Public": "public", "Redhead": "redhead", "Squirt": "squirt", "Teen": "teen", "Threesome": "threesome", "Webcam": "webcam" }
       },
       list: { uri: "latest/?page={page}", firstpage: "{host}/trending/" },
       search: { uri: "search/?q={search}&page={page}" },
@@ -1608,7 +1653,7 @@ function _toPrimitive(e, t) {
       menu: {
         route: { sort: "{host}/?ordering={sort}&page={page}", cat: "{host}/?category={cat}&page={page}" },
         sort: { "Новые": "newest", "Популярные": "mostviewed", "Рейтинг": "rating" },
-        categories: { "Все": "", "Amateur": "Amateur" }
+        categories: { "Все": "", "Amateur": "Amateur", "Anal": "Anal", "Asian": "Asian", "BBW": "BBW", "Big Dick": "Big+Dick", "Big Tits": "Big+Tits", "Blonde": "Blonde", "Blowjob": "Blowjob", "Brunette": "Brunette", "Creampie": "Creampie", "Cumshot": "Cumshots", "Ebony": "Ebony", "Fetish": "Fetish", "Gangbang": "Gangbang", "Gay": "Gay", "Hardcore": "Hardcore", "Indian": "Indian", "Interracial": "Interracial", "Japanese": "Japanese", "Latina": "Latina", "Lesbian": "Lesbian", "Massage": "Massage", "Mature": "Mature", "MILF": "MILF", "Outdoor": "Outdoor", "POV": "POV", "Redhead": "Redhead", "Shemale": "Shemale", "Squirt": "Squirting", "Teen": "Teen", "Threesome": "Threesome", "Webcam": "Webcam" }
       },
       list: { uri: "?page={page}", firstpage: "{host}/" },
       search: { uri: "?search={search}&page={page}" },
@@ -1695,10 +1740,10 @@ function _toPrimitive(e, t) {
     window.AdultJS = {
       Menu: function () {
         var e = [
+          { title: "xvideos.com",    playlist_url: g.host },
+          { title: "spankbang.com",  playlist_url: v.host },
           { title: "eporner.com",    playlist_url: f.host },
-	  { title: "xvideos.com",    playlist_url: g.host },
-	  { title: "xnxx.com",       playlist_url: y.host },
-          { title: "spankbang.com",  playlist_url: v.host },          
+          { title: "xnxx.com",       playlist_url: y.host },
           { title: "bongacams.com",  playlist_url: d.host },
           { title: "chaturbate.com", playlist_url: b.host }
         ];
@@ -2025,7 +2070,7 @@ function _toPrimitive(e, t) {
           Lampa.SettingsApi.addComponent({
             component: "AdultJS",
             name: Lampa.Lang.translate("lampac_adultName") + " v3.0.2",
-            icon: ''
+            icon: '<svg width="200" height="243" viewBox="0 0 200 243" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M187.714 130.727C206.862 90.1515 158.991 64.2019 100.983 64.2019C42.9759 64.2019 -4.33044 91.5669 10.875 130.727C26.0805 169.888 63.2501 235.469 100.983 234.997C138.716 234.526 168.566 171.303 187.714 130.727Z" stroke="currentColor" stroke-width="15"/><path d="M102.11 62.3146C109.995 39.6677 127.46 28.816 169.692 24.0979C172.514 56.1811 135.338 64.2018 102.11 62.3146Z" stroke="currentColor" stroke-width="15"/><path d="M90.8467 62.7863C90.2285 34.5178 66.0667 25.0419 31.7127 33.063C28.8904 65.1461 68.8826 62.7863 90.8467 62.7863Z" stroke="currentColor" stroke-width="15"/><path d="M100.421 58.5402C115.627 39.6677 127.447 13.7181 85.2149 9C82.3926 41.0832 83.5258 35.4214 100.421 58.5402Z" stroke="currentColor" stroke-width="15"/><rect x="39.0341" y="98.644" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="90.8467" y="92.0388" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="140.407" y="98.644" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="116.753" y="139.22" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="64.9404" y="139.22" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="93.0994" y="176.021" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/></svg>'
           }),
           Lampa.SettingsApi.addParam({
             component: "AdultJS",
