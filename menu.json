@@ -1,13 +1,16 @@
 {
   "channels": [
     {
-      "title": "phub.net",
-      "playlist_url": "https://raw.githubusercontent.com/Denis-Tikhonov/lampa-plugin/refs/heads/main/phub"
-    },
-    {
       "title": "Закладки",
       "playlist_url": "local://bookmarks"
     },
-
+    {
+      "title": "phub.net",
+      "playlist_url": "https://denis-tikhonov.github.io/lampa-plugin/phub"
+    },
+    {
+      "title": "xds",
+      "playlist_url": "https://denis-tikhonov.github.io/lampa-plugin/xds"
+    }
   ]
 }
