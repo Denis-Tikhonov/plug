@@ -4,8 +4,8 @@
      var PLUGIN_VERSION = '1.2.0';
     var PLUGIN_ID = 'adult_plugin';
     // ✅ ИСПРАВЛЕНО: Прямая ссылка на menu.json (raw GitHub)
-    var MENU_URL = 'https://raw.githubusercontent.com/Denis-Tikhonov/lampa-plugin/refs/heads/main/menu.json';
-    var PARSERS_URL = 'https://raw.githubusercontent.com/Denis-Tikhonov/lampa-plugin/refs/heads/main/';
+    var MENU_URL = 'https://denis-tikhonov.github.io/lampa-plugin/menu.json';
+    var PARSERS_URL = 'https://denis-tikhonov.github.io/lampa-plugin/';
 
     // =============================================================
     // [1] СИСТЕМА ЛОГИРОВАНИЯ
