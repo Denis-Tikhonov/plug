@@ -1797,31 +1797,35 @@ function _toPrimitive(e, t) {
       sourceTitle: function (e) { return Lampa.Utils.capitalizeFirstLetter(e.split(".")[0]) },
       play: function (e) {
         var t = Lampa.Controller.enabled().name;
-        if (e.json)
-          Lampa.Loading.start(function () { _req.clear(), Lampa.Loading.stop() }),
-            _invoke.qualitys(e.video, function (a) {
-              if (a.error)
-                return Lampa.Noty.show(Lampa.Lang.translate("torrent_parser_nofiles")),
-                  void Lampa.Loading.stop();
-              var n = a.qualitys || a, i = a.recomends || [];
-              Lampa.Loading.stop();
-              var o = { title: e.name, url: getBestQuality(n), url_reserve: !!a.qualitys_proxy && getBestQuality(a.qualitys_proxy), quality: n, headers: a.headers_stream };
-              Lampa.Player.play(o),
-                i.length
-                  ? (i.forEach(function (e) {
-                    e.title = Lampa.Utils.shortText(e.name, 50),
-                      e.icon = '<img class="size-youtube" src="' + e.picture + '" />',
-                      e.template = "selectbox_icon",
-                      e.url = function (t) {
-                        e.json ? _invoke.qualitys(e.video, function (a) {
-                          e.quality = a.qualitys, e.url = getBestQuality(a.qualitys),
-                            a.qualitys_proxy && (e.url_reserve = getBestQuality(a.qualitys_proxy)), t()
-                        }) : (e.url = e.video, t())
-                      }
-                  }), Lampa.Player.playlist(i))
-                  : Lampa.Player.playlist([o]),
-                Lampa.Player.callback(function () { Lampa.Controller.toggle(t) });
-        else {
+        if (e.json) {
+          Lampa.Loading.start(function () { _req.clear(), Lampa.Loading.stop() });
+          _invoke.qualitys(e.video, function (a) {
+            if (a.error)
+              return Lampa.Noty.show(Lampa.Lang.translate("torrent_parser_nofiles")),
+                void Lampa.Loading.stop();
+            var n = a.qualitys || a, i = a.recomends || [];
+            Lampa.Loading.stop();
+            var o = { title: e.name, url: getBestQuality(n), url_reserve: !!a.qualitys_proxy && getBestQuality(a.qualitys_proxy), quality: n, headers: a.headers_stream };
+            Lampa.Player.play(o);
+            i.length
+              ? (i.forEach(function (e) {
+                e.title = Lampa.Utils.shortText(e.name, 50),
+                  e.icon = '<img class="size-youtube" src="' + e.picture + '" />',
+                  e.template = "selectbox_icon",
+                  e.url = function (t) {
+                    e.json ? _invoke.qualitys(e.video, function (a) {
+                      e.quality = a.qualitys, e.url = getBestQuality(a.qualitys),
+                        a.qualitys_proxy && (e.url_reserve = getBestQuality(a.qualitys_proxy)), t()
+                    }) : (e.url = e.video, t())
+                  }
+              }), Lampa.Player.playlist(i))
+              : Lampa.Player.playlist([o]);
+            Lampa.Player.callback(function () { Lampa.Controller.toggle(t) });
+          }, function () {
+            Lampa.Noty.show(Lampa.Lang.translate("torrent_parser_nofiles"));
+            Lampa.Loading.stop();
+          });
+        } else {
           var a = { title: e.name, url: getBestQuality(e.qualitys) || e.video, url_reserve: getBestQuality(e.qualitys_proxy) || e.video_reserve || "", quality: e.qualitys };
           Lampa.Player.play(a), Lampa.Player.playlist([a]),
             Lampa.Player.callback(function () { Lampa.Controller.toggle(t) })
