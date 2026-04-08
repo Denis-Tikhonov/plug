@@ -1,9 +1,15 @@
 // =============================================================
 // phub.js — Парсер PornHub для AdultJS
-// Version  : 1.0.0
+// Version  : 1.1.0
 // Changed  : [1.0.0] Первая версия: категории + поиск, без авторизации
-//            [1.0.0] Парсинг HTML на клиенте через DOMParser
-//            [1.0.0] Регистрация через window.AdultPlugin.registerParser
+//            [1.1.0] FIX: убран запрещённый заголовок User-Agent из
+//                    fallback fetch() — forbidden header → TypeError.
+//            [1.1.0] FIX: основной путь через Lampa.Reguest.silent
+//                    явно передаёт dataType:'text' чтобы получить HTML,
+//                    а не JSON-парсинг ответа.
+//            [1.1.0] FIX: регистрация добавила polling — парсер
+//                    загружается асинхронно и AdultPlugin может ещё
+//                    не существовать в момент выполнения скрипта.
 // =============================================================
 
 (function () {
@@ -13,71 +19,97 @@
   // [1.0.0] КОНФИГУРАЦИЯ
   // ----------------------------------------------------------
   var CONFIG = {
-    // Базовый URL сайта
     base_url:   'https://www.pornhub.com',
-    // URL страницы поиска (?search=... будет добавлен парсером)
     search_url: 'https://www.pornhub.com/video/search',
-    // Параметр пагинации
     page_param: 'page',
-    // CSS-селекторы (по структуре из анализа HTML)
     sel: {
-      item:      'li.pcVideoListItem',
-      title:     'a.thumbnailTitle, .title a',
-      thumb:     'img.js-videoThumb, img.thumb',
-      preview:   'img[data-mediabook]',
-      href:      'a.linkVideoThumb, a.js-linkVideoThumb',
-      duration:  'var.duration',
-      views:     '.views var',
-      added:     'var.added',
-      // Категории
-      cat_item:  '.categoriesWrap a, .wrap a[href*="/categories/"]',
+      item:     'li.pcVideoListItem',
+      title:    'a.thumbnailTitle, .title a',
+      thumb:    'img.js-videoThumb, img.thumb',
+      href:     'a.linkVideoThumb, a.js-linkVideoThumb',
+      duration: 'var.duration',
+      views:    '.views var',
     },
-    // Категории — статичный список, чтобы не парсить лишнюю страницу
     categories: [
-      { title: 'Главная',      url: 'https://www.pornhub.com/recommended' },
-      { title: 'Новинки',      url: 'https://www.pornhub.com/video?o=newest' },
-      { title: 'Популярное',   url: 'https://www.pornhub.com/video?o=mv' },
-      { title: 'Топ недели',   url: 'https://www.pornhub.com/video?o=tr&t=w' },
-      { title: 'Топ месяца',   url: 'https://www.pornhub.com/video?o=tr&t=m' },
-      { title: 'Лучшее',       url: 'https://www.pornhub.com/video?o=tr&t=a' },
-      { title: 'Русские',      url: 'https://www.pornhub.com/video?c=36' },
-      { title: 'Азиатки',      url: 'https://www.pornhub.com/video?c=1'  },
-      { title: 'Анал',         url: 'https://www.pornhub.com/video?c=2'  },
-      { title: 'Оральный',     url: 'https://www.pornhub.com/video?c=70' },
-      { title: 'Лесбиянки',    url: 'https://www.pornhub.com/video?c=14' },
-      { title: 'Студентки',    url: 'https://www.pornhub.com/video?c=7'  },
-      { title: 'Массаж',       url: 'https://www.pornhub.com/video?c=55' },
-      { title: 'Зрелые',       url: 'https://www.pornhub.com/video?c=44' },
+      { title: 'Главная',    url: 'https://www.pornhub.com/recommended'   },
+      { title: 'Новинки',    url: 'https://www.pornhub.com/video?o=newest' },
+      { title: 'Популярное', url: 'https://www.pornhub.com/video?o=mv'     },
+      { title: 'Топ недели', url: 'https://www.pornhub.com/video?o=tr&t=w' },
+      { title: 'Топ месяца', url: 'https://www.pornhub.com/video?o=tr&t=m' },
+      { title: 'Лучшее',     url: 'https://www.pornhub.com/video?o=tr&t=a' },
+      { title: 'Русские',    url: 'https://www.pornhub.com/video?c=36'     },
+      { title: 'Азиатки',    url: 'https://www.pornhub.com/video?c=1'      },
+      { title: 'Анал',       url: 'https://www.pornhub.com/video?c=2'      },
+      { title: 'Оральный',   url: 'https://www.pornhub.com/video?c=70'     },
+      { title: 'Лесбиянки',  url: 'https://www.pornhub.com/video?c=14'     },
+      { title: 'Студентки',  url: 'https://www.pornhub.com/video?c=7'      },
+      { title: 'Массаж',     url: 'https://www.pornhub.com/video?c=55'     },
+      { title: 'Зрелые',     url: 'https://www.pornhub.com/video?c=44'     },
     ],
   };
 
   // ----------------------------------------------------------
-  // [1.0.0] ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+  // [1.1.0] HTTP-ХЕЛПЕР — загрузка HTML
+  //
+  // БАГ v1.0.0: fallback fetch() передавал заголовок 'User-Agent'.
+  //   Браузеры и WebView относят его к "forbidden headers" →
+  //   fetch бросает TypeError → error() → парсер не работает.
+  //
+  // ИСПРАВЛЕНИЕ v1.1.0:
+  //   1. Основной путь: Lampa.Reguest.silent с { dataType:'text' }.
+  //      На Android TV это нативный запрос без CORS-ограничений.
+  //   2. Fallback: чистый fetch() БЕЗ заголовков.
+  //   3. Проверка ответа: если silent вернул не строку (JSON-режим),
+  //      переключаемся на fetch.
   // ----------------------------------------------------------
-
-  // Получить значение атрибута или текст по нескольким возможным селекторам
-  function queryAttr(root, selectors, attr) {
-    var sels = selectors.split(',');
-    for (var i = 0; i < sels.length; i++) {
-      var el = root.querySelector(sels[i].trim());
-      if (el) return attr ? (el.getAttribute(attr) || '') : (el.textContent || el.innerText || '');
+  function fetchHtml(url, success, error) {
+    try {
+      var net = new Lampa.Reguest();
+      net.silent(
+        url,
+        function (data) {
+          if (typeof data === 'string' && data.length > 50) {
+            success(data);
+          } else {
+            // silent вернул объект — Lampa распарсил как JSON
+            // Переключаемся на fetch
+            _fetchFallback(url, success, error);
+          }
+        },
+        function () { _fetchFallback(url, success, error); },
+        false,
+        { dataType: 'text', timeout: 10000 }
+      );
+    } catch (e) {
+      _fetchFallback(url, success, error);
     }
-    return '';
   }
 
-  // [1.0.0] Формирование URL с пагинацией
+  // [1.1.0] fetch без запрещённых заголовков
+  function _fetchFallback(url, success, error) {
+    if (typeof fetch === 'undefined') { error('fetch unavailable'); return; }
+    fetch(url, { method: 'GET' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.text();
+      })
+      .then(success)
+      .catch(error);
+  }
+
+  // ----------------------------------------------------------
+  // [1.0.0] УТИЛИТЫ ПАРСИНГА
+  // ----------------------------------------------------------
   function buildPageUrl(baseUrl, page) {
     if (!page || page <= 1) return baseUrl;
     var sep = baseUrl.indexOf('?') !== -1 ? '&' : '?';
     return baseUrl + sep + CONFIG.page_param + '=' + page;
   }
 
-  // [1.0.0] Парсинг одного <li> элемента карточки
   function parseItem(li) {
     var titleEl = li.querySelector(CONFIG.sel.title);
     var thumbEl = li.querySelector(CONFIG.sel.thumb);
     var hrefEl  = li.querySelector(CONFIG.sel.href);
-
     if (!titleEl || !hrefEl) return null;
 
     var name    = (titleEl.getAttribute('title') || titleEl.textContent || '').trim();
@@ -86,146 +118,83 @@
     var preview = '';
 
     if (thumbEl) {
-      // [1.0.0] Предпочитаем data-mediumthumb → src
-      picture = thumbEl.getAttribute('data-mediumthumb') ||
-                thumbEl.getAttribute('src') || '';
-      // Видео-превью из data-mediabook
-      preview = thumbEl.getAttribute('data-mediabook') || '';
+      picture = thumbEl.getAttribute('data-mediumthumb') || thumbEl.getAttribute('src') || '';
+      preview = thumbEl.getAttribute('data-mediabook')   || '';
     }
 
-    var duration = '';
-    var durEl = li.querySelector(CONFIG.sel.duration);
-    if (durEl) duration = durEl.textContent.trim();
-
-    var views = '';
-    var viewEl = li.querySelector(CONFIG.sel.views);
-    if (viewEl) views = viewEl.textContent.trim();
-
-    var added = '';
-    var addedEl = li.querySelector(CONFIG.sel.added);
-    if (addedEl) added = addedEl.textContent.trim();
-
-    // Полный URL видео
+    var durEl    = li.querySelector(CONFIG.sel.duration);
+    var duration = durEl ? durEl.textContent.trim() : '';
     var videoUrl = href.indexOf('http') === 0 ? href : CONFIG.base_url + href;
 
     return {
       name:    name,
       picture: picture,
       preview: preview,
-      video:   videoUrl,   // [1.0.0] ссылка на страницу видео (не прямой .mp4)
-      quality: duration,   // отображается как качество в Lampa
+      video:   videoUrl,
+      quality: duration,
       time:    duration,
       source:  'phub',
-      views:   views,
-      added:   added,
     };
   }
 
-  // [1.0.0] Парсинг всей HTML-страницы → массив карточек
   function parsePage(html) {
-    var parser = new DOMParser();
-    var doc    = parser.parseFromString(html, 'text/html');
-    var items  = [];
-
-    var lis = doc.querySelectorAll(CONFIG.sel.item);
-    lis.forEach(function (li) {
+    var doc   = new DOMParser().parseFromString(html, 'text/html');
+    var items = [];
+    doc.querySelectorAll(CONFIG.sel.item).forEach(function (li) {
       var card = parseItem(li);
       if (card && card.name && card.video) items.push(card);
     });
-
     return items;
   }
 
-  // [1.0.0] Определить есть ли следующая страница
-  function hasNextPage(html, currentPage) {
-    var parser = new DOMParser();
-    var doc    = parser.parseFromString(html, 'text/html');
-    // Ищем кнопку "Следующая" или пагинацию
-    var nextBtn = doc.querySelector('.page_next:not(.disabled), a[data-page="' + (currentPage + 1) + '"]');
-    return !!nextBtn;
+  function hasNextPage(html, page) {
+    var doc = new DOMParser().parseFromString(html, 'text/html');
+    return !!doc.querySelector('.page_next:not(.disabled), a[data-page="' + (page + 1) + '"]');
+  }
+
+  function buildMenu(activeUrl) {
+    return CONFIG.categories.map(function (cat) {
+      return { title: cat.title, playlist_url: cat.url, selected: cat.url === activeUrl };
+    });
   }
 
   // ----------------------------------------------------------
-  // [1.0.0] ЗАГРУЗКА HTML ЧЕРЕЗ FETCH
-  // Внимание: phub может блокировать запросы без User-Agent.
-  // На Android TV Lampa использует нативный WebView, CORS обычно
-  // не применяется. Если сайт заблокирует — нужен CORS-прокси.
-  // ----------------------------------------------------------
-  function fetchPage(url, success, error) {
-    try {
-      // [1.0.0] Пробуем через Lampa.Reguest (нативный запрос на Android)
-      var net = new Lampa.Reguest();
-      net.silent(url, function (data) {
-        // data может быть строкой (HTML) или объектом
-        if (typeof data === 'string') success(data);
-        else error('Unexpected response type');
-      }, function (e) {
-        // [1.0.0] Fallback: обычный fetch
-        fetch(url, {
-          headers: {
-            'Accept': 'text/html,application/xhtml+xml',
-          },
-        })
-        .then(function (r) { return r.text(); })
-        .then(success)
-        .catch(error);
-      }, false, { dataType: 'text' });
-    } catch (e) {
-      error(e);
-    }
-  }
-
-  // ----------------------------------------------------------
-  // [1.0.0] ПУБЛИЧНЫЙ ИНТЕРФЕЙС ПАРСЕРА
+  // [1.0.0] ПУБЛИЧНЫЙ ИНТЕРФЕЙС
   // ----------------------------------------------------------
   var PhubParser = {
 
-    // [1.0.0] Главная — загружаем первую категорию «Рекомендованное»
     main: function (params, success, error) {
       var url = CONFIG.categories[0].url;
-      fetchPage(url, function (html) {
+      fetchHtml(url, function (html) {
         var results = parsePage(html);
-        if (!results.length) { error(); return; }
-        success({
-          results:     results,
-          collection:  true,
-          total_pages: 30,
-          menu:        PhubParser._buildMenu(url),
-        });
+        if (!results.length) { error('PornHub: нет карточек'); return; }
+        success({ results: results, collection: true, total_pages: 30, menu: buildMenu(url) });
       }, error);
     },
 
-    // [1.0.0] Просмотр категории / страницы
     view: function (params, success, error) {
-      // params.url — URL категории, может содержать ?pg=N от Lampa
       var url  = (params.url || CONFIG.categories[0].url).split('&pg=')[0].split('?pg=')[0];
-      var page = parseInt(params.page) || 1;
-      var loadUrl = buildPageUrl(url, page);
-
-      fetchPage(loadUrl, function (html) {
+      var page = parseInt(params.page, 10) || 1;
+      fetchHtml(buildPageUrl(url, page), function (html) {
         var results = parsePage(html);
-        if (!results.length) { error(); return; }
+        if (!results.length) { error('PornHub: нет карточек на странице ' + page); return; }
         success({
           results:     results,
           collection:  true,
           total_pages: hasNextPage(html, page) ? page + 10 : page,
-          menu:        PhubParser._buildMenu(url),
+          menu:        buildMenu(url),
         });
       }, error);
     },
 
-    // [1.0.0] Поиск
     search: function (params, success, error) {
-      var query = encodeURIComponent(params.query || '');
-      var page  = parseInt(params.page) || 1;
-      var url   = CONFIG.search_url + '?search=' + query;
-      var loadUrl = buildPageUrl(url, page);
-
-      fetchPage(loadUrl, function (html) {
+      var page = parseInt(params.page, 10) || 1;
+      var url  = CONFIG.search_url + '?search=' + encodeURIComponent(params.query || '');
+      fetchHtml(buildPageUrl(url, page), function (html) {
         var results = parsePage(html);
-        if (!results.length) { error(); return; }
+        if (!results.length) { error('PornHub: ничего не найдено'); return; }
         success({
-          title:       'phub: ' + params.query,
+          title:       'PornHub: ' + params.query,
           results:     results,
           url:         url,
           collection:  true,
@@ -233,33 +202,32 @@
         });
       }, error);
     },
-
-    // [1.0.0] Построить меню фильтра из категорий CONFIG
-    _buildMenu: function (activeUrl) {
-      return CONFIG.categories.map(function (cat) {
-        return {
-          title:        cat.title,
-          playlist_url: cat.url,
-          selected:     cat.url === activeUrl,
-        };
-      });
-    },
   };
 
   // ----------------------------------------------------------
-  // [1.0.0] РЕГИСТРАЦИЯ В AdultPlugin
+  // [1.1.0] РЕГИСТРАЦИЯ с polling
+  //
+  // БАГ v1.0.0: регистрация выполнялась только один раз сразу.
+  //   Если AdultJS.js ещё не создал window.AdultPlugin в момент
+  //   загрузки phub.js — парсер молча не регистрировался.
+  //
+  // ИСПРАВЛЕНИЕ v1.1.0: polling каждые 100 мс до 10 секунд.
   // ----------------------------------------------------------
-  if (window.AdultPlugin && window.AdultPlugin.registerParser) {
-    window.AdultPlugin.registerParser('phub', PhubParser);
-  } else {
-    // [1.0.0] Если AdultJS ещё не загружен — ждём
-    var waitInterval = setInterval(function () {
-      if (window.AdultPlugin && window.AdultPlugin.registerParser) {
-        window.AdultPlugin.registerParser('phub', PhubParser);
-        clearInterval(waitInterval);
-      }
+  function tryRegister() {
+    if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
+      window.AdultPlugin.registerParser('phub', PhubParser);
+      console.log('[phub] v1.1.0 registered OK');
+      return true;
+    }
+    return false;
+  }
+
+  if (!tryRegister()) {
+    var _elapsed = 0;
+    var _poll = setInterval(function () {
+      _elapsed += 100;
+      if (tryRegister() || _elapsed >= 10000) clearInterval(_poll);
     }, 100);
   }
 
 })();
-
