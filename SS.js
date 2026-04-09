@@ -1,6 +1,6 @@
 // =============================================================
 // AdultJS.js — Lampa Adult Plugin
-// Version  : 1.1.0
+// Version  : 1.3.0
 // Changed  : [1.0.0] Полный рефакторинг с ab2024.ru → GitHub Pages
 //            [1.0.0] Убраны: RCH, история, лицензионные проверки
 //            [1.0.0] Добавлены: localStorage-закладки, динамические парсеры
@@ -18,7 +18,7 @@
   // [1.1.0] PLUGIN_VERSION — отображается в настройках; менять при каждом релизе
   // ----------------------------------------------------------
   var PLUGIN_ID      = 'adult_lampac';
-  var PLUGIN_VERSION = '1.2.0';
+  var PLUGIN_VERSION = '1.3.0';
   var GITHUB_BASE    = 'https://denis-tikhonov.github.io/plug/';
   var MENU_URL       = GITHUB_BASE + 'menu.json';
   var READY_FLAG     = 'plugin_' + PLUGIN_ID + '_ready';
@@ -364,6 +364,7 @@
     },
 
     // [1.0.0] Роутинг: local://bookmarks → закладки; иначе → парсер
+    // [1.3.0] Исправлен роутинг: entry URL (GitHub) → main(), site URL → view()
     view: function (params, success, error) {
       var url = params.url || '';
 
@@ -379,14 +380,22 @@
         return;
       }
 
-      // [1.0.0] Определяем парсер по имени файла в URL
-      // menu.json playlist_url: "https://denis-tikhonov.github.io/lampa-plugin/phub"
-      // → парсер "phub"
+      // Извлекаем имя парсера из URL
       var parserName = url.replace(GITHUB_BASE, '').split('?')[0].split('/')[0];
       if (!parserName) { error('Неизвестный источник'); return; }
 
       loadParser(parserName, function (parser) {
-        parser.view(params, success, error);
+        // [1.3.0] Если url = entry URL из menu.json (GitHub Pages URL)
+        // → это первый вход, нужна главная страница источника → main()
+        // Если url = реальный URL сайта (eporner.com, etc.) → view()
+        var isEntryUrl = (url === GITHUB_BASE + parserName) ||
+                         (url === GITHUB_BASE + parserName + '.js');
+
+        if (isEntryUrl && typeof parser.main === 'function') {
+          parser.main(params, success, error);
+        } else {
+          parser.view(params, success, error);
+        }
       });
     },
 
