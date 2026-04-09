@@ -19,7 +19,7 @@
   // ----------------------------------------------------------
   var PLUGIN_ID      = 'adult_lampac';
   var PLUGIN_VERSION = '1.2.0';
-  var GITHUB_BASE    = 'https://denis-tikhonov.github.io/lampa-plugin/';
+  var GITHUB_BASE    = 'https://denis-tikhonov.github.io/plug/';
   var MENU_URL       = GITHUB_BASE + 'menu.json';
   var READY_FLAG     = 'plugin_' + PLUGIN_ID + '_ready';
 
