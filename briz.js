@@ -1,13 +1,29 @@
 // =============================================================
 // briz.js — Парсер PornoBriz для AdultJS / AdultPlugin (Lampa)
-// Version  : 1.1.2
-// Changed  : [1.0.0] Первая версия.
-//            [1.1.0] Добавлено подробное логирование через Lampa.Noty
-//            [1.1.1] Исправлена ReferenceError на Parsers в блоке регистрации
-//            [1.1.1] Заменены .find() на совместимые циклы
-//            [1.1.1] Заменены NodeList.forEach на Array.prototype.forEach.call
-//            [1.1.2] Исправлена ошибка Converting circular structure to JSON
-//                    JSON.stringify(params) заменён на безопасное логирование
+// Version  : 1.1.0
+// Changed  : [1.0.0]
+//            [1.1.0] FIX: httpGet переписан с XHR (Lampa.Reguest.silent игнорирует dataType:text)
+//            [1.1.0] FIX: добавлено поле hide:false в карточки (обязательное для Lampa) Первая версия.
+//            Конфиг взят из AdultJS_debug_v1.3.2 [BLOCK:13] nexthub P[].
+//            PornoBriz — русскоязычный сайт без Cloudflare,
+//            прямые GET-запросы работают с Android TV.
+//
+// Структура URL:
+//   Главная:    /new/page1/
+//   Категория:  /{cat}/page{N}/
+//   Сортировка: /top/page{N}/ | /best/page{N}/
+//   Поиск:      /search/{query}/page{N}/
+//
+// Структура карточек (XPath из contentParse):
+//   nodes:    //div[contains(@class,'thumb_main')]
+//   name:     .//div[@class='th-title']
+//   href:     .//a @href
+//   img:      .//img @data-original
+//   duration: .//div[@class='duration']
+//   preview:  .//video @data-preview
+//
+// Получение видео (regexMatch из view):
+//   src="(...)" type="video/mp4" size="720|480|240"
 // =============================================================
 
 (function () {
@@ -15,176 +31,50 @@
 
   var HOST = 'https://pornobriz.com';
   var NAME = 'briz';
-  var TAG  = '[briz]';
-  var NOTY_TIME = 3000;
-
-  // ----------------------------------------------------------
-  // [1.1.1] ПОЛИФИЛЛЫ для старых WebView
-  // ----------------------------------------------------------
-  if (!Array.prototype.find) {
-    Array.prototype.find = function (predicate) {
-      for (var i = 0; i < this.length; i++) {
-        if (predicate(this[i], i, this)) return this[i];
-      }
-      return undefined;
-    };
-  }
-
-  if (!String.prototype.startsWith) {
-    String.prototype.startsWith = function (search, pos) {
-      pos = pos || 0;
-      return this.indexOf(search, pos) === pos;
-    };
-  }
-
-  // ----------------------------------------------------------
-  // [1.1.1] УТИЛИТА: forEach для NodeList (безопасная)
-  // ----------------------------------------------------------
-  function forEachNode(nodeList, fn) {
-    if (!nodeList || !nodeList.length) return;
-    for (var i = 0; i < nodeList.length; i++) {
-      fn(nodeList[i], i);
-    }
-  }
-
-  // ----------------------------------------------------------
-  // [1.1.1] УТИЛИТА: найти элемент в массиве (замена .find)
-  // ----------------------------------------------------------
-  function arrayFind(arr, predicate) {
-    if (!arr) return undefined;
-    for (var i = 0; i < arr.length; i++) {
-      if (predicate(arr[i], i)) return arr[i];
-    }
-    return undefined;
-  }
-
-  // ----------------------------------------------------------
-  // [1.1.2] УТИЛИТА: безопасное извлечение полей из params
-  //         Исключает циклические ссылки (activity, component)
-  // ----------------------------------------------------------
-  function safeParams(params) {
-    if (!params) return '(null)';
-    return JSON.stringify({
-      url:       params.url       || '',
-      page:      params.page      || '',
-      title:     params.title     || '',
-      query:     params.query     || '',
-      component: params.component || '',
-    });
-  }
-
-  // ----------------------------------------------------------
-  // [1.1.0] ЛОГИРОВАНИЕ
-  // ----------------------------------------------------------
-  function log(msg, data) {
-    console.log(TAG, msg, data !== undefined ? data : '');
-  }
-
-  function warn(msg, data) {
-    console.warn(TAG, msg, data !== undefined ? data : '');
-  }
-
-  function err(msg, data) {
-    console.error(TAG, msg, data !== undefined ? data : '');
-  }
-
-  function noty(msg) {
-    try {
-      Lampa.Noty.show(TAG + ' ' + msg, { time: NOTY_TIME });
-    } catch (e) {
-      console.warn(TAG, 'Noty unavailable:', msg);
-    }
-  }
-
-  function notyError(msg) {
-    try {
-      Lampa.Noty.show(TAG + ' ⛔ ' + msg, { time: NOTY_TIME, style: 'error' });
-    } catch (e) {
-      console.error(TAG, 'Noty unavailable:', msg);
-    }
-  }
-
-  function notySuccess(msg) {
-    try {
-      Lampa.Noty.show(TAG + ' ✅ ' + msg, { time: NOTY_TIME });
-    } catch (e) {
-      console.log(TAG, 'Noty unavailable:', msg);
-    }
-  }
 
   // ----------------------------------------------------------
   // [1.0.0] HTTP
-  // [1.1.0] Логирование каждого этапа
   // ----------------------------------------------------------
+  // [1.1.0] HTTP — XHR напрямую (заменяет Lampa.Reguest.silent)
+  // Причина: silent() игнорирует dataType:'text' и всегда JSON.parse()
+  // → HTML-ответ вызывает error callback → парсер не получает данные.
+  // XHR не имеет авто-парсинга, работает на Android TV WebView без CORS.
   function httpGet(url, success, error) {
-    log('httpGet → запрос:', url);
-    noty('Загрузка: ' + url.substring(0, 60) + '...');
-
     try {
-      var net = new Lampa.Reguest();
-      net.silent(
-        url,
-        function (data) {
-          if (typeof data === 'string' && data.length > 50) {
-            log('httpGet → Lampa.Reguest OK, длина:', data.length);
-            notySuccess('Reguest OK (' + data.length + ' символов)');
-            success(data);
-          } else {
-            warn('httpGet → Lampa.Reguest вернул мало данных, длина:', (data || '').length);
-            noty('Reguest: мало данных (' + (data || '').length + '), пробую fetch...');
-            _fallback(url, success, error);
-          }
-        },
-        function (e) {
-          warn('httpGet → Lampa.Reguest ошибка:', e);
-          noty('Reguest ошибка, пробую fetch...');
-          _fallback(url, success, error);
-        },
-        false,
-        { dataType: 'text', timeout: 12000 }
-      );
-    } catch (e) {
-      err('httpGet → исключение Lampa.Reguest:', e.message);
-      notyError('Исключение Reguest: ' + e.message);
-      _fallback(url, success, error);
-    }
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', url, true);
+      xhr.timeout = 12000;
+      xhr.responseType = 'text';
+      xhr.onload = function () {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          var resp = xhr.responseText || '';
+          if (resp.length > 50) { success(resp); }
+          else { error('Empty response'); }
+        } else { error('HTTP ' + xhr.status); }
+      };
+      xhr.onerror   = function () { _fallback(url, success, error); };
+      xhr.ontimeout = function () { error('XHR timeout'); };
+      xhr.send();
+    } catch (e) { _fallback(url, success, error); }
   }
 
   function _fallback(url, success, error) {
-    if (typeof fetch === 'undefined') {
-      err('_fallback → fetch недоступен');
-      notyError('fetch недоступен в этом окружении');
-      error('fetch unavailable');
-      return;
-    }
-
-    log('_fallback → пробую fetch:', url);
-    noty('Fetch: ' + url.substring(0, 60) + '...');
-
+    if (typeof fetch === 'undefined') { error('fetch unavailable'); return; }
     fetch(url, { method: 'GET' })
-      .then(function (r) {
-        log('_fallback → fetch статус:', r.status);
-        if (!r.ok) {
-          notyError('Fetch HTTP ' + r.status);
-          throw new Error('HTTP ' + r.status);
-        }
-        return r.text();
-      })
-      .then(function (text) {
-        log('_fallback → fetch OK, длина:', text.length);
-        notySuccess('Fetch OK (' + text.length + ' символов)');
-        success(text);
-      })
-      .catch(function (e) {
-        err('_fallback → fetch ошибка:', e.message || e);
-        notyError('Fetch ошибка: ' + (e.message || e));
-        error(e);
-      });
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+      .then(function (t) { if (t && t.length > 50) success(t); else error('Empty fetch'); })
+      .catch(error);
   }
 
   // ----------------------------------------------------------
   // [1.0.0] ПОСТРОЕНИЕ URL
-  // [1.1.0] Логирование
+  // Источник: contentParse.route из AdultJS_debug [BLOCK:13] PornoBriz
+  //
+  // Шаблоны:
+  //   list:   /new/page{N}/
+  //   sort:   /{sort}      (sort уже содержит page: "top/page{N}/")
+  //   cat:    /{cat}/page{N}/
+  //   search: /search/{query}/page{N}/
   // ----------------------------------------------------------
   var SORTS = [
     { title: 'Новинки',      val: '',    urlTpl: 'new/page{page}/'  },
@@ -206,432 +96,173 @@
 
   function buildUrl(sort, cat, search, page) {
     page = page || 1;
-    var result;
-
     if (search) {
-      result = HOST + '/search/' + encodeURIComponent(search) + '/page' + page + '/';
-    } else if (cat) {
-      result = HOST + '/' + cat + '/page' + page + '/';
-    } else {
-      var sortObj = arrayFind(SORTS, function (s) { return s.val === sort; }) || SORTS[0];
-      result = HOST + '/' + sortObj.urlTpl.replace('{page}', page);
+      return HOST + '/search/' + encodeURIComponent(search) + '/page' + page + '/';
     }
-
-    log('buildUrl →', 'sort=' + sort + ' cat=' + cat + ' search=' + search + ' page=' + page + ' → ' + result);
-    return result;
+    if (cat) {
+      return HOST + '/' + cat + '/page' + page + '/';
+    }
+    var sortObj = SORTS.find(function (s) { return s.val === sort; }) || SORTS[0];
+    return HOST + '/' + sortObj.urlTpl.replace('{page}', page);
   }
 
   // ----------------------------------------------------------
   // [1.0.0] ПАРСИНГ КАТАЛОГА
-  // [1.1.0] Подробное логирование каждого шага парсинга
-  // [1.1.1] Заменены NodeList.forEach на forEachNode
+  // Использует DOMParser + XPath (как NextHub-движок в AdultJS).
+  //
+  // nodes: //div[contains(@class,'thumb_main')]
   // ----------------------------------------------------------
   function parsePlaylist(html) {
-    if (!html) {
-      warn('parsePlaylist → html пустой');
-      notyError('Парсинг: HTML пустой');
-      return [];
-    }
-
-    log('parsePlaylist → длина HTML:', html.length);
-    noty('Парсинг HTML (' + html.length + ' символов)...');
-
-    var doc;
-    try {
-      doc = new DOMParser().parseFromString(html, 'text/html');
-      log('parsePlaylist → DOMParser OK');
-    } catch (e) {
-      err('parsePlaylist → DOMParser ошибка:', e.message);
-      notyError('DOMParser ошибка: ' + e.message);
-      return [];
-    }
-
+    if (!html) return [];
+    var doc   = new DOMParser().parseFromString(html, 'text/html');
     var cards = [];
 
-    // ----------------------------------------------------------
-    // Стратегия 1: XPath
-    // ----------------------------------------------------------
-    log('parsePlaylist → Стратегия 1: XPath...');
-    try {
-      var nodes = doc.evaluate(
-        "//div[contains(@class,'thumb_main')]",
-        doc, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null
-      );
-      log('parsePlaylist → XPath найдено узлов:', nodes.snapshotLength);
-      noty('XPath: найдено ' + nodes.snapshotLength + ' узлов');
+    // XPath: все блоки карточек
+    var nodes = doc.evaluate(
+      "//div[contains(@class,'thumb_main')]",
+      doc, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null
+    );
 
-      for (var i = 0; i < nodes.snapshotLength; i++) {
-        var el = nodes.snapshotItem(i);
-        var card = _extractCard(el);
-        if (card) cards.push(card);
-      }
+    for (var i = 0; i < nodes.snapshotLength; i++) {
+      var el = nodes.snapshotItem(i);
 
-      log('parsePlaylist → XPath извлечено карточек:', cards.length);
-    } catch (e) {
-      warn('parsePlaylist → XPath ошибка:', e.message);
-      notyError('XPath ошибка: ' + e.message);
+      // Ссылка
+      var aEl  = el.querySelector('a');
+      var href = aEl ? aEl.getAttribute('href') : '';
+      if (!href) continue;
+      if (href.indexOf('http') !== 0) href = HOST + href;
+
+      // Название
+      var titleEl = el.querySelector('.th-title');
+      var name    = titleEl ? titleEl.textContent.trim() : '';
+      if (!name && aEl) name = aEl.getAttribute('title') || '';
+      if (!name) continue;
+
+      // Картинка: data-original
+      var imgEl   = el.querySelector('img');
+      var picture = imgEl ? (imgEl.getAttribute('data-original') || imgEl.getAttribute('src') || '') : '';
+
+      // Превью: video[data-preview]
+      var vidEl   = el.querySelector('video');
+      var preview = vidEl ? (vidEl.getAttribute('data-preview') || '') : '';
+
+      // Длительность
+      var durEl   = el.querySelector('.duration');
+      var time    = durEl ? durEl.textContent.trim() : '';
+
+      cards.push({
+        name:    name,
+        video:   href,
+        picture: picture,
+        preview: preview || null,
+        time:    time,
+        quality: 'HD',
+        json:    true,   // нужна страница для поиска mp4
+        hide:    false,
+        related: true,
+        model:   null,
+        source:  NAME,
+      });
     }
 
-    // ----------------------------------------------------------
-    // Стратегия 2: CSS-селекторы (fallback)
-    // ----------------------------------------------------------
+    // Fallback: если XPath не сработал — CSS-селектор
     if (!cards.length) {
-      log('parsePlaylist → Стратегия 2: CSS-селекторы...');
-      noty('XPath не дал результатов, пробую CSS...');
-
-      var selectors = [
-        '.thumb_main',
-        '.thumb-main',
-        '.video-item',
-        '.item',
-        '.th-wrap',
-        '.thumb',
-        'article',
-      ];
-
-      for (var s = 0; s < selectors.length; s++) {
-        var sel = selectors[s];
-        var els = doc.querySelectorAll(sel);
-        log('parsePlaylist → CSS "' + sel + '" найдено:', els.length);
-
-        if (els.length > 0) {
-          noty('CSS "' + sel + '": найдено ' + els.length + ' элементов');
-          forEachNode(els, function (nodeEl) {
-            var card = _extractCard(nodeEl);
-            if (card) cards.push(card);
-          });
-          if (cards.length > 0) {
-            log('parsePlaylist → CSS "' + sel + '" извлечено карточек:', cards.length);
-            break;
-          }
-        }
-      }
-    }
-
-    // ----------------------------------------------------------
-    // Стратегия 3: Поиск всех ссылок с изображениями (последний fallback)
-    // ----------------------------------------------------------
-    if (!cards.length) {
-      log('parsePlaylist → Стратегия 3: все ссылки с img...');
-      noty('CSS не дал результатов, ищу все ссылки с картинками...');
-
-      var allLinks = doc.querySelectorAll('a[href]');
-      log('parsePlaylist → всего ссылок на странице:', allLinks.length);
-
-      forEachNode(allLinks, function (a) {
-        var href = a.getAttribute('href') || '';
-        var img  = a.querySelector('img');
-        if (!img) return;
-        if (href.indexOf('/video') === -1 && href.indexOf('/watch') === -1) return;
+      doc.querySelectorAll('.thumb_main, .thumb-main, .video-item').forEach(function (el) {
+        var aEl  = el.querySelector('a');
+        var href = aEl ? aEl.getAttribute('href') : '';
+        if (!href) return;
         if (href.indexOf('http') !== 0) href = HOST + href;
-
-        var name = a.getAttribute('title') || (a.textContent || '').trim().substring(0, 80);
-        if (!name || name.length < 3) return;
-
-        var picture = img.getAttribute('data-original') || img.getAttribute('data-src') || img.getAttribute('src') || '';
-
+        var titleEl = el.querySelector('.th-title, .title, h3');
+        var name    = titleEl ? titleEl.textContent.trim() : (aEl ? aEl.getAttribute('title') || '' : '');
+        if (!name) return;
+        var imgEl   = el.querySelector('img');
+        var picture = imgEl ? (imgEl.getAttribute('data-original') || imgEl.getAttribute('src') || '') : '';
+        var durEl   = el.querySelector('.duration, .time');
         cards.push({
-          name:    name,
-          video:   href,
-          picture: picture,
-          preview: null,
-          time:    '',
-          quality: 'HD',
-          json:    true,
-          related: true,
-          model:   null,
-          source:  NAME,
+          name: name, video: href, picture: picture,
+          preview: null, time: durEl ? durEl.textContent.trim() : '',
+          quality: 'HD', json: true, related: true, model: null, source: NAME,
         });
       });
-
-      log('parsePlaylist → Стратегия 3 извлечено:', cards.length);
-    }
-
-    // ----------------------------------------------------------
-    // [1.1.0] Дамп структуры для отладки если ничего не найдено
-    // ----------------------------------------------------------
-    if (!cards.length) {
-      warn('parsePlaylist → НИ ОДНА СТРАТЕГИЯ НЕ СРАБОТАЛА');
-      notyError('Карточки не найдены! Смотрите консоль.');
-
-      var bodyHtml = doc.body ? doc.body.innerHTML : '';
-      warn('parsePlaylist → body (первые 500 символов):', bodyHtml.substring(0, 500));
-
-      var topClasses = [];
-      if (doc.body) {
-        var children = doc.body.children;
-        for (var c = 0; c < Math.min(children.length, 20); c++) {
-          topClasses.push({
-            tag:     children[c].tagName,
-            id:      children[c].id || '',
-            classes: children[c].className || '',
-          });
-        }
-      }
-      warn('parsePlaylist → top-level элементы body:', JSON.stringify(topClasses));
-
-      var thumbDivs = doc.querySelectorAll('div[class*="thumb"]');
-      warn('parsePlaylist → div с "thumb" в классе:', thumbDivs.length);
-      forEachNode(thumbDivs, function (d, idx) {
-        if (idx < 5) warn('  thumb div #' + idx + ':', d.className);
-      });
-    } else {
-      log('parsePlaylist → ИТОГО карточек:', cards.length);
-      notySuccess('Найдено ' + cards.length + ' видео');
-      log('parsePlaylist → первая карточка:', cards[0].name + ' | ' + cards[0].video);
     }
 
     return cards;
   }
 
   // ----------------------------------------------------------
-  // [1.1.0] Извлечение одной карточки из DOM-элемента
-  // ----------------------------------------------------------
-  function _extractCard(el) {
-    var aEl  = el.querySelector('a');
-    var href = aEl ? aEl.getAttribute('href') : '';
-    if (!href) return null;
-    if (href.indexOf('http') !== 0) href = HOST + href;
-
-    var titleEl = el.querySelector('.th-title');
-    var name    = titleEl ? (titleEl.textContent || '').trim() : '';
-    if (!name && aEl) name = aEl.getAttribute('title') || '';
-    if (!name) {
-      var altTitle = el.querySelector('.title, h3, h4, .name');
-      if (altTitle) name = (altTitle.textContent || '').trim();
-    }
-    if (!name) return null;
-
-    var imgEl   = el.querySelector('img');
-    var picture = imgEl
-      ? (imgEl.getAttribute('data-original') || imgEl.getAttribute('data-src') || imgEl.getAttribute('src') || '')
-      : '';
-
-    var vidEl   = el.querySelector('video');
-    var preview = vidEl
-      ? (vidEl.getAttribute('data-preview') || vidEl.getAttribute('src') || '')
-      : '';
-
-    var durEl = el.querySelector('.duration, .time, .dur');
-    var time  = durEl ? (durEl.textContent || '').trim() : '';
-
-    return {
-      name:    name,
-      video:   href,
-      picture: picture,
-      preview: preview || null,
-      time:    time,
-      quality: 'HD',
-      json:    true,
-      related: true,
-      model:   null,
-      source:  NAME,
-    };
-  }
-
-  // ----------------------------------------------------------
   // [1.0.0] ПОЛУЧЕНИЕ ПРЯМЫХ ССЫЛОК
-  // [1.1.0] Подробное логирование
+  // Источник: view.regexMatch из AdultJS_debug [BLOCK:13] PornoBriz
+  //
+  // Паттерн: src="(...)" type="video/mp4" size="720|480|240"
   // ----------------------------------------------------------
   function getStreamLinks(videoPageUrl, success, error) {
-    log('getStreamLinks → загрузка страницы видео:', videoPageUrl);
-    noty('Получаю ссылки: ' + videoPageUrl.substring(0, 50) + '...');
-
     httpGet(videoPageUrl, function (html) {
-      log('getStreamLinks → HTML получен, длина:', html.length);
-
       var qualitys = {};
-
-      // ----------------------------------------------------------
-      // Стратегия 1: src="..." type="video/mp4" size="..."
-      // ----------------------------------------------------------
-      var sizes = ['1080', '720', '480', '360', '240'];
-      var si;
-      for (si = 0; si < sizes.length; si++) {
-        var size = sizes[si];
+      var sizes    = ['1080', '720', '480', '360', '240'];
+      sizes.forEach(function (size) {
         var m = html.match(new RegExp('src="([^"]+)"\\s+type="video/mp4"\\s+size="' + size + '"'));
-        if (m && m[1]) {
-          qualitys[size + 'p'] = m[1];
-          log('getStreamLinks → Стратегия 1: найдено ' + size + 'p:', m[1].substring(0, 80));
-        }
-      }
-
-      log('getStreamLinks → Стратегия 1 результат:', Object.keys(qualitys).length + ' качеств');
-
-      // ----------------------------------------------------------
-      // Стратегия 2: source с атрибутами в любом порядке
-      // ----------------------------------------------------------
+        if (m && m[1]) qualitys[size + 'p'] = m[1];
+      });
       if (!Object.keys(qualitys).length) {
-        log('getStreamLinks → Стратегия 2: source теги...');
-        for (si = 0; si < sizes.length; si++) {
-          var size2 = sizes[si];
-          var m2;
-          m2 = html.match(new RegExp('size="' + size2 + '"[^>]*src="([^"]+)"'));
-          if (m2 && m2[1]) { qualitys[size2 + 'p'] = m2[1]; continue; }
-          m2 = html.match(new RegExp('label="' + size2 + 'p?"[^>]*src="([^"]+)"'));
-          if (m2 && m2[1]) { qualitys[size2 + 'p'] = m2[1]; continue; }
-          m2 = html.match(new RegExp('res="' + size2 + '"[^>]*src="([^"]+)"'));
-          if (m2 && m2[1]) { qualitys[size2 + 'p'] = m2[1]; }
+        // Fallback: ищем любые .mp4 в source
+        var re = /src="(https?:\/\/[^"]+\.mp4[^"]*)"/g;
+        var m2, idx = 0;
+        while ((m2 = re.exec(html)) !== null && idx < 3) {
+          qualitys['auto' + (idx || '')] = m2[1];
+          idx++;
         }
-        log('getStreamLinks → Стратегия 2 результат:', Object.keys(qualitys).length + ' качеств');
       }
-
-      // ----------------------------------------------------------
-      // Стратегия 3: JSON в скрипте (sources: [...])
-      // ----------------------------------------------------------
-      if (!Object.keys(qualitys).length) {
-        log('getStreamLinks → Стратегия 3: JSON sources...');
-        var jsonMatch = html.match(/sources\s*[:=]\s*(\[[\s\S]*?\])/);
-        if (jsonMatch) {
-          log('getStreamLinks → найден массив sources:', jsonMatch[1].substring(0, 200));
-          try {
-            var sources = JSON.parse(jsonMatch[1].replace(/'/g, '"'));
-            for (var j = 0; j < sources.length; j++) {
-              var src = sources[j];
-              var label = (src.label || src.size || src.quality || 'auto').toString().replace(/\s/g, '');
-              var srcUrl = src.file || src.src || src.url || '';
-              if (srcUrl) qualitys[label] = srcUrl;
-            }
-          } catch (e) {
-            warn('getStreamLinks → JSON parse ошибка:', e.message);
-          }
-        }
-        log('getStreamLinks → Стратегия 3 результат:', Object.keys(qualitys).length + ' качеств');
-      }
-
-      // ----------------------------------------------------------
-      // Стратегия 4: любые .mp4 ссылки
-      // ----------------------------------------------------------
-      if (!Object.keys(qualitys).length) {
-        log('getStreamLinks → Стратегия 4: все .mp4 ссылки...');
-        var reMp4 = /["'](https?:\/\/[^"'\s]+\.mp4[^"'\s]*)/g;
-        var m4, idx4 = 0;
-        while ((m4 = reMp4.exec(html)) !== null && idx4 < 5) {
-          qualitys['auto' + (idx4 || '')] = m4[1];
-          log('getStreamLinks → найден mp4 #' + idx4 + ':', m4[1].substring(0, 80));
-          idx4++;
-        }
-        log('getStreamLinks → Стратегия 4 результат:', Object.keys(qualitys).length + ' ссылок');
-      }
-
-      // ----------------------------------------------------------
-      // Стратегия 5: .m3u8 ссылки (HLS)
-      // ----------------------------------------------------------
-      if (!Object.keys(qualitys).length) {
-        log('getStreamLinks → Стратегия 5: .m3u8 ссылки...');
-        var reHls = /["'](https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/g;
-        var m5 = reHls.exec(html);
-        if (m5) {
-          qualitys['HLS'] = m5[1];
-          log('getStreamLinks → найден m3u8:', m5[1].substring(0, 80));
-        }
-        log('getStreamLinks → Стратегия 5 результат:', Object.keys(qualitys).length + ' ссылок');
-      }
-
-      // ----------------------------------------------------------
-      // Итог
-      // ----------------------------------------------------------
-      var keys = Object.keys(qualitys);
-      var count = keys.length;
-      if (!count) {
-        err('getStreamLinks → НИ ОДНА СТРАТЕГИЯ НЕ НАШЛА ССЫЛОК');
-        notyError('Нет mp4/m3u8 ссылок на странице видео!');
-
-        var sourceMatches = html.match(/<source[^>]*>/gi) || [];
-        warn('getStreamLinks → <source> теги (' + sourceMatches.length + '):', sourceMatches.slice(0, 5));
-
-        var videoMatches = html.match(/<video[^>]*>[\s\S]*?<\/video>/gi) || [];
-        warn('getStreamLinks → <video> блоки (' + videoMatches.length + '):', videoMatches.slice(0, 2));
-
-        var mp4Mentions = (html.match(/mp4/gi) || []).length;
-        warn('getStreamLinks → упоминаний "mp4" в HTML:', mp4Mentions);
-
-        var hlsMentions = (html.match(/m3u8/gi) || []).length;
-        warn('getStreamLinks → упоминаний "m3u8" в HTML:', hlsMentions);
-
-        error('PornoBriz: нет mp4/m3u8');
-        return;
-      }
-
-      log('getStreamLinks → ИТОГО качеств:', count);
-      notySuccess('Найдено ' + count + ' качеств');
-
-      for (var k = 0; k < keys.length; k++) {
-        log('  ' + keys[k] + ' → ' + qualitys[keys[k]].substring(0, 80));
-      }
-
+      if (!Object.keys(qualitys).length) { error('PornoBriz: нет mp4'); return; }
       success({ qualitys: qualitys });
-    }, function (e) {
-      err('getStreamLinks → ошибка загрузки страницы:', e);
-      notyError('Ошибка загрузки страницы видео');
-      error(e);
-    });
+    }, error);
   }
 
   // ----------------------------------------------------------
   // [1.0.0] МЕНЮ ФИЛЬТРА
-  // [1.1.1] Заменены .find() на arrayFind()
   // ----------------------------------------------------------
   function parseState(url) {
+    // Определяем sort/cat/search из URL
     var sort = '', cat = '', search = '';
-    var path = (url || '').replace(HOST, '').replace(/^\//, '');
+    var path = url.replace(HOST, '').replace(/^\//, '');
 
-    if (path.indexOf('search/') === 0) {
+    if (path.startsWith('search/')) {
       search = decodeURIComponent(path.split('/')[1] || '');
     } else {
-      for (var i = 0; i < SORTS.length; i++) {
-        if (SORTS[i].val && path.indexOf(SORTS[i].val + '/') === 0) {
-          sort = SORTS[i].val;
-          break;
-        }
-      }
+      SORTS.forEach(function (s) {
+        if (s.val && path.startsWith(s.val + '/')) sort = s.val;
+      });
       if (!sort) {
-        for (var j = 0; j < CATS.length; j++) {
-          if (path.indexOf(CATS[j].val + '/') === 0) {
-            cat = CATS[j].val;
-            break;
-          }
-        }
+        CATS.forEach(function (c) {
+          if (path.startsWith(c.val + '/')) cat = c.val;
+        });
       }
     }
-
-    log('parseState → url=' + url + ' sort=' + sort + ' cat=' + cat + ' search=' + search);
     return { sort: sort, cat: cat, search: search };
   }
 
   function buildMenu(url) {
-    var state   = parseState(url || '');
-    var sortObj = arrayFind(SORTS, function (s) { return s.val === state.sort; }) || SORTS[0];
-    var catObj  = arrayFind(CATS,  function (c) { return c.val === state.cat;  });
+    var state    = parseState(url || '');
+    var sortObj  = SORTS.find(function (s) { return s.val === state.sort; }) || SORTS[0];
+    var catObj   = CATS.find(function (c)  { return c.val === state.cat;  });
 
     var items = [{ title: 'Поиск', playlist_url: HOST, search_on: true }];
 
-    var sortSubmenu = [];
-    for (var i = 0; i < SORTS.length; i++) {
-      sortSubmenu.push({
-        title:        SORTS[i].title,
-        playlist_url: HOST + '/' + SORTS[i].urlTpl.replace('{page}', '1'),
-      });
-    }
-
+    // Подменю сортировки
     items.push({
       title:        'Сортировка: ' + sortObj.title,
       playlist_url: 'submenu',
-      submenu:      sortSubmenu,
+      submenu:      SORTS.map(function (s) {
+        return { title: s.title, playlist_url: HOST + '/' + s.urlTpl.replace('{page}', '1') };
+      }),
     });
 
-    var catSubmenu = [];
-    for (var j = 0; j < CATS.length; j++) {
-      catSubmenu.push({
-        title:        CATS[j].title,
-        playlist_url: HOST + '/' + CATS[j].val + '/page1/',
-      });
-    }
-
+    // Подменю категорий
     items.push({
       title:        'Категория: ' + (catObj ? catObj.title : 'Все'),
       playlist_url: 'submenu',
-      submenu:      catSubmenu,
+      submenu:      CATS.map(function (c) {
+        return { title: c.title, playlist_url: HOST + '/' + c.val + '/page1/' };
+      }),
     });
 
     return items;
@@ -639,83 +270,43 @@
 
   // ----------------------------------------------------------
   // [1.0.0] ПУБЛИЧНЫЙ ИНТЕРФЕЙС
-  // [1.1.0] Логирование входа/выхода каждого метода
-  // [1.1.2] Заменён JSON.stringify(params) на safeParams(params)
   // ----------------------------------------------------------
   var BrizParser = {
 
     main: function (params, success, error) {
-      log('main() → вызван:', safeParams(params));
-      noty('Загрузка главной страницы...');
-
       httpGet(buildUrl('', '', '', 1), function (html) {
         var results = parsePlaylist(html);
-        if (!results.length) {
-          err('main() → нет карточек');
-          notyError('Главная: карточки не найдены');
-          error('PornoBriz: нет карточек');
-          return;
-        }
-        log('main() → успех, карточек:', results.length);
-        notySuccess('Главная: ' + results.length + ' видео');
+        if (!results.length) { error('PornoBriz: нет карточек'); return; }
         success({ results: results, collection: true, total_pages: 30, menu: buildMenu(HOST) });
-      }, function (e) {
-        err('main() → ошибка загрузки:', e);
-        notyError('Главная: ошибка загрузки');
-        error(e);
-      });
+      }, error);
     },
 
     view: function (params, success, error) {
-      log('view() → вызван:', safeParams(params));
+      var rawUrl = (params.url || HOST).replace(/[?&]pg=\d+/, '');
+      var page   = parseInt(params.page, 10) || 1;
+      var state  = parseState(rawUrl);
 
-      var rawUrl  = (params.url || HOST).replace(/[?&]pg=\d+/, '');
-      var page    = parseInt(params.page, 10) || 1;
-      var state   = parseState(rawUrl);
+      // Строим URL с правильной пагинацией
       var loadUrl = buildUrl(state.sort, state.cat, state.search, page);
-
-      log('view() → loadUrl:', loadUrl, 'page:', page);
-      noty('Загрузка страницы ' + page + '...');
 
       httpGet(loadUrl, function (html) {
         var results = parsePlaylist(html);
-        if (!results.length) {
-          err('view() → нет карточек');
-          notyError('Каталог: карточки не найдены');
-          error('PornoBriz: нет карточек');
-          return;
-        }
-        log('view() → успех, карточек:', results.length);
-        notySuccess('Каталог: ' + results.length + ' видео');
+        if (!results.length) { error('PornoBriz: нет карточек'); return; }
         success({
           results:     results,
           collection:  true,
           total_pages: results.length >= 20 ? page + 5 : page,
           menu:        buildMenu(rawUrl),
         });
-      }, function (e) {
-        err('view() → ошибка загрузки:', e);
-        notyError('Каталог: ошибка загрузки');
-        error(e);
-      });
+      }, error);
     },
 
     search: function (params, success, error) {
       var query = params.query || '';
       var page  = parseInt(params.page, 10) || 1;
-      log('search() → запрос: "' + query + '", страница: ' + page);
-      noty('Поиск: "' + query + '"...');
-
       httpGet(buildUrl('', '', query, page), function (html) {
         var results = parsePlaylist(html);
-        if (!results.length) {
-          warn('search() → ничего не найдено');
-          notyError('Поиск: ничего не найдено');
-          error('PornoBriz: ничего не найдено');
-          return;
-        }
-        log('search() → найдено:', results.length);
-        notySuccess('Поиск: ' + results.length + ' результатов');
+        if (!results.length) { error('PornoBriz: ничего не найдено'); return; }
         success({
           title:       'PornoBriz: ' + query,
           results:     results,
@@ -723,46 +314,30 @@
           collection:  true,
           total_pages: page + 5,
         });
-      }, function (e) {
-        err('search() → ошибка:', e);
-        notyError('Поиск: ошибка загрузки');
-        error(e);
-      });
+      }, error);
     },
 
     qualitys: function (videoUrl, success, error) {
-      log('qualitys() → вызван для:', videoUrl);
-      noty('Получение качеств видео...');
       getStreamLinks(videoUrl, success, error);
     },
   };
 
   // ----------------------------------------------------------
   // [1.0.0] РЕГИСТРАЦИЯ
-  // [1.1.1] Исправлена ссылка на несуществующую переменную Parsers
   // ----------------------------------------------------------
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, BrizParser);
-      log('v1.1.2 зарегистрирован OK');
-      notySuccess('Парсер PornoBriz v1.1.2 загружен');
+      console.log('[briz] v1.0.0 registered OK');
       return true;
     }
-    log('AdultPlugin ещё не доступен, жду...');
     return false;
   }
 
   if (!tryRegister()) {
-    var _elapsed = 0;
-    var _timer = setInterval(function () {
-      _elapsed += 100;
-      if (tryRegister()) {
-        clearInterval(_timer);
-      } else if (_elapsed >= 10000) {
-        clearInterval(_timer);
-        err('Не удалось зарегистрироваться за 10 секунд!');
-        notyError('PornoBriz: таймаут регистрации!');
-      }
+    var _e = 0, _t = setInterval(function () {
+      _e += 100;
+      if (tryRegister() || _e >= 10000) clearInterval(_t);
     }, 100);
   }
 
