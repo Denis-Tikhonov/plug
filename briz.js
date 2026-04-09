@@ -1,91 +1,59 @@
-(function() {
+(function () {
     'use strict';
 
-    var NAME = 'PornBriz';
-    var HOST = 'https://pornobriz.com';
-
     function Briz(api) {
-        this.main = function() {
-            var items = [
-                { title: 'Новое', url: HOST + '/latest-updates/' },
-                { title: 'Популярное', url: HOST + '/most-popular/' },
-                { title: 'Топ рейтинга', url: HOST + '/top-rated/' },
-                { title: 'Длинные видео', url: HOST + '/categories/long-movies/' }
-            ];
-            api.menu(items, this.list.bind(this));
-        };
-
-        this.list = function(item) {
-            var url = item.url;
-            if (item.page > 1) {
-                // Формат пагинации для Briz: /page/2/
-                url = item.url.replace(/\/$/, '') + '/page/' + item.page + '/';
-            }
-
-            api.fetch(url, function(html) {
+        // Главное меню поиска
+        this.search = function (query) {
+            var url = 'https://pornbriz.com/search/' + encodeURIComponent(query);
+            
+            api.network.native(url, function (html) {
                 if (!html) return api.error();
-
+                
                 var items = [];
-                var temp = document.createElement('div');
-                temp.innerHTML = html;
-
-                // Основные селекторы карточек видео
-                var cards = temp.querySelectorAll('.th-item, .thumb-video');
-
-                cards.forEach(function(card) {
-                    var link = card.querySelector('a');
-                    var img = card.querySelector('img');
-                    var title = card.querySelector('.th-title, .title, .thumb-title');
-
-                    if (link) {
-                        var href = link.getAttribute('href');
-                        var video_url = href.indexOf('http') === -1 ? HOST + href : href;
+                // Регулярное выражение для парсинга (проверьте селекторы сайта)
+                var matches = html.match(/<div class="video-item">([\s\S]*?)<\/div>/g);
+                
+                if (matches) {
+                    matches.forEach(function (item) {
+                        var title = item.match(/title="([^"]+)"/);
+                        var link = item.match(/href="([^"]+)"/);
+                        var img = item.match(/src="([^"]+)"/);
                         
-                        var poster = img ? (img.getAttribute('data-original') || img.getAttribute('data-src') || img.getAttribute('src')) : '';
-                        if (poster && poster.indexOf('http') === -1) poster = HOST + poster;
-
-                        items.push({
-                            title: title ? title.textContent.trim() : link.getAttribute('title'),
-                            url: video_url,
-                            img: poster,
-                            js: true // Сигнал AdultJS искать плеер на странице
-                        });
-                    }
-                });
-
+                        if (title && link) {
+                            items.push({
+                                title: title[1],
+                                url: link[1],
+                                img: img ? img[1] : ''
+                            });
+                        }
+                    });
+                }
+                
                 api.result(items);
             });
         };
 
-        this.search = function(query) {
-            this.list({ url: HOST + '/search/' + encodeURIComponent(query) + '/' });
-        };
-
-        // Поиск прямой ссылки на видео или iframe
-        this.video = function(item) {
-            api.fetch(item.url, function(html) {
+        // Обработка конкретного видео
+        this.any = function (url) {
+            api.network.native(url, function (html) {
                 if (!html) return api.error();
-
-                // Ищем скрипты плеера или iframe
-                var video_url = '';
-                var match = html.match(/video_url:\s*['"]([^'"]+)['"]/);
                 
-                if (match && match[1]) {
-                    video_url = match[1];
-                } else {
-                    // Если прямая ссылка зашифрована, пытаемся найти iframe
-                    var iframe = html.match(/<iframe.*?src=["']([^"']+)["']/);
-                    if (iframe) video_url = iframe[1];
-                }
-
+                var video_url = html.match(/source src="([^"]+)"/);
                 if (video_url) {
-                    api.play({ url: video_url, title: item.title });
+                    api.play({
+                        url: video_url[1]
+                    });
                 } else {
-                    api.error('Не удалось найти видео');
+                    api.error();
                 }
             });
         };
     }
 
-    window.AdultJS.register(NAME, Briz);
+    // Регистрация плагина в системе Lampa
+    if (window.AdultJS) {
+        window.AdultJS.register('Briz', Briz);
+    } else {
+        console.error('Lampa AdultJS не найден');
+    }
 })();
