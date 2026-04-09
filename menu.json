@@ -1,10 +1,24 @@
 {
   "channels": [
+ {
+      "title": "Закладки",
+      "playlist_url": "local://bookmarks"
+    },
     {
-      "title": "PornHub",
-      "playlist_url": "https://rt.pornhub.com/",
-      "parser": "phub",
-      "icon": "https://via.placeholder.com/300?text=PornHub"
+      "title": "EPorner",
+      "playlist_url": "https://denis-tikhonov.github.io/lampa-plugin/eporner"
+    },
+    {
+      "title": "PornoBriz",
+      "playlist_url": "https://denis-tikhonov.github.io/lampa-plugin/briz"
+    },
+    {
+      "title": "YouJizz",
+      "playlist_url": "https://denis-tikhonov.github.io/lampa-plugin/yjizz"
+    },
+    {
+      "title": "xds [TEST]",
+      "playlist_url": "https://denis-tikhonov.github.io/lampa-plugin/xds"
     }
   ]
 }
