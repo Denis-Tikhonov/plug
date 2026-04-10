@@ -1,6 +1,6 @@
 // =============================================================
 // AdultJS.js — Lampa Adult Plugin
-// Version  : 1.5.0
+// Version  : 1.5.1
 // Changed  :
 //   [1.0.0] Полный рефакторинг с ab2024.ru → GitHub Pages
 //   [1.0.0] Убраны: RCH, история, лицензионные проверки
@@ -58,7 +58,7 @@
   // [1.4.0] URL Cloudflare Worker — менять здесь, не в Settings.
   // Должен заканчиваться на '?url=' или '&url='.
   // Пример: 'https://zonaproxy.777b737.workers.dev/?url='
-  var WORKER_DEFAULT = 'https://ВАШ-WORKER.ВАШ-АККАУНТ.workers.dev/?url=';
+  var WORKER_DEFAULT = 'https://zonaproxy.777b737.workers.dev/?url=';
 
   // [1.0.0] Все ключи Lampa.Storage — для сброса
   var STORAGE_KEYS = [
