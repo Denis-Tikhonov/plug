@@ -1,6 +1,6 @@
 // =============================================================
 // briz.js — Парсер PornoBriz для AdultJS / AdultPlugin (Lampa)
-// Version  : 1.3.0
+// Version  : 1.4.0
 // Changed  :
 //   [1.0.0] Первая версия.
 //   [1.1.0] Добавлено подробное логирование через Lampa.Noty
@@ -18,10 +18,13 @@
 //           При 403 выводится Noty «Домен не разрешён в Worker»
 //           и цепочка тихо переходит к следующему уровню (fallback)
 //   [1.3.0] Добавлена авто-проверка workerUrl: если URL не заканчивается
-//           на '=', символ '=' добавляется автоматически —
-//           пользователь не получит молчаливую ошибку при ручном вводе
-//   [1.3.0] Константа WORKER_DEFAULT помечена явной инструкцией:
-//           вписать реальный URL задеплоенного Cloudflare Worker
+//           на '=', символ '=' добавляется автоматически
+//   [1.3.0] Константа WORKER_DEFAULT помечена явной инструкцией
+//   [1.4.0] BUGFIX: val:'' в SORTS[0] совпадал с «нет сортировки»,
+//           из-за чего main() и view() уходили на /new/page1/
+//           вместо корневой страницы HOST+'/'
+//           Исправлено: val:'' → val:'new', в buildUrl добавлена
+//           отдельная ветка else для случая sort='',cat='',search=''
 // =============================================================
 
 (function () {
@@ -383,9 +386,13 @@
 
   // ----------------------------------------------------------
   // [1.0.0] ПОСТРОЕНИЕ URL
+  // [1.4.0] BUGFIX: убран val:'' из SORTS — пустое значение совпадало
+  //         с «нет сортировки» и buildUrl('','','',1) уходил на
+  //         /new/page1/ вместо корневой страницы HOST+'/'.
+  //         Главная страница теперь отдаётся отдельной веткой в buildUrl.
   // ----------------------------------------------------------
   var SORTS = [
-    { title: 'Новинки',      val: '',     urlTpl: 'new/page{page}/'  },
+    { title: 'Новинки',      val: 'new',  urlTpl: 'new/page{page}/'  },
     { title: 'Топ рейтинга', val: 'top',  urlTpl: 'top/page{page}/'  },
     { title: 'Популярное',   val: 'best', urlTpl: 'best/page{page}/' },
   ];
@@ -410,9 +417,13 @@
       result = HOST + '/search/' + encodeURIComponent(search) + '/page' + page + '/';
     } else if (cat) {
       result = HOST + '/' + cat + '/page' + page + '/';
-    } else {
+    } else if (sort) {
+      // [1.4.0] Явная сортировка — строим по шаблону
       var sortObj = arrayFind(SORTS, function (s) { return s.val === sort; }) || SORTS[0];
       result = HOST + '/' + sortObj.urlTpl.replace('{page}', page);
+    } else {
+      // [1.4.0] BUGFIX: sort='', cat='', search='' → главная страница сайта
+      result = HOST + '/';
     }
 
     log('buildUrl →', 'sort=' + sort + ' cat=' + cat + ' search=' + search + ' page=' + page + ' → ' + result);
@@ -888,8 +899,8 @@
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, BrizParser);
-      log('v1.3.0 зарегистрирован OK');
-      notySuccess('Парсер PornoBriz v1.3.0 загружен');
+      log('v1.4.0 зарегистрирован OK');
+      notySuccess('Парсер PornoBriz v1.4.0 загружен');
       return true;
     }
     log('AdultPlugin ещё не доступен, жду...');
