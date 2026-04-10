@@ -1,18 +1,27 @@
 // =============================================================
 // briz.js — Парсер PornoBriz для AdultJS / AdultPlugin (Lampa)
-// Version  : 1.2.0
-// Changed  : [1.0.0] Первая версия.
-//            [1.1.0] Добавлено подробное логирование через Lampa.Noty
-//            [1.1.1] Исправлена ReferenceError на Parsers в блоке регистрации
-//            [1.1.1] Заменены .find() на совместимые циклы
-//            [1.1.1] Заменены NodeList.forEach на Array.prototype.forEach.call
-//            [1.1.2] Исправлена ошибка Converting circular structure to JSON
-//                    JSON.stringify(params) заменён на безопасное логирование
-//            [1.2.0] Интеграция Lampa.Network.native + Cloudflare Worker
-//                    Приоритетная цепочка: native → Reguest → fetch
-//                    Поддержка централизованного window.AdultPlugin.networkRequest
-//                    Добавлена функция _nativeRequest()
-//                    URL запросов проксируются через Cloudflare Worker
+// Version  : 1.3.0
+// Changed  :
+//   [1.0.0] Первая версия.
+//   [1.1.0] Добавлено подробное логирование через Lampa.Noty
+//   [1.1.1] Исправлена ReferenceError на Parsers в блоке регистрации
+//   [1.1.1] Заменены .find() на совместимые циклы
+//   [1.1.1] Заменены NodeList.forEach на Array.prototype.forEach.call
+//   [1.1.2] Исправлена ошибка Converting circular structure to JSON
+//           JSON.stringify(params) заменён на безопасное логирование
+//   [1.2.0] Интеграция Lampa.Network.native + Cloudflare Worker
+//           Приоритетная цепочка: native → Reguest → fetch
+//           Поддержка централизованного window.AdultPlugin.networkRequest
+//           Добавлена функция _nativeRequest()
+//           URL запросов проксируются через Cloudflare Worker
+//   [1.3.0] BUGFIX: добавлена обработка HTTP 403 от Worker
+//           При 403 выводится Noty «Домен не разрешён в Worker»
+//           и цепочка тихо переходит к следующему уровню (fallback)
+//   [1.3.0] Добавлена авто-проверка workerUrl: если URL не заканчивается
+//           на '=', символ '=' добавляется автоматически —
+//           пользователь не получит молчаливую ошибку при ручном вводе
+//   [1.3.0] Константа WORKER_DEFAULT помечена явной инструкцией:
+//           вписать реальный URL задеплоенного Cloudflare Worker
 // =============================================================
 
 (function () {
@@ -25,15 +34,36 @@
 
   // ----------------------------------------------------------
   // [1.2.0] URL Cloudflare Worker
-  // Приоритет: AdultPlugin.workerUrl → константа по умолчанию
+  // [1.3.0] ИНСТРУКЦИЯ: замените строку ниже на реальный URL
+  //         вашего задеплоенного воркера, например:
+  //         'https://zonaproxy.777b737.workers.dev/?url='
+  //
+  //         Требования к URL:
+  //         - должен заканчиваться на '?url=' или '&url='
+  //         - авто-проверка (getWorkerUrl) добавит '=' если забыли
+  //
+  // Приоритет выбора: AdultPlugin.workerUrl → константа ниже
   // ----------------------------------------------------------
   var WORKER_DEFAULT = 'https://ВАШ-WORKER.ВАШ-АККАУНТ.workers.dev/?url=';
 
+  // ----------------------------------------------------------
+  // [1.3.0] Нормализация URL воркера:
+  //         если пользователь скопировал URL без завершающего '='
+  //         (например, 'https://x.workers.dev/?url') — добавляем его.
+  //         Это предотвращает молчаливую ошибку при ручном вводе.
+  // ----------------------------------------------------------
   function getWorkerUrl() {
-    if (window.AdultPlugin && window.AdultPlugin.workerUrl) {
-      return window.AdultPlugin.workerUrl;
+    var url = (window.AdultPlugin && window.AdultPlugin.workerUrl)
+      ? window.AdultPlugin.workerUrl
+      : WORKER_DEFAULT;
+
+    // Авто-коррекция: добавляем '=' если отсутствует
+    if (url && url.charAt(url.length - 1) !== '=') {
+      warn('getWorkerUrl → URL не заканчивается на "=", добавляю автоматически');
+      url = url + '=';
     }
-    return WORKER_DEFAULT;
+
+    return url;
   }
 
   // ----------------------------------------------------------
@@ -78,7 +108,6 @@
 
   // ----------------------------------------------------------
   // [1.1.2] УТИЛИТА: безопасное извлечение полей из params
-  //         Исключает циклические ссылки (activity, component)
   // ----------------------------------------------------------
   function safeParams(params) {
     if (!params) return '(null)';
@@ -135,33 +164,27 @@
   //
   // Приоритетная цепочка запросов:
   //
-  //   1. window.AdultPlugin.networkRequest()
+  //   0. window.AdultPlugin.networkRequest()
   //      — централизованный метод из AdultJS.js (если доступен)
-  //      — уже содержит логику native + Worker внутри себя
   //
-  //   2. _nativeRequest()
+  //   1. _nativeRequest()
   //      — Lampa.Network.native через Cloudflare Worker
-  //      — работает на уровне нативного приложения, без CORS
+  //      [1.3.0] + обработка 403: Noty + тихий fallback на уровень 2
   //
-  //   3. _requestionRequest()
-  //      — Lampa.Reguest (стандартный метод Lampa)
-  //      — прямой запрос, без Worker
+  //   2. _requestionRequest()
+  //      — Lampa.Reguest (стандартный метод Lampa, прямой запрос)
   //
-  //   4. _fetchRequest()
-  //      — браузерный fetch()
-  //      — последний резерв, может падать из-за CORS
+  //   3. _fetchRequest()
+  //      — браузерный fetch(), последний резерв (может падать от CORS)
   //
   // ----------------------------------------------------------
 
   // ----------------------------------------------------------
   // [1.2.0] Уровень 1: Lampa.Network.native через Cloudflare Worker
-  //
-  // Lampa.Network.native отправляет запрос через нативную
-  // оболочку приложения (OKHttp на Android, NSURLSession на iOS),
-  // полностью минуя WebView и его CORS-ограничения.
-  // Cloudflare Worker добавляет второй слой: подменяет заголовки
-  // Origin/Referer на стороне сервера, исключая блокировку
-  // на уровне целевого сайта.
+  // [1.3.0] Добавлена отдельная обработка HTTP 403:
+  //         выводим Noty «Домен не разрешён в Worker» и вызываем
+  //         callback error() чтобы цепочка тихо перешла на уровень 2.
+  //         Прочие HTTP-ошибки (404, 5xx) обрабатываются как раньше.
   // ----------------------------------------------------------
   function _nativeRequest(url, success, error) {
     if (typeof Lampa === 'undefined' ||
@@ -182,10 +205,18 @@
       Lampa.Network.native(
         fullPath,
 
-        // Успех
+        // Успех — ответ получен (HTTP 2xx)
         function (result) {
-          // native может вернуть строку или уже распарсенный объект
           var text = (typeof result === 'string') ? result : JSON.stringify(result);
+
+          // [1.3.0] Проверяем: Worker мог вернуть JSON с error:true и status:403
+          // даже при «успешном» HTTP-ответе (зависит от реализации native)
+          if (text && text.indexOf('"status":403') !== -1) {
+            warn('_nativeRequest → Worker вернул 403 внутри тела ответа');
+            notyError('Домен не разрешён в Worker (403). Проверьте ALLOWED_TARGETS.');
+            error('worker_403');
+            return;
+          }
 
           if (text && text.length > 50) {
             log('_nativeRequest → OK, длина:', text.length);
@@ -197,22 +228,29 @@
           }
         },
 
-        // Ошибка
+        // Ошибка — сетевая или HTTP
         function (e) {
-          warn('_nativeRequest → ошибка:', e);
-          notyError('Native ошибка: ' + (e || 'неизвестно'));
+          // [1.3.0] Lampa.Network.native передаёт объект ошибки или HTTP-статус.
+          //         Если статус 403 — это Worker-блокировка домена, а не сетевая ошибка.
+          //         Выводим понятное сообщение и делаем тихий fallback.
+          var status  = (e && e.status)  ? e.status  : 0;
+          var message = (e && e.message) ? e.message : String(e || 'unknown');
+
+          if (status === 403 || message.indexOf('403') !== -1) {
+            warn('_nativeRequest → Worker ответил 403 (домен не в белом списке)');
+            notyError('Домен не разрешён в Worker. Тихий fallback на прямой запрос.');
+            // [1.3.0] Тихий переход к следующему уровню — НЕ останавливаем цепочку
+            error('worker_403');
+            return;
+          }
+
+          warn('_nativeRequest → ошибка:', message);
+          notyError('Native ошибка: ' + message.substring(0, 60));
           error(e || 'native_error');
         },
 
-        // Четвёртый параметр native: withCredentials = false
         false,
-
-        // Пятый параметр native: доп. опции / заголовки
-        {
-          headers: {
-            'X-Requested-With': 'XMLHttpRequest',
-          },
-        }
+        { headers: { 'X-Requested-With': 'XMLHttpRequest' } }
       );
     } catch (ex) {
       err('_nativeRequest → исключение:', ex.message);
@@ -234,6 +272,7 @@
         url,
         function (data) {
           var text = (typeof data === 'string') ? data : '';
+
           if (text.length > 50) {
             log('_requestionRequest → OK, длина:', text.length);
             notySuccess('Reguest OK (' + text.length + ' символов)');
@@ -293,21 +332,12 @@
 
   // ----------------------------------------------------------
   // [1.2.0] httpGet — главная точка входа для всех запросов
-  //
-  // Логика запуска цепочки:
-  //   Если AdultPlugin.networkRequest доступен — делегируем ему
-  //   (он уже содержит native + Worker логику).
-  //   Иначе — запускаем собственную цепочку парсера.
+  // [1.3.0] При worker_403 цепочка тихо продолжается без остановки
   // ----------------------------------------------------------
   function httpGet(url, success, error) {
     log('httpGet → URL:', url);
 
-    // ----------------------------------------------------------
     // Приоритет 0: централизованный метод из AdultJS.js
-    // window.AdultPlugin.networkRequest() содержит всю логику
-    // native+Worker и доступен после загрузки AdultJS.
-    // Парсер просто делегирует ему управление.
-    // ----------------------------------------------------------
     if (window.AdultPlugin &&
         typeof window.AdultPlugin.networkRequest === 'function') {
       log('httpGet → используем централизованный AdultPlugin.networkRequest');
@@ -315,36 +345,35 @@
       return;
     }
 
-    // ----------------------------------------------------------
     // Приоритет 1: Lampa.Network.native через Cloudflare Worker
-    // ----------------------------------------------------------
     log('httpGet → уровень 1: Lampa.Network.native + Worker');
     _nativeRequest(url,
       function (text) {
         success(text);
       },
-      function () {
-        // ----------------------------------------------------------
-        // Приоритет 2: Lampa.Reguest (прямой запрос)
-        // ----------------------------------------------------------
-        warn('httpGet → native не сработал, уровень 2: Lampa.Reguest');
-        noty('Native не сработал, пробую Reguest...');
+      function (e) {
+        // [1.3.0] worker_403 — информируем, но продолжаем цепочку молча
+        if (e === 'worker_403') {
+          warn('httpGet → worker_403: переход к уровню 2 без лишних сообщений');
+        } else {
+          warn('httpGet → native не сработал (' + e + '), уровень 2: Lampa.Reguest');
+          noty('Native не сработал, пробую Reguest...');
+        }
 
+        // Приоритет 2: Lampa.Reguest (прямой запрос)
         _requestionRequest(url,
           function (text) {
             success(text);
           },
           function () {
-            // ----------------------------------------------------------
             // Приоритет 3: fetch() (последний резерв)
-            // ----------------------------------------------------------
             warn('httpGet → Reguest не сработал, уровень 3: fetch');
             noty('Reguest не сработал, пробую fetch...');
 
-            _fetchRequest(url, success, function (e) {
+            _fetchRequest(url, success, function (fe) {
               err('httpGet → все методы исчерпаны для:', url);
               notyError('Все методы запроса исчерпаны!');
-              error(e || 'all_methods_failed');
+              error(fe || 'all_methods_failed');
             });
           }
         );
@@ -354,7 +383,6 @@
 
   // ----------------------------------------------------------
   // [1.0.0] ПОСТРОЕНИЕ URL
-  // [1.1.0] Логирование
   // ----------------------------------------------------------
   var SORTS = [
     { title: 'Новинки',      val: '',     urlTpl: 'new/page{page}/'  },
@@ -393,8 +421,6 @@
 
   // ----------------------------------------------------------
   // [1.0.0] ПАРСИНГ КАТАЛОГА
-  // [1.1.0] Подробное логирование каждого шага парсинга
-  // [1.1.1] Заменены NodeList.forEach на forEachNode
   // ----------------------------------------------------------
   function parsePlaylist(html) {
     if (!html) {
@@ -418,69 +444,50 @@
 
     var cards = [];
 
-    // ----------------------------------------------------------
-    // Стратегия 1: XPath
-    // ----------------------------------------------------------
+    // Стратегия 1: XPath с уточнением по @class (быстрее на слабых ТВ)
     log('parsePlaylist → Стратегия 1: XPath...');
     try {
       var nodes = doc.evaluate(
-        "//div[contains(@class,'thumb_main')]",
+        // [1.3.0] Уточнён XPath: добавлена проверка дочернего элемента 'a'
+        // для ускорения поиска карточек на слабых TV-процессорах
+        "//div[contains(@class,'thumb_main') and .//a[@href]]",
         doc, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null
       );
       log('parsePlaylist → XPath найдено узлов:', nodes.snapshotLength);
       noty('XPath: найдено ' + nodes.snapshotLength + ' узлов');
 
       for (var i = 0; i < nodes.snapshotLength; i++) {
-        var el = nodes.snapshotItem(i);
+        var el   = nodes.snapshotItem(i);
         var card = _extractCard(el);
         if (card) cards.push(card);
       }
-
       log('parsePlaylist → XPath извлечено карточек:', cards.length);
     } catch (e) {
       warn('parsePlaylist → XPath ошибка:', e.message);
       notyError('XPath ошибка: ' + e.message);
     }
 
-    // ----------------------------------------------------------
     // Стратегия 2: CSS-селекторы (fallback)
-    // ----------------------------------------------------------
     if (!cards.length) {
       log('parsePlaylist → Стратегия 2: CSS-селекторы...');
       noty('XPath не дал результатов, пробую CSS...');
 
-      var selectors = [
-        '.thumb_main',
-        '.thumb-main',
-        '.video-item',
-        '.item',
-        '.th-wrap',
-        '.thumb',
-        'article',
-      ];
-
+      var selectors = ['.thumb_main', '.thumb-main', '.video-item', '.item', '.card'];
       for (var s = 0; s < selectors.length; s++) {
-        var sel = selectors[s];
-        var els = doc.querySelectorAll(sel);
-        log('parsePlaylist → CSS "' + sel + '" найдено:', els.length);
-
-        if (els.length > 0) {
-          noty('CSS "' + sel + '": найдено ' + els.length + ' элементов');
-          forEachNode(els, function (nodeEl) {
-            var c = _extractCard(nodeEl);
-            if (c) cards.push(c);
+        var els = doc.querySelectorAll(selectors[s]);
+        if (els.length) {
+          log('parsePlaylist → CSS "' + selectors[s] + '" нашёл:', els.length);
+          forEachNode(els, function (el2) {
+            var card2 = _extractCard(el2);
+            if (card2) cards.push(card2);
           });
-          if (cards.length > 0) {
-            log('parsePlaylist → CSS "' + sel + '" извлечено карточек:', cards.length);
-            break;
-          }
+          if (cards.length) break;
         }
       }
+      log('parsePlaylist → CSS извлечено карточек:', cards.length);
     }
 
-    // ----------------------------------------------------------
     // Стратегия 3: все ссылки с изображениями (последний fallback)
-    // ----------------------------------------------------------
     if (!cards.length) {
       log('parsePlaylist → Стратегия 3: все ссылки с img...');
       noty('CSS не дал результатов, ищу все ссылки с картинками...');
@@ -515,13 +522,10 @@
           source:  NAME,
         });
       });
-
       log('parsePlaylist → Стратегия 3 извлечено:', cards.length);
     }
 
-    // ----------------------------------------------------------
-    // [1.1.0] Дамп структуры для отладки если ничего не найдено
-    // ----------------------------------------------------------
+    // Дамп структуры если ничего не найдено
     if (!cards.length) {
       warn('parsePlaylist → НИ ОДНА СТРАТЕГИЯ НЕ СРАБОТАЛА');
       notyError('Карточки не найдены! Смотрите консоль.');
@@ -534,9 +538,7 @@
         var children = doc.body.children;
         for (var c = 0; c < Math.min(children.length, 20); c++) {
           topClasses.push({
-            tag:     children[c].tagName,
-            id:      children[c].id || '',
-            classes: children[c].className || '',
+            tag: children[c].tagName, id: children[c].id || '', classes: children[c].className || '',
           });
         }
       }
@@ -606,7 +608,6 @@
 
   // ----------------------------------------------------------
   // [1.0.0] ПОЛУЧЕНИЕ ПРЯМЫХ ССЫЛОК
-  // [1.1.0] Подробное логирование
   // ----------------------------------------------------------
   function getStreamLinks(videoPageUrl, success, error) {
     log('getStreamLinks → загрузка страницы видео:', videoPageUrl);
@@ -616,10 +617,10 @@
       log('getStreamLinks → HTML получен, длина:', html.length);
 
       var qualitys = {};
-
-      // Стратегия 1: src="..." type="video/mp4" size="..."
       var sizes = ['1080', '720', '480', '360', '240'];
       var si;
+
+      // Стратегия 1: src="..." type="video/mp4" size="..."
       for (si = 0; si < sizes.length; si++) {
         var size = sizes[si];
         var m = html.match(new RegExp('src="([^"]+)"\\s+type="video/mp4"\\s+size="' + size + '"'));
@@ -648,13 +649,13 @@
       // Стратегия 3: JSON sources: [...]
       if (!Object.keys(qualitys).length) {
         log('getStreamLinks → Стратегия 3: JSON sources...');
-        var jsonMatch = html.match(/sources\s*[:=]\s*($[\s\S]*?$)/);
+        var jsonMatch = html.match(/sources\s*[:=]\s*(\[[\s\S]*?\])/);
         if (jsonMatch) {
           try {
             var sources = JSON.parse(jsonMatch[1].replace(/'/g, '"'));
             for (var j = 0; j < sources.length; j++) {
-              var src   = sources[j];
-              var label = (src.label || src.size || src.quality || 'auto').toString().replace(/\s/g, '');
+              var src    = sources[j];
+              var label  = (src.label || src.size || src.quality || 'auto').toString().replace(/\s/g, '');
               var srcUrl = src.file || src.src || src.url || '';
               if (srcUrl) qualitys[label] = srcUrl;
             }
@@ -727,7 +728,6 @@
 
   // ----------------------------------------------------------
   // [1.0.0] МЕНЮ ФИЛЬТРА
-  // [1.1.1] Заменены .find() на arrayFind()
   // ----------------------------------------------------------
   function parseState(url) {
     var sort = '', cat = '', search = '';
@@ -770,11 +770,7 @@
         playlist_url: HOST + '/' + SORTS[i].urlTpl.replace('{page}', '1'),
       });
     }
-    items.push({
-      title:        'Сортировка: ' + sortObj.title,
-      playlist_url: 'submenu',
-      submenu:      sortSubmenu,
-    });
+    items.push({ title: 'Сортировка: ' + sortObj.title, playlist_url: 'submenu', submenu: sortSubmenu });
 
     var catSubmenu = [];
     for (var j = 0; j < CATS.length; j++) {
@@ -783,19 +779,13 @@
         playlist_url: HOST + '/' + CATS[j].val + '/page1/',
       });
     }
-    items.push({
-      title:        'Категория: ' + (catObj ? catObj.title : 'Все'),
-      playlist_url: 'submenu',
-      submenu:      catSubmenu,
-    });
+    items.push({ title: 'Категория: ' + (catObj ? catObj.title : 'Все'), playlist_url: 'submenu', submenu: catSubmenu });
 
     return items;
   }
 
   // ----------------------------------------------------------
   // [1.0.0] ПУБЛИЧНЫЙ ИНТЕРФЕЙС
-  // [1.1.0] Логирование входа/выхода каждого метода
-  // [1.1.2] Заменён JSON.stringify(params) на safeParams(params)
   // ----------------------------------------------------------
   var BrizParser = {
 
@@ -813,12 +803,7 @@
         }
         log('main() → успех, карточек:', results.length);
         notySuccess('Главная: ' + results.length + ' видео');
-        success({
-          results:     results,
-          collection:  true,
-          total_pages: 30,
-          menu:        buildMenu(HOST),
-        });
+        success({ results: results, collection: true, total_pages: 30, menu: buildMenu(HOST) });
       }, function (e) {
         err('main() → ошибка загрузки:', e);
         notyError('Главная: ошибка загрузки');
@@ -899,13 +884,12 @@
 
   // ----------------------------------------------------------
   // [1.0.0] РЕГИСТРАЦИЯ
-  // [1.1.1] Исправлена ссылка на несуществующую переменную Parsers
   // ----------------------------------------------------------
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, BrizParser);
-      log('v1.2.0 зарегистрирован OK');
-      notySuccess('Парсер PornoBriz v1.2.0 загружен');
+      log('v1.3.0 зарегистрирован OK');
+      notySuccess('Парсер PornoBriz v1.3.0 загружен');
       return true;
     }
     log('AdultPlugin ещё не доступен, жду...');
