@@ -10,13 +10,12 @@
 //   [1.3.0] Добавлен централизованный AdultPlugin.networkRequest()
 //   [1.3.0] Обработка HTTP 403 от Worker + тихий fallback
 //   [1.4.0] URL воркера — жёсткая константа WORKER_DEFAULT
-//   [1.5.0] BUGFIX: добавлен явный таймаут 9с для Lampa.Network.native
-//           (без него Android Lampa ждёт 30с перед переходом к Reguest)
-//   [1.5.0] Расширенное логирование сетевого слоя:
-//           - метка времени старта/финиша каждого уровня
-//           - длина полученного HTML
-//           - причина отказа каждого уровня (код + сообщение)
-//           - Noty с прогрессом: «Native...» / «Reguest...» / «Fetch...»
+//   [1.5.0] BUGFIX: таймаут native 9с, расширенные логи
+//   [1.5.1] BUGFIX: полифиллы Array.find/findIndex в AdultJS.js
+//           (старые Android WebView не имеют этих методов → SS.js:808 crash)
+//   [1.5.1] BUGFIX: null-guard на comp.render() в View.create —
+//           если build() не создал DOM, .find() на undefined → crash
+//   [1.5.1] BUGFIX: filterMenu.find() заменён на явный цикл
 // GitHub   : https://denis-tikhonov.github.io/plug/
 // =============================================================
 
@@ -30,7 +29,28 @@
   //         Менять здесь вручную, поле Settings удалено.
   // ----------------------------------------------------------
   var PLUGIN_ID      = 'adult_lampac';
-  var PLUGIN_VERSION = '1.5.0';
+  var PLUGIN_VERSION = '1.5.1';
+
+  // ----------------------------------------------------------
+  // [1.5.1] ПОЛИФИЛЛЫ — старые Android WebView не имеют
+  //         Array.prototype.find и иногда Array.prototype.filter
+  // ----------------------------------------------------------
+  if (!Array.prototype.find) {
+    Array.prototype.find = function (fn) {
+      for (var i = 0; i < this.length; i++) {
+        if (fn(this[i], i, this)) return this[i];
+      }
+      return undefined;
+    };
+  }
+  if (!Array.prototype.findIndex) {
+    Array.prototype.findIndex = function (fn) {
+      for (var i = 0; i < this.length; i++) {
+        if (fn(this[i], i, this)) return i;
+      }
+      return -1;
+    };
+  }
   var GITHUB_BASE    = 'https://denis-tikhonov.github.io/plug/';
   var MENU_URL       = GITHUB_BASE + 'menu.json';
   var READY_FLAG     = 'plugin_' + PLUGIN_ID + '_ready';
@@ -38,7 +58,7 @@
   // [1.4.0] URL Cloudflare Worker — менять здесь, не в Settings.
   // Должен заканчиваться на '?url=' или '&url='.
   // Пример: 'https://zonaproxy.777b737.workers.dev/?url='
-  var WORKER_DEFAULT = 'https://zonaproxy.777b737.workers.dev/?url=';
+  var WORKER_DEFAULT = 'https://ВАШ-WORKER.ВАШ-АККАУНТ.workers.dev/?url=';
 
   // [1.0.0] Все ключи Lampa.Storage — для сброса
   var STORAGE_KEYS = [
@@ -805,7 +825,11 @@
           });
         }
         _this.build(data);
-        comp.render().find('.category-full').addClass('mapping--grid cols--3');
+        // [1.5.1] BUGFIX: comp.render() возвращает undefined если build()
+        // не отработал (пустые results или ошибка структуры данных).
+        // Добавляем null-guard чтобы избежать Cannot read .find of undefined
+        var rendered = comp.render();
+        if (rendered) rendered.find('.category-full').addClass('mapping--grid cols--3');
         if (!data.results.length && object.url === 'local://bookmarks') {
           Lampa.Noty.show(Lampa.Lang.translate('adult_bm_empty'), { time: 8000 });
         }
@@ -828,8 +852,14 @@
 
     comp.filter = function () {
       if (!filterMenu) return;
-      var items  = filterMenu.filter(function (m) { return !m.search_on; });
-      var search = filterMenu.find(function (m)   { return  m.search_on; });
+      // [1.5.1] BUGFIX: filterMenu.find() падает на старых Android WebView
+      // (нет Array.prototype.find). Используем явный цикл.
+      var items  = [];
+      var search = null;
+      for (var fi = 0; fi < filterMenu.length; fi++) {
+        if (filterMenu[fi].search_on) search = filterMenu[fi];
+        else items.push(filterMenu[fi]);
+      }
       if (!search) search = object.search_start;
       if (!items.length && !search) return;
 
