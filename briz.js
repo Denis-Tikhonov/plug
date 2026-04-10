@@ -1,6 +1,6 @@
 // =============================================================
 // briz.js — Парсер PornoBriz для AdultJS / AdultPlugin (Lampa)
-// Version  : 1.1.2
+// Version  : 1.2.0
 // Changed  : [1.0.0] Первая версия.
 //            [1.1.0] Добавлено подробное логирование через Lampa.Noty
 //            [1.1.1] Исправлена ReferenceError на Parsers в блоке регистрации
@@ -8,15 +8,33 @@
 //            [1.1.1] Заменены NodeList.forEach на Array.prototype.forEach.call
 //            [1.1.2] Исправлена ошибка Converting circular structure to JSON
 //                    JSON.stringify(params) заменён на безопасное логирование
+//            [1.2.0] Интеграция Lampa.Network.native + Cloudflare Worker
+//                    Приоритетная цепочка: native → Reguest → fetch
+//                    Поддержка централизованного window.AdultPlugin.networkRequest
+//                    Добавлена функция _nativeRequest()
+//                    URL запросов проксируются через Cloudflare Worker
 // =============================================================
 
 (function () {
   'use strict';
 
-  var HOST = 'https://pornobriz.com';
-  var NAME = 'briz';
-  var TAG  = '[briz]';
+  var HOST      = 'https://pornobriz.com';
+  var NAME      = 'briz';
+  var TAG       = '[briz]';
   var NOTY_TIME = 3000;
+
+  // ----------------------------------------------------------
+  // [1.2.0] URL Cloudflare Worker
+  // Приоритет: AdultPlugin.workerUrl → константа по умолчанию
+  // ----------------------------------------------------------
+  var WORKER_DEFAULT = 'https://ВАШ-WORKER.ВАШ-АККАУНТ.workers.dev/?url=';
+
+  function getWorkerUrl() {
+    if (window.AdultPlugin && window.AdultPlugin.workerUrl) {
+      return window.AdultPlugin.workerUrl;
+    }
+    return WORKER_DEFAULT;
+  }
 
   // ----------------------------------------------------------
   // [1.1.1] ПОЛИФИЛЛЫ для старых WebView
@@ -113,57 +131,148 @@
   }
 
   // ----------------------------------------------------------
-  // [1.0.0] HTTP
-  // [1.1.0] Логирование каждого этапа
+  // [1.2.0] СЕТЕВОЙ СЛОЙ
+  //
+  // Приоритетная цепочка запросов:
+  //
+  //   1. window.AdultPlugin.networkRequest()
+  //      — централизованный метод из AdultJS.js (если доступен)
+  //      — уже содержит логику native + Worker внутри себя
+  //
+  //   2. _nativeRequest()
+  //      — Lampa.Network.native через Cloudflare Worker
+  //      — работает на уровне нативного приложения, без CORS
+  //
+  //   3. _requestionRequest()
+  //      — Lampa.Reguest (стандартный метод Lampa)
+  //      — прямой запрос, без Worker
+  //
+  //   4. _fetchRequest()
+  //      — браузерный fetch()
+  //      — последний резерв, может падать из-за CORS
+  //
   // ----------------------------------------------------------
-  function httpGet(url, success, error) {
-    log('httpGet → запрос:', url);
-    noty('Загрузка: ' + url.substring(0, 60) + '...');
+
+  // ----------------------------------------------------------
+  // [1.2.0] Уровень 1: Lampa.Network.native через Cloudflare Worker
+  //
+  // Lampa.Network.native отправляет запрос через нативную
+  // оболочку приложения (OKHttp на Android, NSURLSession на iOS),
+  // полностью минуя WebView и его CORS-ограничения.
+  // Cloudflare Worker добавляет второй слой: подменяет заголовки
+  // Origin/Referer на стороне сервера, исключая блокировку
+  // на уровне целевого сайта.
+  // ----------------------------------------------------------
+  function _nativeRequest(url, success, error) {
+    if (typeof Lampa === 'undefined' ||
+        !Lampa.Network ||
+        typeof Lampa.Network.native !== 'function') {
+      log('_nativeRequest → Lampa.Network.native недоступен, пропускаем');
+      error('native_unavailable');
+      return;
+    }
+
+    var workerUrl = getWorkerUrl();
+    var fullPath  = workerUrl + encodeURIComponent(url);
+
+    log('_nativeRequest → запрос через Worker:', fullPath.substring(0, 120));
+    noty('Native → Worker: ' + url.substring(0, 50) + '...');
+
+    try {
+      Lampa.Network.native(
+        fullPath,
+
+        // Успех
+        function (result) {
+          // native может вернуть строку или уже распарсенный объект
+          var text = (typeof result === 'string') ? result : JSON.stringify(result);
+
+          if (text && text.length > 50) {
+            log('_nativeRequest → OK, длина:', text.length);
+            notySuccess('Native OK (' + text.length + ' символов)');
+            success(text);
+          } else {
+            warn('_nativeRequest → слишком мало данных:', (text || '').length);
+            error('native_empty_response');
+          }
+        },
+
+        // Ошибка
+        function (e) {
+          warn('_nativeRequest → ошибка:', e);
+          notyError('Native ошибка: ' + (e || 'неизвестно'));
+          error(e || 'native_error');
+        },
+
+        // Четвёртый параметр native: withCredentials = false
+        false,
+
+        // Пятый параметр native: доп. опции / заголовки
+        {
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+        }
+      );
+    } catch (ex) {
+      err('_nativeRequest → исключение:', ex.message);
+      notyError('Native исключение: ' + ex.message);
+      error(ex.message);
+    }
+  }
+
+  // ----------------------------------------------------------
+  // [1.2.0] Уровень 2: Lampa.Reguest (прямой запрос)
+  // ----------------------------------------------------------
+  function _requestionRequest(url, success, error) {
+    log('_requestionRequest → запрос:', url);
+    noty('Reguest: ' + url.substring(0, 50) + '...');
 
     try {
       var net = new Lampa.Reguest();
       net.silent(
         url,
         function (data) {
-          if (typeof data === 'string' && data.length > 50) {
-            log('httpGet → Lampa.Reguest OK, длина:', data.length);
-            notySuccess('Reguest OK (' + data.length + ' символов)');
-            success(data);
+          var text = (typeof data === 'string') ? data : '';
+          if (text.length > 50) {
+            log('_requestionRequest → OK, длина:', text.length);
+            notySuccess('Reguest OK (' + text.length + ' символов)');
+            success(text);
           } else {
-            warn('httpGet → Lampa.Reguest вернул мало данных, длина:', (data || '').length);
-            noty('Reguest: мало данных (' + (data || '').length + '), пробую fetch...');
-            _fallback(url, success, error);
+            warn('_requestionRequest → мало данных:', text.length);
+            error('reguest_empty_response');
           }
         },
         function (e) {
-          warn('httpGet → Lampa.Reguest ошибка:', e);
-          noty('Reguest ошибка, пробую fetch...');
-          _fallback(url, success, error);
+          warn('_requestionRequest → ошибка:', e);
+          error(e || 'reguest_error');
         },
         false,
         { dataType: 'text', timeout: 12000 }
       );
-    } catch (e) {
-      err('httpGet → исключение Lampa.Reguest:', e.message);
-      notyError('Исключение Reguest: ' + e.message);
-      _fallback(url, success, error);
+    } catch (ex) {
+      err('_requestionRequest → исключение:', ex.message);
+      error(ex.message);
     }
   }
 
-  function _fallback(url, success, error) {
+  // ----------------------------------------------------------
+  // [1.2.0] Уровень 3: браузерный fetch() (последний резерв)
+  // ----------------------------------------------------------
+  function _fetchRequest(url, success, error) {
     if (typeof fetch === 'undefined') {
-      err('_fallback → fetch недоступен');
-      notyError('fetch недоступен в этом окружении');
-      error('fetch unavailable');
+      err('_fetchRequest → fetch недоступен в этом окружении');
+      notyError('fetch недоступен');
+      error('fetch_unavailable');
       return;
     }
 
-    log('_fallback → пробую fetch:', url);
-    noty('Fetch: ' + url.substring(0, 60) + '...');
+    log('_fetchRequest → запрос:', url);
+    noty('Fetch: ' + url.substring(0, 50) + '...');
 
     fetch(url, { method: 'GET' })
       .then(function (r) {
-        log('_fallback → fetch статус:', r.status);
+        log('_fetchRequest → статус:', r.status);
         if (!r.ok) {
           notyError('Fetch HTTP ' + r.status);
           throw new Error('HTTP ' + r.status);
@@ -171,15 +280,76 @@
         return r.text();
       })
       .then(function (text) {
-        log('_fallback → fetch OK, длина:', text.length);
+        log('_fetchRequest → OK, длина:', text.length);
         notySuccess('Fetch OK (' + text.length + ' символов)');
         success(text);
       })
       .catch(function (e) {
-        err('_fallback → fetch ошибка:', e.message || e);
+        err('_fetchRequest → ошибка:', e.message || e);
         notyError('Fetch ошибка: ' + (e.message || e));
         error(e);
       });
+  }
+
+  // ----------------------------------------------------------
+  // [1.2.0] httpGet — главная точка входа для всех запросов
+  //
+  // Логика запуска цепочки:
+  //   Если AdultPlugin.networkRequest доступен — делегируем ему
+  //   (он уже содержит native + Worker логику).
+  //   Иначе — запускаем собственную цепочку парсера.
+  // ----------------------------------------------------------
+  function httpGet(url, success, error) {
+    log('httpGet → URL:', url);
+
+    // ----------------------------------------------------------
+    // Приоритет 0: централизованный метод из AdultJS.js
+    // window.AdultPlugin.networkRequest() содержит всю логику
+    // native+Worker и доступен после загрузки AdultJS.
+    // Парсер просто делегирует ему управление.
+    // ----------------------------------------------------------
+    if (window.AdultPlugin &&
+        typeof window.AdultPlugin.networkRequest === 'function') {
+      log('httpGet → используем централизованный AdultPlugin.networkRequest');
+      window.AdultPlugin.networkRequest(url, success, error, { type: 'html' });
+      return;
+    }
+
+    // ----------------------------------------------------------
+    // Приоритет 1: Lampa.Network.native через Cloudflare Worker
+    // ----------------------------------------------------------
+    log('httpGet → уровень 1: Lampa.Network.native + Worker');
+    _nativeRequest(url,
+      function (text) {
+        success(text);
+      },
+      function () {
+        // ----------------------------------------------------------
+        // Приоритет 2: Lampa.Reguest (прямой запрос)
+        // ----------------------------------------------------------
+        warn('httpGet → native не сработал, уровень 2: Lampa.Reguest');
+        noty('Native не сработал, пробую Reguest...');
+
+        _requestionRequest(url,
+          function (text) {
+            success(text);
+          },
+          function () {
+            // ----------------------------------------------------------
+            // Приоритет 3: fetch() (последний резерв)
+            // ----------------------------------------------------------
+            warn('httpGet → Reguest не сработал, уровень 3: fetch');
+            noty('Reguest не сработал, пробую fetch...');
+
+            _fetchRequest(url, success, function (e) {
+              err('httpGet → все методы исчерпаны для:', url);
+              notyError('Все методы запроса исчерпаны!');
+              error(e || 'all_methods_failed');
+            });
+          }
+        );
+      }
+    );
   }
 
   // ----------------------------------------------------------
@@ -187,9 +357,9 @@
   // [1.1.0] Логирование
   // ----------------------------------------------------------
   var SORTS = [
-    { title: 'Новинки',      val: '',    urlTpl: 'new/page{page}/'  },
-    { title: 'Топ рейтинга', val: 'top', urlTpl: 'top/page{page}/'  },
-    { title: 'Популярное',   val: 'best',urlTpl: 'best/page{page}/' },
+    { title: 'Новинки',      val: '',     urlTpl: 'new/page{page}/'  },
+    { title: 'Топ рейтинга', val: 'top',  urlTpl: 'top/page{page}/'  },
+    { title: 'Популярное',   val: 'best', urlTpl: 'best/page{page}/' },
   ];
 
   var CATS = [
@@ -297,8 +467,8 @@
         if (els.length > 0) {
           noty('CSS "' + sel + '": найдено ' + els.length + ' элементов');
           forEachNode(els, function (nodeEl) {
-            var card = _extractCard(nodeEl);
-            if (card) cards.push(card);
+            var c = _extractCard(nodeEl);
+            if (c) cards.push(c);
           });
           if (cards.length > 0) {
             log('parsePlaylist → CSS "' + sel + '" извлечено карточек:', cards.length);
@@ -309,7 +479,7 @@
     }
 
     // ----------------------------------------------------------
-    // Стратегия 3: Поиск всех ссылок с изображениями (последний fallback)
+    // Стратегия 3: все ссылки с изображениями (последний fallback)
     // ----------------------------------------------------------
     if (!cards.length) {
       log('parsePlaylist → Стратегия 3: все ссылки с img...');
@@ -328,7 +498,9 @@
         var name = a.getAttribute('title') || (a.textContent || '').trim().substring(0, 80);
         if (!name || name.length < 3) return;
 
-        var picture = img.getAttribute('data-original') || img.getAttribute('data-src') || img.getAttribute('src') || '';
+        var picture = img.getAttribute('data-original') ||
+                      img.getAttribute('data-src')      ||
+                      img.getAttribute('src')            || '';
 
         cards.push({
           name:    name,
@@ -404,12 +576,15 @@
 
     var imgEl   = el.querySelector('img');
     var picture = imgEl
-      ? (imgEl.getAttribute('data-original') || imgEl.getAttribute('data-src') || imgEl.getAttribute('src') || '')
+      ? (imgEl.getAttribute('data-original') ||
+         imgEl.getAttribute('data-src')      ||
+         imgEl.getAttribute('src')            || '')
       : '';
 
     var vidEl   = el.querySelector('video');
     var preview = vidEl
-      ? (vidEl.getAttribute('data-preview') || vidEl.getAttribute('src') || '')
+      ? (vidEl.getAttribute('data-preview') ||
+         vidEl.getAttribute('src')           || '')
       : '';
 
     var durEl = el.querySelector('.duration, .time, .dur');
@@ -442,9 +617,7 @@
 
       var qualitys = {};
 
-      // ----------------------------------------------------------
       // Стратегия 1: src="..." type="video/mp4" size="..."
-      // ----------------------------------------------------------
       var sizes = ['1080', '720', '480', '360', '240'];
       var si;
       for (si = 0; si < sizes.length; si++) {
@@ -452,15 +625,11 @@
         var m = html.match(new RegExp('src="([^"]+)"\\s+type="video/mp4"\\s+size="' + size + '"'));
         if (m && m[1]) {
           qualitys[size + 'p'] = m[1];
-          log('getStreamLinks → Стратегия 1: найдено ' + size + 'p:', m[1].substring(0, 80));
+          log('getStreamLinks → Стратегия 1: ' + size + 'p:', m[1].substring(0, 80));
         }
       }
 
-      log('getStreamLinks → Стратегия 1 результат:', Object.keys(qualitys).length + ' качеств');
-
-      // ----------------------------------------------------------
-      // Стратегия 2: source с атрибутами в любом порядке
-      // ----------------------------------------------------------
+      // Стратегия 2: атрибуты source в любом порядке
       if (!Object.keys(qualitys).length) {
         log('getStreamLinks → Стратегия 2: source теги...');
         for (si = 0; si < sizes.length; si++) {
@@ -473,21 +642,18 @@
           m2 = html.match(new RegExp('res="' + size2 + '"[^>]*src="([^"]+)"'));
           if (m2 && m2[1]) { qualitys[size2 + 'p'] = m2[1]; }
         }
-        log('getStreamLinks → Стратегия 2 результат:', Object.keys(qualitys).length + ' качеств');
+        log('getStreamLinks → Стратегия 2:', Object.keys(qualitys).length + ' качеств');
       }
 
-      // ----------------------------------------------------------
-      // Стратегия 3: JSON в скрипте (sources: [...])
-      // ----------------------------------------------------------
+      // Стратегия 3: JSON sources: [...]
       if (!Object.keys(qualitys).length) {
         log('getStreamLinks → Стратегия 3: JSON sources...');
-        var jsonMatch = html.match(/sources\s*[:=]\s*(\[[\s\S]*?\])/);
+        var jsonMatch = html.match(/sources\s*[:=]\s*($[\s\S]*?$)/);
         if (jsonMatch) {
-          log('getStreamLinks → найден массив sources:', jsonMatch[1].substring(0, 200));
           try {
             var sources = JSON.parse(jsonMatch[1].replace(/'/g, '"'));
             for (var j = 0; j < sources.length; j++) {
-              var src = sources[j];
+              var src   = sources[j];
               var label = (src.label || src.size || src.quality || 'auto').toString().replace(/\s/g, '');
               var srcUrl = src.file || src.src || src.url || '';
               if (srcUrl) qualitys[label] = srcUrl;
@@ -496,43 +662,36 @@
             warn('getStreamLinks → JSON parse ошибка:', e.message);
           }
         }
-        log('getStreamLinks → Стратегия 3 результат:', Object.keys(qualitys).length + ' качеств');
+        log('getStreamLinks → Стратегия 3:', Object.keys(qualitys).length + ' качеств');
       }
 
-      // ----------------------------------------------------------
       // Стратегия 4: любые .mp4 ссылки
-      // ----------------------------------------------------------
       if (!Object.keys(qualitys).length) {
-        log('getStreamLinks → Стратегия 4: все .mp4 ссылки...');
+        log('getStreamLinks → Стратегия 4: все .mp4...');
         var reMp4 = /["'](https?:\/\/[^"'\s]+\.mp4[^"'\s]*)/g;
         var m4, idx4 = 0;
         while ((m4 = reMp4.exec(html)) !== null && idx4 < 5) {
           qualitys['auto' + (idx4 || '')] = m4[1];
-          log('getStreamLinks → найден mp4 #' + idx4 + ':', m4[1].substring(0, 80));
           idx4++;
         }
-        log('getStreamLinks → Стратегия 4 результат:', Object.keys(qualitys).length + ' ссылок');
+        log('getStreamLinks → Стратегия 4:', Object.keys(qualitys).length + ' ссылок');
       }
 
-      // ----------------------------------------------------------
-      // Стратегия 5: .m3u8 ссылки (HLS)
-      // ----------------------------------------------------------
+      // Стратегия 5: .m3u8 (HLS)
       if (!Object.keys(qualitys).length) {
-        log('getStreamLinks → Стратегия 5: .m3u8 ссылки...');
+        log('getStreamLinks → Стратегия 5: m3u8...');
         var reHls = /["'](https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/g;
         var m5 = reHls.exec(html);
         if (m5) {
           qualitys['HLS'] = m5[1];
-          log('getStreamLinks → найден m3u8:', m5[1].substring(0, 80));
+          log('getStreamLinks → m3u8:', m5[1].substring(0, 80));
         }
-        log('getStreamLinks → Стратегия 5 результат:', Object.keys(qualitys).length + ' ссылок');
+        log('getStreamLinks → Стратегия 5:', Object.keys(qualitys).length + ' ссылок');
       }
 
-      // ----------------------------------------------------------
-      // Итог
-      // ----------------------------------------------------------
-      var keys = Object.keys(qualitys);
+      var keys  = Object.keys(qualitys);
       var count = keys.length;
+
       if (!count) {
         err('getStreamLinks → НИ ОДНА СТРАТЕГИЯ НЕ НАШЛА ССЫЛОК');
         notyError('Нет mp4/m3u8 ссылок на странице видео!');
@@ -543,11 +702,8 @@
         var videoMatches = html.match(/<video[^>]*>[\s\S]*?<\/video>/gi) || [];
         warn('getStreamLinks → <video> блоки (' + videoMatches.length + '):', videoMatches.slice(0, 2));
 
-        var mp4Mentions = (html.match(/mp4/gi) || []).length;
-        warn('getStreamLinks → упоминаний "mp4" в HTML:', mp4Mentions);
-
-        var hlsMentions = (html.match(/m3u8/gi) || []).length;
-        warn('getStreamLinks → упоминаний "m3u8" в HTML:', hlsMentions);
+        warn('getStreamLinks → упоминаний "mp4":', (html.match(/mp4/gi) || []).length);
+        warn('getStreamLinks → упоминаний "m3u8":', (html.match(/m3u8/gi) || []).length);
 
         error('PornoBriz: нет mp4/m3u8');
         return;
@@ -561,6 +717,7 @@
       }
 
       success({ qualitys: qualitys });
+
     }, function (e) {
       err('getStreamLinks → ошибка загрузки страницы:', e);
       notyError('Ошибка загрузки страницы видео');
@@ -595,7 +752,7 @@
       }
     }
 
-    log('parseState → url=' + url + ' sort=' + sort + ' cat=' + cat + ' search=' + search);
+    log('parseState → sort=' + sort + ' cat=' + cat + ' search=' + search);
     return { sort: sort, cat: cat, search: search };
   }
 
@@ -613,7 +770,6 @@
         playlist_url: HOST + '/' + SORTS[i].urlTpl.replace('{page}', '1'),
       });
     }
-
     items.push({
       title:        'Сортировка: ' + sortObj.title,
       playlist_url: 'submenu',
@@ -627,7 +783,6 @@
         playlist_url: HOST + '/' + CATS[j].val + '/page1/',
       });
     }
-
     items.push({
       title:        'Категория: ' + (catObj ? catObj.title : 'Все'),
       playlist_url: 'submenu',
@@ -658,7 +813,12 @@
         }
         log('main() → успех, карточек:', results.length);
         notySuccess('Главная: ' + results.length + ' видео');
-        success({ results: results, collection: true, total_pages: 30, menu: buildMenu(HOST) });
+        success({
+          results:     results,
+          collection:  true,
+          total_pages: 30,
+          menu:        buildMenu(HOST),
+        });
       }, function (e) {
         err('main() → ошибка загрузки:', e);
         notyError('Главная: ошибка загрузки');
@@ -744,8 +904,8 @@
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, BrizParser);
-      log('v1.1.2 зарегистрирован OK');
-      notySuccess('Парсер PornoBriz v1.1.2 загружен');
+      log('v1.2.0 зарегистрирован OK');
+      notySuccess('Парсер PornoBriz v1.2.0 загружен');
       return true;
     }
     log('AdultPlugin ещё не доступен, жду...');
