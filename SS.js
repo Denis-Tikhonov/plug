@@ -1,6 +1,6 @@
 // =============================================================
 // AdultJS.js — Lampa Adult Plugin
-// Version  : 1.5.1
+// Version  : 1.5.0
 // Changed  :
 //   [1.0.0] Полный рефакторинг с ab2024.ru → GitHub Pages
 //   [1.0.0] Убраны: RCH, история, лицензионные проверки
@@ -11,11 +11,12 @@
 //   [1.3.0] Обработка HTTP 403 от Worker + тихий fallback
 //   [1.4.0] URL воркера — жёсткая константа WORKER_DEFAULT
 //   [1.5.0] BUGFIX: таймаут native 9с, расширенные логи
-//   [1.5.1] BUGFIX: полифиллы Array.find/findIndex в AdultJS.js
-//           (старые Android WebView не имеют этих методов → SS.js:808 crash)
-//   [1.5.1] BUGFIX: null-guard на comp.render() в View.create —
-//           если build() не создал DOM, .find() на undefined → crash
-//   [1.5.1] BUGFIX: filterMenu.find() заменён на явный цикл
+//   [1.5.1] BUGFIX: полифиллы Array.find/findIndex
+//   [1.5.1] BUGFIX: null-guard comp.render(), filterMenu.find → цикл
+//   [1.5.2] BUGFIX: parserName из полного URL (было: 'https:' → грузил https.js)
+//           domainMap: pornobriz.com→briz, eporner.com→eporner и др.
+//   [1.5.2] BUGFIX: Bookmarks._load() — защита от не-массива из Storage
+//           (при удержании OK падало с cannot read .some of undefined)
 // GitHub   : https://denis-tikhonov.github.io/plug/
 // =============================================================
 
@@ -29,7 +30,7 @@
   //         Менять здесь вручную, поле Settings удалено.
   // ----------------------------------------------------------
   var PLUGIN_ID      = 'adult_lampac';
-  var PLUGIN_VERSION = '1.5.1';
+  var PLUGIN_VERSION = '1.5.2';
 
   // ----------------------------------------------------------
   // [1.5.1] ПОЛИФИЛЛЫ — старые Android WebView не имеют
@@ -58,7 +59,7 @@
   // [1.4.0] URL Cloudflare Worker — менять здесь, не в Settings.
   // Должен заканчиваться на '?url=' или '&url='.
   // Пример: 'https://zonaproxy.777b737.workers.dev/?url='
-  var WORKER_DEFAULT = 'https://zonaproxy.777b737.workers.dev/?url=';
+  var WORKER_DEFAULT = 'https://ВАШ-WORKER.ВАШ-АККАУНТ.workers.dev/?url=';
 
   // [1.0.0] Все ключи Lampa.Storage — для сброса
   var STORAGE_KEYS = [
@@ -94,15 +95,24 @@
 
   // ----------------------------------------------------------
   // [1.0.0] ЗАКЛАДКИ
+  // [1.5.1] BUGFIX: _load() защищён от не-массива из Storage
+  //         (Storage.get может вернуть null/object → .some() падало)
   // ----------------------------------------------------------
   var Bookmarks = {
     _key: 'adult_bookmarks_list',
 
-    _load: function () { return Lampa.Storage.get(this._key, []); },
+    _load: function () {
+      var v = Lampa.Storage.get(this._key, []);
+      // [1.5.1] Защита: если Storage вернул не массив — возвращаем []
+      return Array.isArray ? (Array.isArray(v) ? v : []) : (v && v.length !== undefined ? v : []);
+    },
     _save: function (list) { Lampa.Storage.set(this._key, list); },
     all:   function () { return this._load(); },
     has:   function (element) {
-      return this._load().some(function (b) { return b.video === element.video; });
+      if (!element || !element.video) return false;
+      try {
+        return this._load().some(function (b) { return b.video === element.video; });
+      } catch(e) { return false; }
     },
     add: function (element) {
       var list = this._load();
@@ -636,7 +646,31 @@
         return;
       }
 
-      var parserName = url.replace(GITHUB_BASE, '').split('?')[0].split('/')[0];
+      // [1.5.1] BUGFIX: parserName из полного URL
+      // Раньше: 'https://pornobriz.com/anal/'.split('/')[0] = 'https:' → грузил https.js
+      // Теперь: сначала strip GITHUB_BASE, потом проверяем что осталось не URL
+      var parserName;
+      var stripped = url.replace(GITHUB_BASE, '');
+      if (stripped.indexOf('http') === 0 || stripped.indexOf('//') === 0) {
+        // URL не с GitHub Pages — определяем парсер по hostname
+        try {
+          var hostname = new URL(url).hostname.replace('www.', '');
+          // pornobriz.com → 'briz'
+          var domainMap = {
+            'pornobriz.com': 'briz',
+            'eporner.com':   'eporner',
+            'yjizz.com':     'yjizz',
+            'phub.net':      'phub',
+            'xds.com':       'xds',
+          };
+          parserName = domainMap[hostname] || stripped.split('/')[0];
+        } catch(e) {
+          parserName = 'briz';
+        }
+      } else {
+        parserName = stripped.split('?')[0].split('/')[0];
+      }
+
       if (!parserName) { error('Неизвестный источник'); return; }
 
       loadParser(parserName, function (parser) {
@@ -678,7 +712,19 @@
             return;
           }
 
-          var parserName = ch.playlist_url.replace(GITHUB_BASE, '').split('?')[0].split('/')[0];
+          // [1.5.1] BUGFIX: правильное определение парсера по URL
+          var _pn;
+          var _ps = ch.playlist_url.replace(GITHUB_BASE, '');
+          if (_ps.indexOf('http') === 0 || _ps.indexOf('//') === 0) {
+            try {
+              var _hn = new URL(ch.playlist_url).hostname.replace('www.', '');
+              var _dm = { 'pornobriz.com':'briz','eporner.com':'eporner','yjizz.com':'yjizz','phub.net':'phub','xds.com':'xds' };
+              _pn = _dm[_hn] || _ps.split('/')[0];
+            } catch(e2) { _pn = 'briz'; }
+          } else {
+            _pn = _ps.split('?')[0].split('/')[0];
+          }
+          var parserName = _pn;
           loadParser(parserName, function (parser) {
             if (parser.search) {
               parser.search(params, function (data) {
