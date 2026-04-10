@@ -1,9 +1,13 @@
 // =============================================================
 // xv-ru.js — Парсер xv-ru.com для AdultJS / AdultPlugin (Lampa)
-// Version  : 1.1.1
+// Version  : 1.2.0
 // Changed  :
-//   [1.1.1] ДИАГНОСТИКА: логи внутри _extractCard (первые 3 элемента)
-//           ДИАГНОСТИКА: innerHTML первого .thumb в parsePlaylist
+//   [1.2.0] ИСПРАВЛЕНО: name извлекается из slug href (/47061148/she_called_me...)
+//           ИСПРАВЛЕНО: img.alt добавлен как промежуточный fallback для name
+//           ИСПРАВЛЕНО: убрана дублирующая проверка href.indexOf('/video') у fallback aEl
+//           ИСПРАВЛЕНО: Стратегия 3 ищет img в a.parentElement если не нашла внутри a
+//           ИСПРАВЛЕНО: CSS фильтр вложенности через classList.contains вместо indexOf
+//           УБРАНА: диагностика первых 3 элементов (задача выполнена)
 // =============================================================
 
 (function () {
@@ -54,6 +58,37 @@
   function log(msg)  { console.log(TAG, msg); }
   function warn(msg) { console.warn(TAG, msg); }
   function err(msg)  { console.error(TAG, msg); }
+
+  // ----------------------------------------------------------
+  // ПРАВКА 1: slug из href → читаемое название
+  // Пример: /47061148/she_called_me_daddy_so_sweety
+  //       → She Called Me Daddy So Sweety
+  // ----------------------------------------------------------
+  function slugToName(href) {
+    if (!href) return '';
+
+    // Берём последний сегмент пути (после последнего /)
+    // Формат xvideos: /video.xxxxx/12345678/slug_here
+    var m = href.match(/\/(\d+)\/([^\/\?#]+)/);
+    if (!m || !m[2]) {
+      // Запасной: просто последний сегмент
+      var parts = href.replace(/\/$/, '').split('/');
+      m = [null, null, parts[parts.length - 1] || ''];
+    }
+
+    var slug = m[2];
+    if (!slug || slug.length < 3) return '';
+
+    // Заменяем - и _ на пробел, capitalize каждое слово
+    var words = slug.replace(/[-_]+/g, ' ').trim().split(' ');
+    var result = [];
+    for (var i = 0; i < words.length; i++) {
+      var w = words[i];
+      if (!w) continue;
+      result.push(w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+    }
+    return result.join(' ');
+  }
 
   // ----------------------------------------------------------
   // Сетевой слой
@@ -203,85 +238,84 @@
   }
 
   // ----------------------------------------------------------
+  // _hasClass — безопасная проверка наличия класса
+  // ----------------------------------------------------------
+  function _hasClass(el, cls) {
+    if (!el || !el.className) return false;
+    if (el.classList) return el.classList.contains(cls);
+    // fallback для старых движков
+    return (' ' + el.className + ' ').indexOf(' ' + cls + ' ') !== -1;
+  }
+
+  // ----------------------------------------------------------
   // _extractCard
   //
-  // ПРАВКА 1 [1.1.1]: добавлена диагностика для первых 3 элементов.
-  //   Логируем: есть ли aEl, значение href, значение name,
-  //   и на каком именно return null вылетаем.
+  // ПРАВКА 1: name извлекается из slug href если другие способы не дали результат
+  // ПРАВКА 2: img.alt добавлен как промежуточный fallback
+  // ПРАВКА 3: убрана дублирующая проверка href.indexOf('/video') у fallback aEl
   // ----------------------------------------------------------
-  var _extractCallCount = 0; // счётчик вызовов для ограничения лога
-
   function _extractCard(el) {
-    _extractCallCount++;
-    var doLog = _extractCallCount <= 3; // логируем только первые 3
-
-    if (doLog) {
-      warn('_extractCard #' + _extractCallCount + ' -> el.className: ' + (el.className || ''));
-      warn('_extractCard #' + _extractCallCount + ' -> el.innerHTML (первые 400): ' + el.innerHTML.substring(0, 400));
-    }
 
     // Ссылка на видео
     var aEl = el.querySelector('a[href*="/video"]');
+
+    // ПРАВКА 3: если специфичный селектор не нашёл — берём любую a[href]
+    // без повторной проверки на /video (XPath уже гарантирует контекст)
     if (!aEl) aEl = el.querySelector('a[href]');
-
-    if (doLog) {
-      warn('_extractCard #' + _extractCallCount + ' -> aEl: ' + (aEl ? aEl.outerHTML.substring(0, 150) : 'NULL'));
-    }
-
-    if (!aEl) {
-      if (doLog) warn('_extractCard #' + _extractCallCount + ' -> RETURN NULL: aEl не найден');
-      return null;
-    }
+    if (!aEl) return null;
 
     var href = aEl.getAttribute('href') || '';
-
-    if (doLog) {
-      warn('_extractCard #' + _extractCallCount + ' -> href: ' + href);
-    }
-
-    if (!href || href.indexOf('/video') === -1) {
-      if (doLog) warn('_extractCard #' + _extractCallCount + ' -> RETURN NULL: href не содержит /video. href=' + href);
-      return null;
-    }
-
+    if (!href) return null;
     if (href.indexOf('http') !== 0) href = HOST + href;
 
-    // Название
+    // Картинку ищем сразу — нужна для alt fallback названия
+    var imgEl = aEl.querySelector('img') || el.querySelector('img');
+
+    // ----------------------------------------------------------
+    // Название — цепочка источников:
+    //   1. p.title a  (стандарт xvideos)
+    //   2. p.title
+    //   3. a[title] атрибут
+    //   4. любой [title] внутри карточки
+    //   5. ПРАВКА 2: img.alt
+    //   6. ПРАВКА 1: slug из href
+    // ----------------------------------------------------------
     var name = '';
+
     var titleEl = el.querySelector('p.title a') || el.querySelector('p.title');
-    if (titleEl) name = (titleEl.getAttribute('title') || titleEl.textContent || '').trim();
-    if (!name) name = (aEl.getAttribute('title') || '').trim();
+    if (titleEl) {
+      name = (titleEl.getAttribute('title') || titleEl.textContent || '').trim();
+    }
+
+    if (!name) {
+      name = (aEl.getAttribute('title') || '').trim();
+    }
+
     if (!name) {
       var anyTitle = el.querySelector('[title]');
-      if (anyTitle) name = anyTitle.getAttribute('title').trim();
+      if (anyTitle) name = (anyTitle.getAttribute('title') || '').trim();
     }
 
-    if (doLog) {
-      warn('_extractCard #' + _extractCallCount + ' -> titleEl: ' + (titleEl ? titleEl.outerHTML.substring(0, 100) : 'NULL'));
-      warn('_extractCard #' + _extractCallCount + ' -> name итог: "' + name + '"');
+    // ПРАВКА 2: img.alt
+    if (!name && imgEl) {
+      name = (imgEl.getAttribute('alt') || '').trim();
     }
 
+    // ПРАВКА 1: slug из href
     if (!name || name.length < 3) {
-      if (doLog) warn('_extractCard #' + _extractCallCount + ' -> RETURN NULL: name пустой или короткий. name="' + name + '"');
-      return null;
+      name = slugToName(href);
     }
+
+    if (!name || name.length < 3) return null;
 
     // Картинка
-    var imgEl = aEl.querySelector('img') || el.querySelector('img');
     var picture = _getImgSrc(imgEl);
-
-    if (doLog) {
-      warn('_extractCard #' + _extractCallCount + ' -> imgEl: ' + (imgEl ? imgEl.outerHTML.substring(0, 150) : 'NULL'));
-      warn('_extractCard #' + _extractCallCount + ' -> picture: ' + picture);
-    }
 
     // Длительность
     var durEl = el.querySelector('.duration, span.duration, time, .dur');
     var time  = durEl ? (durEl.textContent || '').trim() : '';
 
-    if (doLog) {
-      warn('_extractCard #' + _extractCallCount + ' -> УСПЕХ: name="' + name + '" href=' + href);
-    }
+    log('_extractCard -> OK: "' + name + '" | ' + href);
 
     return {
       name:    name,
@@ -299,15 +333,12 @@
   // ----------------------------------------------------------
   // parsePlaylist
   //
-  // ПРАВКА 2 [1.1.1]: выводим innerHTML первого найденного
-  //   .thumb элемента до начала извлечения карточек.
+  // ПРАВКА 4: Стратегия 3 ищет img в parentElement если нет внутри a
+  // ПРАВКА 5: CSS фильтр вложенности через _hasClass вместо indexOf
   // ----------------------------------------------------------
   function parsePlaylist(html) {
     if (!html) { warn('parsePlaylist -> html пустой'); return []; }
     log('parsePlaylist -> длина HTML: ' + html.length);
-
-    // Сбрасываем счётчик диагностики для каждого нового парсинга
-    _extractCallCount = 0;
 
     var doc;
     try {
@@ -318,31 +349,10 @@
       return [];
     }
 
-    // ----------------------------------------------------------
-    // ПРАВКА 2: Вывод innerHTML первого .thumb ДО любой стратегии
-    // ----------------------------------------------------------
-    var firstThumb = doc.querySelector('.thumb');
-    if (firstThumb) {
-      warn('parsePlaylist -> ДИАГНОСТИКА первый .thumb innerHTML:\n' + firstThumb.innerHTML);
-      warn('parsePlaylist -> ДИАГНОСТИКА первый .thumb className: ' + firstThumb.className);
-      warn('parsePlaylist -> ДИАГНОСТИКА первый .thumb parentElement.className: ' + (firstThumb.parentElement ? firstThumb.parentElement.className : 'нет'));
-    } else {
-      warn('parsePlaylist -> ДИАГНОСТИКА: .thumb не найден через querySelector');
-    }
-
-    // Дополнительно — первый a[href*=/video]
-    var firstVideoLink = doc.querySelector('a[href*="/video"]');
-    if (firstVideoLink) {
-      warn('parsePlaylist -> ДИАГНОСТИКА первый a[href*=video] href: ' + firstVideoLink.getAttribute('href'));
-      warn('parsePlaylist -> ДИАГНОСТИКА первый a[href*=video] outerHTML: ' + firstVideoLink.outerHTML.substring(0, 300));
-      warn('parsePlaylist -> ДИАГНОСТИКА первый a[href*=video] parentElement.className: ' + (firstVideoLink.parentElement ? firstVideoLink.parentElement.className : 'нет'));
-    }
-    // ----------------------------------------------------------
-
     var cards = [];
     var seen  = {};
 
-    // --- Стратегия 1: XPath ---
+    // --- Стратегия 1: XPath (только верхний уровень .thumb) ---
     log('parsePlaylist -> Стратегия 1: XPath...');
     try {
       var xp = "//div[contains(concat(' ',normalize-space(@class),' '),' thumb ') " +
@@ -364,22 +374,26 @@
       warn('parsePlaylist -> XPath ошибка: ' + e.message);
     }
 
-    // --- Стратегия 2: CSS ---
+    // --- Стратегия 2: CSS querySelectorAll ---
     if (!cards.length) {
       log('parsePlaylist -> Стратегия 2: CSS...');
-      var selectors = ['.mozaique .thumb', '.thumb', '.thumbs .thumb', '.video-thumb', '.video-item'];
+      var selectors = [
+        '.mozaique .thumb',
+        '.thumb',
+        '.thumbs .thumb',
+        '.video-thumb',
+        '.video-item',
+      ];
 
       for (var s = 0; s < selectors.length; s++) {
         var els = doc.querySelectorAll(selectors[s]);
         if (!els.length) continue;
         log('parsePlaylist -> CSS "' + selectors[s] + '" найдено: ' + els.length);
 
-        // ПРАВКА 2: дополнительно — innerHTML первого элемента для каждого селектора
-        warn('parsePlaylist -> CSS "' + selectors[s] + '" первый элемент innerHTML: ' + els[0].innerHTML.substring(0, 300));
-
         forEachNode(els, function (el) {
+          // ПРАВКА 5: точная проверка класса через _hasClass
           var parent = el.parentElement;
-          if (parent && parent.className && parent.className.indexOf('thumb') !== -1) return;
+          if (parent && _hasClass(parent, 'thumb')) return;
 
           var c = _extractCard(el);
           if (c && !seen[c.video]) {
@@ -393,21 +407,31 @@
       log('parsePlaylist -> CSS извлечено карточек: ' + cards.length);
     }
 
-    // --- Стратегия 3: a[href*=video] img ---
+    // --- Стратегия 3: a[href*=video] ---
     if (!cards.length) {
       log('parsePlaylist -> Стратегия 3: a[href*=video]...');
       var links = doc.querySelectorAll('a[href*="/video"]');
 
       forEachNode(links, function (a) {
         var href = a.getAttribute('href') || '';
-        if (!href || href.indexOf('/video') === -1) return;
+        if (!href) return;
         if (href.indexOf('http') !== 0) href = HOST + href;
         if (seen[href]) return;
 
+        // ПРАВКА 4: ищем img внутри a, потом в parentElement
         var img = a.querySelector('img');
-        if (!img) return;
+        if (!img && a.parentElement) {
+          img = a.parentElement.querySelector('img');
+        }
 
-        var title = (a.getAttribute('title') || img.getAttribute('alt') || '').trim();
+        // ПРАВКА 1+2: название из alt → slug
+        var title = '';
+        if (img) title = (img.getAttribute('alt') || '').trim();
+        if (!title || title.length < 3) title = slugToName(href);
+        if (a.getAttribute('title')) {
+          var attrTitle = a.getAttribute('title').trim();
+          if (attrTitle.length >= 3) title = attrTitle;
+        }
         if (!title || title.length < 3) return;
 
         var pic = _getImgSrc(img);
@@ -421,15 +445,16 @@
       log('parsePlaylist -> Стратегия 3 извлечено: ' + cards.length);
     }
 
-    // --- Диагностика если ничего не найдено ---
+    // --- Итог ---
     if (!cards.length) {
       warn('parsePlaylist -> НИЧЕГО НЕ НАЙДЕНО');
       warn('parsePlaylist -> div[class*=thumb]: ' + doc.querySelectorAll('div[class*="thumb"]').length);
       warn('parsePlaylist -> a[href*=video]: '    + doc.querySelectorAll('a[href*="/video"]').length);
-      warn('parsePlaylist -> body (первые 300 символов): ' + (doc.body ? doc.body.innerHTML.substring(0, 300) : 'нет body'));
+      warn('parsePlaylist -> body (первые 500): ' + (doc.body ? doc.body.innerHTML.substring(0, 500) : 'нет body'));
     } else {
-      log('parsePlaylist -> первая карточка: ' + cards[0].name + ' | ' + cards[0].video);
-      log('parsePlaylist -> ИТОГО карточек: '  + cards.length);
+      log('parsePlaylist -> первая карточка: "' + cards[0].name + '" | ' + cards[0].video);
+      log('parsePlaylist -> picture[0]: ' + (cards[0].picture || 'пусто'));
+      log('parsePlaylist -> ИТОГО: ' + cards.length);
     }
 
     return cards;
@@ -447,9 +472,9 @@
       var mLow  = html.match(/html5player\.setVideoUrlLow$['"]([^'"]+)['"]$/);
       var mHigh = html.match(/html5player\.setVideoUrlHigh$['"]([^'"]+)['"]$/);
       var mHLS  = html.match(/html5player\.setVideoHLS$['"]([^'"]+)['"]$/);
-      if (mLow  && mLow[1])  { q['480p'] = mLow[1];  log('getStreamLinks -> low: '  + mLow[1].substring(0, 80)); }
-      if (mHigh && mHigh[1]) { q['720p'] = mHigh[1]; log('getStreamLinks -> high: ' + mHigh[1].substring(0, 80)); }
-      if (mHLS  && mHLS[1])  { q['HLS']  = mHLS[1];  log('getStreamLinks -> HLS: '  + mHLS[1].substring(0, 80)); }
+      if (mLow  && mLow[1])  { q['480p'] = mLow[1];  }
+      if (mHigh && mHigh[1]) { q['720p'] = mHigh[1]; }
+      if (mHLS  && mHLS[1])  { q['HLS']  = mHLS[1];  }
 
       if (!Object.keys(q).length) {
         var mL2 = html.match(/"url_low"\s*:\s*"([^"]+)"/);
@@ -477,17 +502,20 @@
       var keys = Object.keys(q);
       if (!keys.length) {
         err('getStreamLinks -> ссылки не найдены');
-        warn('getStreamLinks -> html5player упоминаний: ' + (html.match(/html5player/gi) || []).length);
-        warn('getStreamLinks -> mp4 упоминаний: '         + (html.match(/\.mp4/gi)       || []).length);
+        warn('getStreamLinks -> html5player: ' + (html.match(/html5player/gi) || []).length);
+        warn('getStreamLinks -> .mp4: '        + (html.match(/\.mp4/gi) || []).length);
         failure('xv-ru: нет ссылок на видео');
         return;
       }
 
       log('getStreamLinks -> качеств: ' + keys.length);
+      for (var k = 0; k < keys.length; k++) {
+        log('  ' + keys[k] + ' -> ' + q[keys[k]].substring(0, 80));
+      }
       success({ qualitys: q });
 
     }, function (e) {
-      err('getStreamLinks -> ошибка загрузки: ' + e);
+      err('getStreamLinks -> ошибка: ' + e);
       failure(e);
     });
   }
@@ -543,12 +571,12 @@
       var load   = buildUrl(state.sort, state.search, page);
 
       log('view() -> loadUrl: ' + load);
-      log('view() -> ' + JSON.stringify({ url: rawUrl, page: page, query: state.search }));
+      log('view() -> ' + JSON.stringify({ url: rawUrl, page: page, search: state.search }));
 
       httpGet(load, function (html) {
         var results = parsePlaylist(html);
         if (!results.length) { failure('xv-ru: нет карточек'); return; }
-        log('view() -> успех, карточек: ' + results.length);
+        log('view() -> карточек: ' + results.length);
         success({
           results:     results,
           collection:  true,
@@ -597,7 +625,7 @@
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, Parser);
-      log('v1.1.1 зарегистрирован');
+      log('v1.2.0 зарегистрирован');
       return true;
     }
     return false;
