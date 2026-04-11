@@ -686,6 +686,7 @@
             'yjizz.com':     'yjizz',
             'phub.net':      'phub',
             'rt.pornhub.com': 'phub',
+            'top.porno365tube.win':  'p365',
             'xds.com':       'xds',
           };
           parserName = domainMap[hostname] || stripped.split('/')[0];
