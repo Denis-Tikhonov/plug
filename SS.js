@@ -13,10 +13,8 @@
 //   [1.5.0] BUGFIX: таймаут native 9с, расширенные логи
 //   [1.5.1] BUGFIX: полифиллы Array.find/findIndex
 //   [1.5.1] BUGFIX: null-guard comp.render(), filterMenu.find → цикл
-//   [1.5.2] BUGFIX: parserName из полного URL (было: 'https:' → грузил https.js)
-//           domainMap: pornobriz.com→briz, eporner.com→eporner и др.
-//   [1.5.2] BUGFIX: Bookmarks._load() — защита от не-массива из Storage
-//           (при удержании OK падало с cannot read .some of undefined)
+//   [1.5.3] BUGFIX: Utils.preview.show — полная защита try/catch,
+//           guard на target/.find()/.card__view, muted+playsinline на video
 // GitHub   : https://denis-tikhonov.github.io/plug/
 // =============================================================
 
@@ -30,7 +28,7 @@
   //         Менять здесь вручную, поле Settings удалено.
   // ----------------------------------------------------------
   var PLUGIN_ID      = 'adult_lampac';
-  var PLUGIN_VERSION = '1.5.2';
+  var PLUGIN_VERSION = '1.5.3';
 
   // ----------------------------------------------------------
   // [1.5.1] ПОЛИФИЛЛЫ — старые Android WebView не имеют
@@ -59,7 +57,7 @@
   // [1.4.0] URL Cloudflare Worker — менять здесь, не в Settings.
   // Должен заканчиваться на '?url=' или '&url='.
   // Пример: 'https://zonaproxy.777b737.workers.dev/?url='
-  var WORKER_DEFAULT = 'https://zonaproxy.777b737.workers.dev/?url=';
+  var WORKER_DEFAULT = 'https://ВАШ-WORKER.ВАШ-АККАУНТ.workers.dev/?url=';
 
   // [1.0.0] Все ключи Lampa.Storage — для сброса
   var STORAGE_KEYS = [
@@ -574,36 +572,54 @@
       function hide() {
         clearTimeout(timer);
         if (activeContainer) {
-          var vid = activeContainer[0] && activeContainer[0].querySelector('video');
-          if (vid) { try { vid.pause(); } catch(e){} }
-          activeContainer.addClass('hide');
+          try {
+            var vid = activeContainer[0] && activeContainer[0].querySelector('video');
+            if (vid) { try { vid.pause(); } catch(e){} }
+            activeContainer.addClass('hide');
+          } catch(e) {}
           activeContainer = null;
         }
       }
 
       function show(target, element) {
         hide();
+        // [1.5.2] Guard: target должен быть jQuery-объектом с методом .find()
+        if (!target || typeof target.find !== 'function') return;
+        if (!element || !element.preview) return;
+
         timer = setTimeout(function () {
-          if (!element.preview || !Lampa.Storage.field('sisi_preview')) return;
-          var container = target.find('.adult-video-preview');
-          if (!container.length) {
-            container = $('<div class="adult-video-preview"></div>').css({
-              position:'absolute', width:'100%', height:'100%',
-              left:0, top:0, overflow:'hidden', borderRadius:'1em',
-            });
-            var vid = $('<video></video>').css({
-              position:'absolute', width:'100%', height:'100%',
-              left:0, top:0, objectFit:'cover',
-            });
-            vid[0].src = element.preview;
-            vid[0].addEventListener('ended', function () { container.addClass('hide'); });
-            vid[0].load();
-            container.append(vid);
-            target.find('.card__view').append(container);
+          try {
+            if (!Lampa.Storage.field('sisi_preview')) return;
+            // [1.5.2] Guard: target мог быть уничтожен пока шёл таймер
+            if (!target || typeof target.find !== 'function') return;
+
+            var container = target.find('.adult-video-preview');
+            if (!container.length) {
+              var cardView = target.find('.card__view');
+              // [1.5.2] Guard: .card__view может отсутствовать в некоторых версиях Lampa
+              if (!cardView.length) return;
+
+              container = $('<div class="adult-video-preview"></div>').css({
+                position:'absolute', width:'100%', height:'100%',
+                left:0, top:0, overflow:'hidden', borderRadius:'1em',
+              });
+              var vid = $('<video muted playsinline></video>').css({
+                position:'absolute', width:'100%', height:'100%',
+                left:0, top:0, objectFit:'cover',
+              });
+              vid[0].src = element.preview;
+              vid[0].addEventListener('ended', function () { container.addClass('hide'); });
+              vid[0].load();
+              container.append(vid);
+              cardView.append(container);
+            }
+            activeContainer = container;
+            var vEl = container[0] && container[0].querySelector('video');
+            if (vEl) { try { vEl.play(); } catch(e){} }
+            container.removeClass('hide');
+          } catch(e) {
+            console.warn('[AdultJS] preview.show error:', e.message || e);
           }
-          activeContainer = container;
-          try { container[0].querySelector('video').play(); } catch(e){}
-          container.removeClass('hide');
         }, 1500);
       }
 
