@@ -1,15 +1,14 @@
 // =============================================================
 // briz.js — Парсер PornoBriz для AdultJS / AdultPlugin (Lampa)
-// Version  : 2.0.2
+// Version  : 2.0.3
 // Changed  :
-//   [2.0.0] Полная перезапись на основе анализа pornobriz.com
+//   [2.0.0] Полная перезапись
 //   [2.0.1] BUGFIX: parseUrl — имя парсера, ?search=, неизвестный путь
-//   [2.0.2] BUGFIX: постеры — img ищется не только внутри <a>,
-//           но и в parentNode цепочке (реальная структура pornobriz)
-//   [2.0.2] BUGFIX: видео — поле video сразу содержит MP4 URL по паттерну
-//           /preview/{slug}.mp4; json:false → плеер сразу воспроизводит
-//   [2.0.2] BUGFIX: поиск Script error — пустой результат через success([])
-//           не передаётся в status.append (фильтр data.results.length)
+//   [2.0.2] BUGFIX: img поиск в parentNode, video=mp4
+//   [2.0.3] BUGFIX: правильный селектор div.thumb_main (не div.logo)
+//   [2.0.3] BUGFIX: постер из data-original (src=placeholder 1x1px)
+//   [2.0.3] BUGFIX: превью из video[data-preview] (готовый mp4 URL)
+//   [2.0.3] BUGFIX: название из div.th-title
 //
 //   СТРУКТУРА САЙТА (из анализа):
 //     Карточки  : div.logo (НЕ div.thumb_main как было раньше)
@@ -359,21 +358,31 @@
   // ----------------------------------------------------------
   // ПАРСИНГ КАТАЛОГА
   //
-  // Реальная структура pornobriz.com (из анализа):
-  //   cardXPath : //div[contains(@class,"logo")]
-  //   title     : img[alt] внутри карточки
-  //   link      : a[href] внутри карточки с /video/ в пути
-  //   thumbnail : img[src] — прямой src
+  // Реальная структура карточки pornobriz.com (из HTML):
   //
-  // Пример карточки из sampleCards:
-  //   title     : "Подготовка ко сну включает в себя секс"
-  //   link      : /video/podgotovka_ko_snu_vklyuchaet_v_sebya_seks/
-  //   thumbnail : /content/screen/77/47693_11.jpg
+  //   <div class="thumb_main">
+  //     <a href="/video/{slug}/" rel="bookmark">
+  //       <video data-preview="https://pornobriz.com/preview/{slug}.mp4"></video>
+  //       <img src="data:image/png;base64,..." 
+  //            data-original="/content/screen/77/XXXXX_11.jpg"
+  //            alt="Название видео" />
+  //       <div class="t-hd">FULL HD</div>
+  //       <div class="duration">22:31</div>
+  //       <div class="th-title">Название видео</div>
+  //     </a>
+  //   </div>
+  //
+  // Ключевые факты:
+  //   - Селектор карточки: div.thumb_main  (НЕ div.logo!)
+  //   - Постер: img[data-original]  (src — плейсхолдер 1×1px!)
+  //   - Превью: video[data-preview]  (готовый mp4 URL)
+  //   - Название: div.th-title или img[alt]
+  //   - Длительность: div.duration
+  //   - mp4 для плеера = data-preview (он же превью)
   // ----------------------------------------------------------
   function parsePlaylist(html) {
     if (!html || html.length < 100) {
-      warn('parsePlaylist → html пустой');
-      return [];
+      warn('parsePlaylist → html пустой'); return [];
     }
     log('parsePlaylist → длина:', html.length);
 
@@ -383,136 +392,111 @@
 
     var cards = [];
 
-    // --- Стратегия 1: a[href*="/video/"] — основная для pornobriz ---
-    try {
-      var videoLinks = doc.querySelectorAll('a[href*="/video/"]');
-      log('parsePlaylist → a[href*=/video/] найдено:', videoLinks.length);
+    // --- Стратегия 1: div.thumb_main (точный селектор карточки) ---
+    var thumbs = doc.querySelectorAll('div.thumb_main');
+    log('parsePlaylist → div.thumb_main найдено:', thumbs.length);
 
-      forEachNode(videoLinks, function (a) {
-        try {
-          var href = a.getAttribute('href') || '';
-          if (!href) return;
-          if (href.indexOf('http') !== 0) href = HOST + href;
+    forEachNode(thumbs, function (el) {
+      var c = _card(el);
+      if (c) cards.push(c);
+    });
 
-          // [2.0.2] Slug из URL → MP4 напрямую
-          var slug = _slugFromUrl(href);
-          if (!slug) return; // не видео-страница
-
-          var mp4Url = HOST + '/preview/' + slug + '.mp4';
-
-          // [2.0.2] Постер — img может быть ВНУТРИ <a>, в РОДИТЕЛЕ или выше
-          // Реальная разметка pornobriz: картинка часто вне тега <a>
-          var imgEl = a.querySelector('img');
-          if (!imgEl && a.parentNode) {
-            imgEl = a.parentNode.querySelector('img');
-          }
-          if (!imgEl && a.parentNode && a.parentNode.parentNode) {
-            imgEl = a.parentNode.parentNode.querySelector('img');
-          }
-
-          var picture = '';
-          if (imgEl) {
-            // Пробуем все возможные атрибуты src
-            picture = imgEl.getAttribute('src')           ||
-                      imgEl.getAttribute('data-src')      ||
-                      imgEl.getAttribute('data-original') ||
-                      imgEl.getAttribute('data-lazy')     || '';
-            // Пропускаем системные картинки (лого, иконки)
-            if (picture && (
-              picture.indexOf('/img/logo') !== -1 ||
-              picture.indexOf('/img/icon') !== -1 ||
-              picture === '/img/logo.png'
-            )) { picture = ''; }
-          }
-
-          // Если постер не нашли — строим по паттерну content/screen
-          // Пример из sampleCards: /content/screen/77/47693_11.jpg
-          // slug содержит числовой ID — но он нам неизвестен без парсинга
-          // Оставляем пустым, это лучше чем сломанный URL
-
-          // Название: alt → title → текст
-          var name = (imgEl ? (imgEl.getAttribute('alt') || '') : '') ||
-                     (a.getAttribute('title') || '') ||
-                     (a.textContent || '').trim().replace(/\s+/g, ' ').substring(0, 100);
-          if (!name || name.length < 3) return;
-
-          // Длительность — ищем в родителе
-          var par   = a.parentNode || a;
-          var durEl = par.querySelector('.duration,.time,.dur,[class*="time"],[class*="dur"]');
-          var time  = durEl ? (durEl.textContent || '').trim() : '';
-
-          // Дедупликация
-          for (var ci = 0; ci < cards.length; ci++) {
-            if (cards[ci].video === mp4Url) return;
-          }
-
-          cards.push({
-            name:    name,
-            video:   mp4Url,        // [2.0.2] сразу mp4, не HTML-страница
-            picture: picture,
-            preview: mp4Url,        // превью = тот же mp4 (коротко)
-            time:    time,
-            quality: 'HD',
-            json:    false,         // прямой URL — qualitys не нужен
-            source:  NAME,
-          });
-        } catch(ex) { warn('card ex:', ex.message); }
-      });
-
-      // [2.0.2] Логируем первую карточку для диагностики постеров
-      if (cards.length) {
-        log('parsePlaylist → первая карточка:', cards[0].name);
-        log('parsePlaylist →   video:', cards[0].video);
-        log('parsePlaylist →   picture:', cards[0].picture || '(пусто)');
-      }
-      log('parsePlaylist → стратегия 1 карточек:', cards.length);
-    } catch(e) { warn('стратегия 1:', e.message); }
-
-    // --- Стратегия 2: XPath div.logo (с фильтром — только те что содержат /video/) ---
+    // --- Стратегия 2: XPath для div.thumb_main ---
     if (!cards.length) {
       try {
         var nodes = doc.evaluate(
-          "//div[contains(@class,'logo') and .//a[contains(@href,'/video/')]]",
+          "//div[contains(@class,'thumb_main')]",
           doc, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null
         );
-        log('parsePlaylist → XPath div.logo[video] найдено:', nodes.snapshotLength);
+        log('parsePlaylist → XPath thumb_main:', nodes.snapshotLength);
         for (var i = 0; i < nodes.snapshotLength; i++) {
-          var c = _card(nodes.snapshotItem(i));
-          if (c) cards.push(c);
+          var c2 = _card(nodes.snapshotItem(i));
+          if (c2) cards.push(c2);
         }
       } catch(e) { warn('XPath:', e.message); }
     }
 
-    // --- Дамп для отладки если карточек нет ---
+    // --- Стратегия 3: a[href*="/video/"] как последний fallback ---
+    if (!cards.length) {
+      log('parsePlaylist → fallback: a[href*=/video/]');
+      forEachNode(doc.querySelectorAll('a[href*="/video/"]'), function (a) {
+        try {
+          var href = a.getAttribute('href') || '';
+          if (!href) return;
+          if (href.indexOf('http') !== 0) href = HOST + href;
+          var slug = _slugFromUrl(href);
+          if (!slug) return;
+
+          var imgEl  = a.querySelector('img');
+          var vidEl  = a.querySelector('video');
+          var mp4    = (vidEl ? vidEl.getAttribute('data-preview') : '') || (HOST + '/preview/' + slug + '.mp4');
+          var pic    = _extractPicture(imgEl);
+          var name   = _extractName(a, imgEl);
+          if (!name || name.length < 3) return;
+          var durEl  = a.querySelector('.duration');
+          var time   = durEl ? (durEl.textContent || '').trim() : '';
+
+          for (var ci = 0; ci < cards.length; ci++) {
+            if (cards[ci].video === mp4) return;
+          }
+          cards.push({ name: name, video: mp4, picture: pic, preview: mp4, time: time, quality: 'HD', json: false, source: NAME });
+        } catch(ex) {}
+      });
+    }
+
     if (!cards.length) {
       warn('parsePlaylist → карточки не найдены');
       if (doc.body) {
-        warn('body[0:500]:', (doc.body.innerHTML || '').substring(0, 500));
-        // Дамп всех div с классами для диагностики
-        var allDivs = doc.querySelectorAll('div[class]');
-        var classSet = {};
-        forEachNode(allDivs, function (d) {
-          var cls = (d.className || '').split(' ')[0];
-          if (cls) classSet[cls] = (classSet[cls] || 0) + 1;
-        });
-        warn('div классы (топ-10):', JSON.stringify(
-          Object.keys(classSet).sort(function(a,b){ return classSet[b]-classSet[a]; }).slice(0,10)
-        ));
-        warn('a[href*=/video/] найдено:', doc.querySelectorAll('a[href*="/video/"]').length);
-        warn('img[src*=/content/] найдено:', doc.querySelectorAll('img[src*="/content/"]').length);
+        warn('body[0:400]:', (doc.body.innerHTML || '').substring(0, 400));
+        warn('thumb_main:', doc.querySelectorAll('div.thumb_main').length);
+        warn('a[/video/]:', doc.querySelectorAll('a[href*="/video/"]').length);
       }
     } else {
       log('parsePlaylist → ИТОГО:', cards.length);
+      if (cards[0]) {
+        log('  первая карточка:', cards[0].name);
+        log('  picture:', cards[0].picture || '(пусто)');
+        log('  video:', cards[0].video);
+      }
       notyOk('Найдено ' + cards.length + ' видео');
     }
     return cards;
   }
 
-  // Извлечь одну карточку из div.logo
+  // ----------------------------------------------------------
+  // Вспомогательные функции извлечения полей
+  // ----------------------------------------------------------
+
+  // Постер: data-original приоритетнее src (src = lazy плейсхолдер 1×1px)
+  function _extractPicture(imgEl) {
+    if (!imgEl) return '';
+    var pic = imgEl.getAttribute('data-original') ||
+              imgEl.getAttribute('data-src')       ||
+              imgEl.getAttribute('data-lazy')      ||
+              imgEl.getAttribute('src')             || '';
+    // Отсекаем base64 плейсхолдеры
+    if (pic.indexOf('data:image') === 0) pic = '';
+    // Добавляем хост если относительный путь
+    if (pic && pic.indexOf('http') !== 0) pic = HOST + pic;
+    return pic;
+  }
+
+  // Название: div.th-title → img[alt] → a[title] → текст
+  function _extractName(aEl, imgEl) {
+    var titleEl = aEl ? aEl.querySelector('.th-title') : null;
+    return (titleEl ? (titleEl.textContent || '').trim() : '') ||
+           (imgEl   ? (imgEl.getAttribute('alt') || '')  : '') ||
+           (aEl     ? (aEl.getAttribute('title') || '')  : '') ||
+           (aEl     ? (aEl.textContent || '').trim().replace(/\s+/g, ' ').substring(0, 100) : '');
+  }
+
+  // ----------------------------------------------------------
+  // Извлечь одну карточку из div.thumb_main
+  // ----------------------------------------------------------
   function _card(el) {
     if (!el) return null;
     try {
-      // Ссылка — ищем a с /video/ в href
+      // Ссылка на видео-страницу
       var aEl = el.querySelector('a[href*="/video/"]') || el.querySelector('a[href]');
       if (!aEl) return null;
 
@@ -520,69 +504,47 @@
       if (!href) return null;
       if (href.indexOf('http') !== 0) href = HOST + href;
 
-      // Название — alt картинки приоритетнее
-      var imgEl = el.querySelector('img');
-      var name  = (imgEl ? imgEl.getAttribute('alt') : '') ||
-                  aEl.getAttribute('title')               ||
-                  (aEl.textContent || '').trim().substring(0, 100);
+      var slug = _slugFromUrl(href);
+      if (!slug) return null;
+
+      // MP4: берём из video[data-preview] — он уже готовый URL
+      var vidEl  = el.querySelector('video[data-preview]');
+      var mp4Url = (vidEl ? vidEl.getAttribute('data-preview') : '') ||
+                  (HOST + '/preview/' + slug + '.mp4');
+
+      // Постер: data-original (src — плейсхолдер)
+      var imgEl  = el.querySelector('img');
+      var picture = _extractPicture(imgEl);
+
+      // Название
+      var name = _extractName(aEl, imgEl);
       if (!name || name.length < 3) return null;
 
-      // Постер — прямой src (на pornobriz нет lazy-атрибутов)
-      var picture = imgEl ? (imgEl.getAttribute('src') || '') : '';
-      // Пропускаем лого и системные картинки
-      if (picture && (picture.indexOf('/img/logo') !== -1 || picture.indexOf('/img/icon') !== -1)) {
-        picture = '';
-      }
-
       // Длительность
-      var durEl = el.querySelector('.duration, .time, .dur, [class*="time"], [class*="dur"]');
+      var durEl = el.querySelector('.duration');
       var time  = durEl ? (durEl.textContent || '').trim() : '';
-
-      // Превью по паттерну из URL видео
-      var preview = _previewFromSlug(href);
 
       return {
         name:    name,
-        video:   href,
-        picture: picture,
-        preview: preview,
+        video:   mp4Url,   // прямой mp4 для плеера
+        picture: picture,  // /content/screen/77/XXXXX_11.jpg
+        preview: mp4Url,   // превью = тот же mp4
         time:    time,
         quality: 'HD',
-        // [2.0.0] json:false — URL видео прямой MP4 по паттерну,
-        // qualitys() вызывается только при json:true
-        json:    false,
+        json:    false,    // прямой URL, qualitys не нужен
         source:  NAME,
       };
     } catch(e) {
-      warn('_card исключение:', e.message);
-      return null;
+      warn('_card:', e.message); return null;
     }
   }
 
   // ----------------------------------------------------------
-  // [2.0.0] Превью и прямой MP4 по паттерну
-  //
-  // Из анализа сайта:
-  //   MP4 URL : https://pornobriz.com/preview/{slug}.mp4
-  //   slug    : последняя часть пути /video/{slug}/
-  //
-  // Пример:
-  //   video URL : /video/podgotovka_ko_snu_vklyuchaet_v_sebya_seks/
-  //   mp4 URL   : /preview/podgotovka_ko_snu_vklyuchaet_v_sebya_seks.mp4
+  // Slug и MP4 по паттерну
   // ----------------------------------------------------------
   function _slugFromUrl(videoUrl) {
-    var m = (videoUrl || '').match(/\/video\/([^\/]+)\/?$/);
+    var m = (videoUrl || '').match(/\/video\/([^\/]+)\/?/);
     return m ? m[1] : '';
-  }
-
-  function _previewFromSlug(videoUrl) {
-    var slug = _slugFromUrl(videoUrl);
-    return slug ? HOST + '/preview/' + slug + '.mp4' : null;
-  }
-
-  function _mp4FromSlug(videoUrl) {
-    var slug = _slugFromUrl(videoUrl);
-    return slug ? HOST + '/preview/' + slug + '.mp4' : '';
   }
 
   // ----------------------------------------------------------
@@ -725,8 +687,8 @@
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, BrizParser);
-      log('v2.0.2 зарегистрирован');
-      notyOk('PornoBriz v2.0.2');
+      log('v2.0.3 зарегистрирован');
+      notyOk('PornoBriz v2.0.3');
       return true;
     }
     return false;
