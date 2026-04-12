@@ -1,14 +1,34 @@
 // =============================================================
 // briz.js — Парсер PornoBriz для AdultJS / AdultPlugin (Lampa)
-// Version  : 2.1.0
+// Version  : 2.0.4
 // Changed  :
-//   [2.0.3] div.thumb_main, data-original, video[data-preview]
-//   [2.0.4] json:true + qualitys() для реального mp4
-//   [2.1.0] Рефакторинг сетевого слоя:
-//           Удалены WORKER_DEFAULT, getWorkerUrl(), _native(), _reguest(), _fetch()
-//           httpGet() делегирует только в AdultPlugin.networkRequest
-//           (Worker URL централизован в AdultJS.js)
-//           Fallback без Worker — прямой Lampa.Reguest
+//   [2.0.3] BUGFIX: div.thumb_main, data-original, video[data-preview]
+//   [2.0.4] BUGFIX: json:true + video=HTML-страница (как в v1.5.0)
+//           qualities() парсит страницу видео и возвращает реальные
+//           mp4-ссылки с качеством 1080p/720p/480p/360p/240p
+//           (в v2.0.2/2.0.3 был json:false + video=preview.mp4 —
+//            плеер открывал короткое превью вместо полного видео)
+//
+//   СТРУКТУРА САЙТА (из анализа):
+//     Карточки  : div.logo (НЕ div.thumb_main как было раньше)
+//     Постер    : img[src] — прямой src, без data-lazy
+//     Thumbnail : https://pornobriz.com/content/screen/77/XXXXX_11.jpg
+//     Поиск     : /?q={query}  (НЕ /search/{query}/page1/)
+//     Категории : /{slug}/  затем &page={N}
+//     Пагинация : &page={N} добавляется к любому URL
+//     Сортировка: НА САЙТЕ НЕТ (убрана из меню)
+//     Видео MP4 : /preview/{slug}.mp4 — по slug из URL видео
+//
+//   ИСПРАВЛЕНИЯ:
+//     - XPath исправлен: div.logo вместо div.thumb_main
+//     - Поиск: URL /?q={query}&page={N}
+//     - Категории: /{slug}/?page={N}
+//     - Пагинация: параметр &page=N
+//     - Видео: прямая ссылка по паттерну /preview/{slug}.mp4
+//     - Постеры: img[src] без lazy-атрибутов (они не нужны)
+//     - Все 70 категорий из анализа сайта
+//     - Script error при закладке: защита от не-массива в Storage
+//     - Удалена SORTS (сортировки нет на сайте)
 // =============================================================
 
 (function () {
@@ -18,6 +38,20 @@
   var NAME      = 'briz';
   var TAG       = '[briz]';
   var NOTY_TIME = 3000;
+
+  // ----------------------------------------------------------
+  // URL Cloudflare Worker
+  // Приоритет: AdultPlugin.workerUrl → константа
+  // ----------------------------------------------------------
+  var WORKER_DEFAULT = 'https://zonaproxy.777b737.workers.dev/?url=';
+
+  function getWorkerUrl() {
+    var url = (window.AdultPlugin && window.AdultPlugin.workerUrl)
+      ? window.AdultPlugin.workerUrl
+      : WORKER_DEFAULT;
+    if (url && url.charAt(url.length - 1) !== '=') url = url + '=';
+    return url;
+  }
 
   // ----------------------------------------------------------
   // ПОЛИФИЛЛЫ
@@ -67,21 +101,47 @@
 
   // ----------------------------------------------------------
   // СЕТЕВОЙ СЛОЙ
-  // [2.1.0] Делегируем в AdultPlugin.networkRequest (централизовано в AdultJS).
-  //         Worker URL хранится только в AdultJS.js → WORKER_DEFAULT.
-  //         Fallback (если AdultPlugin недоступен): Lampa.Reguest прямым запросом.
+  // Приоритет: AdultPlugin.networkRequest → native+Worker → Reguest → fetch
   // ----------------------------------------------------------
-  function httpGet(url, ok, fail) {
-    log('httpGet →', url);
 
-    // Приоритет: централизованный networkRequest из AdultJS
-    if (window.AdultPlugin && typeof window.AdultPlugin.networkRequest === 'function') {
-      window.AdultPlugin.networkRequest(url, ok, fail, { type: 'html' });
-      return;
+  function _native(url, ok, fail) {
+    if (!Lampa.Network || typeof Lampa.Network.native !== 'function') {
+      fail('no_native'); return;
     }
+    var workerUrl = getWorkerUrl();
+    var path = workerUrl + encodeURIComponent(url);
+    var done = false;
 
-    // Fallback (AdultJS не загружен): прямой Lampa.Reguest без Worker
-    warn('httpGet → AdultPlugin недоступен, прямой Reguest');
+    var tid = setTimeout(function () {
+      if (done) return; done = true;
+      warn('native timeout 9с');
+      fail('timeout');
+    }, 9000);
+
+    try {
+      Lampa.Network.native(path,
+        function (r) {
+          if (done) return; done = true; clearTimeout(tid);
+          var t = (typeof r === 'string') ? r : JSON.stringify(r);
+          if (t && t.indexOf('"status":403') !== -1) { fail('403'); return; }
+          if (t && t.length > 50) ok(t); else fail('empty');
+        },
+        function (e) {
+          if (done) return; done = true; clearTimeout(tid);
+          var msg = (e && e.message) ? e.message : String(e||'');
+          var st  = (e && e.status)  ? e.status  : 0;
+          if (st === 403 || msg.indexOf('403') !== -1) { fail('403'); return; }
+          fail(msg || 'native_err');
+        },
+        false, { headers: { 'X-Requested-With': 'XMLHttpRequest' } }
+      );
+    } catch(ex) {
+      if (done) return; done = true; clearTimeout(tid);
+      fail(ex.message);
+    }
+  }
+
+  function _reguest(url, ok, fail) {
     try {
       new Lampa.Reguest().silent(url,
         function (d) {
@@ -89,9 +149,41 @@
           if (t.length > 50) ok(t); else fail('empty');
         },
         function (e) { fail(e || 'req_err'); },
-        false, { dataType: 'text', timeout: 12000 }
+        false, { dataType: 'text', timeout: 10000 }
       );
     } catch(ex) { fail(ex.message); }
+  }
+
+  function _fetch(url, ok, fail) {
+    if (typeof fetch === 'undefined') { fail('no_fetch'); return; }
+    fetch(url, { method: 'GET' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.text();
+      })
+      .then(ok)
+      .catch(function (e) { fail(e.message || String(e)); });
+  }
+
+  function httpGet(url, ok, fail) {
+    log('httpGet →', url);
+
+    if (window.AdultPlugin && typeof window.AdultPlugin.networkRequest === 'function') {
+      window.AdultPlugin.networkRequest(url, ok, fail, { type: 'html' });
+      return;
+    }
+
+    _native(url, ok, function (e1) {
+      log('native fail:', e1);
+      _reguest(url, ok, function (e2) {
+        log('reguest fail:', e2);
+        _fetch(url, ok, function (e3) {
+          err('ALL FAIL | native=' + e1 + ' req=' + e2 + ' fetch=' + e3);
+          notyErr('Сайт недоступен');
+          fail('all_failed');
+        });
+      });
+    });
   }
 
   // ----------------------------------------------------------
@@ -400,7 +492,7 @@
   // ----------------------------------------------------------
   // Извлечь одну карточку из div.thumb_main
   // [2.0.4] json:true + video=href (HTML-страница видео).
-  //         qualitys() скачивает страницу и извлекает реальные
+  //         qualities() скачивает страницу и извлекает реальные
   //         mp4-ссылки с качеством 1080p/720p/480p.
   //         preview берём из video[data-preview] — короткий mp4.
   // ----------------------------------------------------------
@@ -435,12 +527,12 @@
 
       return {
         name:    name,
-        video:   href,      // [2.0.4] HTML-страница → qualitys() найдёт реальный mp4
+        video:   href,      // [2.0.4] HTML-страница → qualities() найдёт реальный mp4
         picture: picture,
         preview: preview,
         time:    time,
         quality: 'HD',
-        json:    true,      // [2.0.4] true → AdultJS вызовет qualitys()
+        json:    true,      // [2.0.4] true → AdultJS вызовет qualities()
         source:  NAME,
       };
     } catch(e) {
@@ -457,12 +549,12 @@
   }
 
   // ----------------------------------------------------------
-  // ПОЛУЧЕНИЕ ПРЯМЫХ ССЫЛОК (qualitys)
+  // ПОЛУЧЕНИЕ ПРЯМЫХ ССЫЛОК (qualities)
   // Восстановлена логика v1.5.0 — скачиваем страницу видео
   // и ищем реальные mp4-ссылки с качеством (работало в v1.5.0)
   // ----------------------------------------------------------
   function getStreamLinks(videoUrl, ok, fail) {
-    log('qualitys →', videoUrl);
+    log('qualities →', videoUrl);
 
     httpGet(videoUrl, function (html) {
       var q = {}, sizes = ['1080','720','480','360','240'];
@@ -522,9 +614,9 @@
         return;
       }
 
-      log('qualitys → найдено качеств:', Object.keys(q).length);
+      log('qualities → найдено качеств:', Object.keys(q).length);
       notyOk('Качеств: ' + Object.keys(q).length);
-      ok({ qualitys: q });
+      ok({ qualities: q });
     }, function(e) {
       notyErr('Ошибка страницы видео');
       fail(e);
@@ -594,10 +686,10 @@
       } catch(e) { err('search:', e.message); fail(e.message); }
     },
 
-    qualitys: function (videoUrl, ok, fail) {
-      log('qualitys()', videoUrl);
+    qualities: function (videoUrl, ok, fail) {
+      log('qualities()', videoUrl);
       try { getStreamLinks(videoUrl, ok, fail); }
-      catch(e) { err('qualitys:', e.message); fail(e.message); }
+      catch(e) { err('qualities:', e.message); fail(e.message); }
     },
   };
 
@@ -607,8 +699,8 @@
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, BrizParser);
-      log('v2.1.0 зарегистрирован');
-      notyOk('PornoBriz v2.1.0');
+      log('v2.0.4 зарегистрирован');
+      notyOk('PornoBriz v2.0.4');
       return true;
     }
     return false;
