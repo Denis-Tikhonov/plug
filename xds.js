@@ -269,7 +269,7 @@ try {
       console.log('[pexels_test] v2.0.0 зарегистрирован');
       try {
         setTimeout(function () {
-          Lampa.Noty.show('Pexels Test v2.0 подключён', { time: 2500 });
+
         }, 600);
       } catch (e) {}
       return true;
@@ -308,7 +308,7 @@ try {
     });
   } catch (n) {
     setTimeout(function () {
-      try { Lampa.Noty.show(errMsg + ' line:' + errLine, { time: 160000 }); } catch (x) {}
+      try { Lampa.Noty.show(errMsg + ' line:' + errLine, { time: 60000 }); } catch (x) {}
     }, 1000);
   }
 }
