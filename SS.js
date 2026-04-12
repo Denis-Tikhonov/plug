@@ -1,6 +1,6 @@
 // =============================================================
 // AdultJS.js — Lampa Adult Plugin
-// Version  : 1.5.5
+// Version  : 1.5.6
 // Changed  :
 //   [1.0.0] Полный рефакторинг с ab2024.ru → GitHub Pages
 //   [1.0.0] Убраны: RCH, история, лицензионные проверки
@@ -15,6 +15,7 @@
 //   [1.5.1] BUGFIX: null-guard comp.render(), filterMenu.find → цикл
 //   [1.5.3] BUGFIX: Utils.preview.show — полная защита try/catch,
 //           guard на target/.find()/.card__view, muted+playsinline на video
+//   [1.5.6] Noty если domain не прописан парсер
 // GitHub   : https://denis-tikhonov.github.io/plug/
 // =============================================================
 
@@ -646,7 +647,10 @@
   // [1.0.0] API — меню с GitHub + роутинг по парсерам
   // ----------------------------------------------------------
   var menuCache = null;
-
+  // [1.5.6] Множество уже показанных предупреждений о domainMap
+  // (чтобы не спамить Noty при поиске через несколько каналов)
+  var _warnedDomains = {};
+  
   var Api = {
 
     menu: function (success, error) {
@@ -694,6 +698,14 @@
             'phub.net':      'phub',
             'xds.com':       'xds',
           };
+
+          // [1.5.6] Предупреждение: домен не найден в domainMap
+          if (!domainMap[hostname] && !_warnedDomains[hostname]) {
+            _warnedDomains[hostname] = true;
+            _noty('⚠ Подключи в Domain источник: ' + hostname, 'error');
+            console.warn('[AdultJS] domainMap: нет записи для "' + hostname + '" — добавь в domainMap');
+          }
+
           parserName = domainMap[hostname] || stripped.split('/')[0];
         } catch(e) {
           parserName = 'briz';
@@ -750,6 +762,12 @@
             try {
               var _hn = new URL(ch.playlist_url).hostname.replace('www.', '');
               var _dm = { 'pornobriz.com':'briz','eporner.com':'eporner','yjizz.com':'yjizz','phub.net':'phub','xds.com':'xds' };
+              // [1.5.6] Предупреждение: домен не найден в domainMap
+              if (!_dm[_hn] && !_warnedDomains[_hn]) {
+                _warnedDomains[_hn] = true;
+                _noty('⚠ Подключи в Domain источник: ' + _hn, 'error');
+                console.warn('[AdultJS] domainMap (search): нет записи для "' + _hn + '"');
+              }
               _pn = _dm[_hn] || _ps.split('/')[0];
             } catch(e2) { _pn = 'briz'; }
           } else {
