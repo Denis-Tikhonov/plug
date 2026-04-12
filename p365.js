@@ -1,6 +1,6 @@
 // =============================================================
 // p365.js — Парсер Porno365Tube для AdultJS / AdultPlugin (Lampa)
-// Version  : 2.0.0
+// Version  : 2.1.0
 // Changed  :
 //   [1.0.0] Первая версия
 //   [2.0.0] УНИФИКАЦИЯ: структура приведена к briz204 как эталону
@@ -12,6 +12,11 @@
 //           — _native(), _reguest(), _fetch() вынесены отдельно
 //           — заголовок файла в едином формате
 //           — notyOk/notyErr: единый формат с TAG + иконкой
+//   [2.1.0] Убрана сортировка из меню фильтра.
+//           Сайт top.porno365tube.win сортировку не поддерживает —
+//           меню теперь содержит только Поиск и Категории.
+//           buildMenu() и buildUrl() упрощены (нет sort-параметра).
+//           parseUrl() упрощён: убрана обработка sort.
 //
 //   СТРУКТУРА САЙТА (из анализа):
 //     Карточки  : div.item.video-block
@@ -35,7 +40,7 @@
   var HOST      = 'https://top.porno365tube.win';
   var NAME      = 'p365';
   var TAG       = '[p365]';
-  var VERSION   = '2.0.0';
+  var VERSION   = '2.1.0';
   var NOTY_TIME = 3000;
 
   // ----------------------------------------------------------
@@ -270,6 +275,8 @@
   // Главная    : HOST + '/'
   // Категория  : HOST + '/categories/' + slug + (page>1 ? '?page=N' : '')
   // Поиск      : HOST + '/?q=' + query  (+ &page=N)
+  //
+  // [2.1.0] Сортировка удалена — сайт не поддерживает order-параметр.
   // ----------------------------------------------------------
   function buildUrl(cat, search, page) {
     page = parseInt(page, 10) || 1;
@@ -291,7 +298,7 @@
     return base;
   }
 
-  // Разобрать URL обратно в {cat, search}
+  // [2.1.0] Разобрать URL обратно в {cat, search}. Sort-параметр убран.
   function parseUrl(url) {
     var s = url || '';
 
@@ -318,7 +325,7 @@
     return { cat: '', search: '' };
   }
 
-  // Меню фильтра
+  // [2.1.0] Меню фильтра: только Поиск + Категории. Сортировка удалена.
   function buildMenu(url) {
     var state     = parseUrl(url || '');
     var activeCat = arrayFind(CATS, function (c) { return c.slug === state.cat; });
