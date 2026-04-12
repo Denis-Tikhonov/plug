@@ -6,8 +6,8 @@
 (function () {
   'use strict';
 
-  var NAME     = 'pexels_test';
-  var API_KEY  = 'ВАШ_КЛЮЧ_PEXELS_ЗДЕСЬ';
+  var NAME     = 'xds';
+  var API_KEY  = 'daFtVOPyOPiuaIuuv3JctGOHmKVlCH6tK4PXLXO1kyTxKRwrEihaXyHT';
   var API_BASE = 'https://api.pexels.com/videos';
   var PER_PAGE = 15;
 
