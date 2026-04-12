@@ -1,48 +1,79 @@
 // =============================================================
 // pexels_test.js — ТЕСТОВАЯ ЗАГЛУШКА AdultJS на базе Pexels API
-// Version  : 1.0.0
-// Данные   : api.pexels.com (CORS: open, без прокси)
-// Постеры  : images.pexels.com (без CORS, без прокси)
-// Видео    : Pexels CDN / Vimeo CDN (без прокси)
-// Поиск    : /videos/search
+// Version  : 2.0.0  (fix: preview, time, categories, search)
 // =============================================================
 
 (function () {
   'use strict';
 
-  // ----------------------------------------------------------
-  // КОНФИГ — вставьте свой ключ Pexels
-  // Получить бесплатно: https://www.pexels.com/api/
-  // ----------------------------------------------------------
   var NAME     = 'xds';
   var API_KEY  = 'daFtVOPyOPiuaIuuv3JctGOHmKVlCH6tK4PXLXO1kyTxKRwrEihaXyHT';
   var API_BASE = 'https://api.pexels.com/videos';
   var PER_PAGE = 15;
 
   // ----------------------------------------------------------
-  // КАТЕГОРИИ — поисковые запросы к Pexels
+  // КАТЕГОРИИ
   // ----------------------------------------------------------
   var CATEGORIES = [
-    { title: '🌿 Природа',     query: 'nature'      },
-    { title: '🏙 Города',      query: 'city'        },
-    { title: '🐾 Животные',    query: 'animals'     },
-    { title: '🏋 Спорт',       query: 'sport'       },
-    { title: '✈ Путешествия',  query: 'travel'      },
-    { title: '🍕 Еда',         query: 'food'        },
-    { title: '💻 Технологии',  query: 'technology'  },
-    { title: '🎭 Люди',        query: 'people'      },
-    { title: '🌊 Океан',       query: 'ocean'       },
-    { title: '🏔 Горы',        query: 'mountain'    },
-    { title: '🌆 Закаты',      query: 'sunset'      },
-    { title: '🚗 Авто',        query: 'cars'        }
+    { title: '🌿 Природа',    query: 'nature'     },
+    { title: '🏙 Города',     query: 'city'       },
+    { title: '🐾 Животные',   query: 'animals'    },
+    { title: '🏋 Спорт',      query: 'sport'      },
+    { title: '✈ Путешествия', query: 'travel'     },
+    { title: '🍕 Еда',        query: 'food'       },
+    { title: '💻 Технологии', query: 'technology' },
+    { title: '🎭 Люди',       query: 'people'     },
+    { title: '🌊 Океан',      query: 'ocean'      },
+    { title: '🏔 Горы',       query: 'mountain'   },
+    { title: '🌆 Закаты',     query: 'sunset'     },
+    { title: '🚗 Авто',       query: 'cars'       }
   ];
 
   // ----------------------------------------------------------
-  // PEXELS ЗАПРОС — Authorization header, CORS open
+  // FIX 1: ВЫБОР ВИДЕО ФАЙЛА
+  // Сортируем mp4 по ширине → берём около 720p
+  // Не используем quality-строку (она ненадёжна у Pexels)
+  // ----------------------------------------------------------
+  function pickVideoFile(video_files) {
+    if (!video_files || !video_files.length) return '';
+
+    // Фильтр: только mp4
+    var mp4 = [];
+    for (var i = 0; i < video_files.length; i++) {
+      if (video_files[i].file_type === 'video/mp4' && video_files[i].link) {
+        mp4.push(video_files[i]);
+      }
+    }
+    if (!mp4.length) return '';
+
+    // Сортировка по ширине по возрастанию
+    mp4.sort(function (a, b) { return (a.width || 0) - (b.width || 0); });
+
+    // Берём файл 640–1280px (SD/HD) — лучшая совместимость с TV
+    var chosen = null;
+    for (var j = 0; j < mp4.length; j++) {
+      var w = mp4[j].width || 0;
+      if (w >= 640 && w <= 1280) { chosen = mp4[j]; break; }
+    }
+
+    return chosen ? chosen.link : mp4[0].link;
+  }
+
+  // ----------------------------------------------------------
+  // FIX 2: ПРОДОЛЖИТЕЛЬНОСТЬ — строка "M:SS"
+  // ----------------------------------------------------------
+  function formatTime(seconds) {
+    if (!seconds || seconds <= 0) return '0:00';
+    var m = Math.floor(seconds / 60);
+    var s = seconds % 60;
+    return m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  // ----------------------------------------------------------
+  // PEXELS ЗАПРОС — Authorization header
   // ----------------------------------------------------------
   function pexelsGet(endpoint, params, onSuccess, onError) {
     var url = API_BASE + endpoint + '?per_page=' + PER_PAGE;
-
     if (params) {
       for (var key in params) {
         if (params.hasOwnProperty(key)) {
@@ -51,6 +82,8 @@
       }
     }
 
+    console.log('[pexels] GET:', url);
+
     var xhr = new XMLHttpRequest();
     xhr.open('GET', url, true);
     xhr.timeout = 12000;
@@ -58,101 +91,63 @@
 
     xhr.onreadystatechange = function () {
       if (xhr.readyState !== 4) return;
-
       if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          onSuccess(JSON.parse(xhr.responseText));
-        } catch (e) {
-          onError('JSON parse error: ' + e.message);
-        }
+        try { onSuccess(JSON.parse(xhr.responseText)); }
+        catch (e) { onError('JSON: ' + e.message); }
       } else {
         onError('HTTP ' + xhr.status);
       }
     };
-
     xhr.ontimeout = function () { onError('Timeout'); };
     xhr.onerror   = function () { onError('Network error'); };
-
     xhr.send();
   }
 
   // ----------------------------------------------------------
-  // ВЫБОР ВИДЕО ФАЙЛА
-  // Приоритет: sd → hd → первый доступный mp4
-  // SD выбирается намеренно — лучше совместимость с TV
-  // ----------------------------------------------------------
-  function pickVideoFile(video_files, prefer_quality) {
-    if (!video_files || !video_files.length) return '';
-
-    prefer_quality = prefer_quality || 'sd';
-
-    var preferred = null;
-    var fallback  = null;
-
-    for (var i = 0; i < video_files.length; i++) {
-      var f = video_files[i];
-      if (f.file_type !== 'video/mp4') continue;
-      if (f.quality === prefer_quality) { preferred = f.link; break; }
-      if (!fallback) fallback = f.link;
-    }
-
-    return preferred || fallback || '';
-  }
-
-  // ----------------------------------------------------------
-  // ФОРМАТИРОВАНИЕ ВРЕМЕНИ
-  // ----------------------------------------------------------
-  function formatDuration(seconds) {
-    if (!seconds) return '';
-    var m = Math.floor(seconds / 60);
-    var s = seconds % 60;
-    return m + ':' + (s < 10 ? '0' : '') + s;
-  }
-
-  // ----------------------------------------------------------
-  // ГЕНЕРАЦИЯ ИМЕНИ КАРТОЧКИ
-  // У Pexels нет заголовков — используем категорию + id
-  // ----------------------------------------------------------
-  function makeName(video, category) {
-    var tag = '';
-    if (category) {
-      tag = category + ' — ';
-    }
-    return tag + 'Видео #' + video.id;
-  }
-
-  // ----------------------------------------------------------
-  // КОНВЕРТАЦИЯ Pexels video → карточка AdultJS
+  // FIX 1+2: КОНВЕРТАЦИЯ video → карточка AdultJS
   // ----------------------------------------------------------
   function videoToCard(video, index, category) {
-    var poster    = video.image || '';                       // thumbnail
-    var videoUrl  = pickVideoFile(video.video_files, 'sd'); // SD для TV
-    var previewUrl = pickVideoFile(video.video_files, 'sd');// тот же файл
+    var videoUrl = pickVideoFile(video.video_files);
 
-    // Альтернативный постер из video_pictures если нет image
+    // Постер: поле image → video_pictures[середина]
+    var poster = video.image || '';
     if (!poster && video.video_pictures && video.video_pictures.length) {
-      poster = video.video_pictures[0].picture || '';
+      var mid = Math.floor(video.video_pictures.length / 2);
+      poster = video.video_pictures[mid].picture || '';
     }
 
+    // Предпросмотр-картинка: другой кадр из video_pictures
+    var previewImg = '';
+    if (video.video_pictures && video.video_pictures.length > 1) {
+      previewImg = video.video_pictures[1].picture || poster;
+    } else {
+      previewImg = poster;
+    }
+
+    var label = (category ? category + ' — ' : '') + '#' + video.id;
+
+    console.log('[pexels] card #' + index,
+      '| time:', video.duration,
+      '| video:', videoUrl ? videoUrl.substring(0, 60) + '...' : 'ПУСТО',
+      '| poster:', poster ? '✅' : '❌'
+    );
+
     return {
-      name             : makeName(video, category),
-      video            : videoUrl,
-      picture          : poster,
-      preview          : previewUrl,
-      background_image : poster,
-      img              : poster,
+      name             : label,
+      video            : videoUrl,        // mp4 для плеера
+      picture          : poster,          // постер карточки
+      preview          : videoUrl,        // ← FIX1: видео при наведении
+      img              : previewImg,      // кадр для thumb
+      background_image : poster,          // фон страницы детали
       poster           : poster,
-      time             : formatDuration(video.duration),
+      time             : formatTime(video.duration), // ← FIX2: "1:23"
       quality          : 'HD',
       json             : false,
       related          : false,
       model            : null,
       source           : NAME,
-
-      // Доп. поля
       pexels_id        : video.id,
-      author           : video.user ? video.user.name : '',
-      pexels_url       : video.url  || ''
+      author           : video.user ? video.user.name : ''
     };
   }
 
@@ -160,31 +155,30 @@
   // МЕНЮ
   // ----------------------------------------------------------
   function buildMenu() {
-    var sections = [
-      { title: '🔥 Популярное',  playlist_url: NAME + '://popular'  },
-      { title: '🆕 Категории',   playlist_url: 'submenu',
-        submenu: CATEGORIES.map(function (c) {
+    return [
+      { title: '🔥 Популярное',  playlist_url: NAME + '://popular'   },
+      {
+        title        : '🎭 Категории',
+        playlist_url : 'submenu',
+        submenu      : CATEGORIES.map(function (c) {
           return {
             title        : c.title,
-            playlist_url : NAME + '://search/' + encodeURIComponent(c.query)
+            playlist_url : NAME + '://cat/' + encodeURIComponent(c.query)
           };
         })
       }
     ];
-    return sections;
   }
 
   // ----------------------------------------------------------
-  // FETCH → CARDS → ОТВЕТ
+  // FETCH HELPERS
   // ----------------------------------------------------------
   function fetchPopular(page, success, error) {
     pexelsGet('/popular', { page: page }, function (data) {
-      var results = (data.videos || []).map(function (v, i) {
-        return videoToCard(v, i, 'Популярное');
-      });
-
       success({
-        results     : results,
+        results     : (data.videos || []).map(function (v, i) {
+          return videoToCard(v, (page - 1) * PER_PAGE + i, 'Популярное');
+        }),
         collection  : true,
         total_pages : Math.min(Math.ceil((data.total_results || 100) / PER_PAGE), 10),
         menu        : buildMenu()
@@ -194,12 +188,12 @@
 
   function fetchSearch(query, page, success, error) {
     pexelsGet('/search', { query: query, page: page }, function (data) {
-      var results = (data.videos || []).map(function (v, i) {
-        return videoToCard(v, i, query);
-      });
-
       success({
-        results     : results,
+        title       : 'Pexels: ' + query,
+        results     : (data.videos || []).map(function (v, i) {
+          return videoToCard(v, i, query);
+        }),
+        url         : NAME + '://cat/' + encodeURIComponent(query),
         collection  : true,
         total_pages : Math.min(Math.ceil((data.total_results || 0) / PER_PAGE), 10),
         menu        : buildMenu()
@@ -208,17 +202,19 @@
   }
 
   // ----------------------------------------------------------
-  // РОУТЕР — разбираем playlist_url
+  // FIX 3: РОУТЕР — принимаем params.url И params.playlist_url
   // ----------------------------------------------------------
   function routeView(url, page, success, error) {
-    var searchPrefix = NAME + '://search/';
-    var popularUrl   = NAME + '://popular';
+    var catPrefix = NAME + '://cat/';
 
-    if (url.indexOf(searchPrefix) === 0) {
-      var query = decodeURIComponent(url.replace(searchPrefix, ''));
+    console.log('[pexels] routeView url:', url, 'page:', page);
+
+    if (url && url.indexOf(catPrefix) === 0) {
+      var query = decodeURIComponent(url.replace(catPrefix, '').split('?')[0]);
+      console.log('[pexels] → поиск по категории:', query);
       fetchSearch(query, page, success, error);
     } else {
-      // popular или любой неизвестный → popular
+      console.log('[pexels] → популярное');
       fetchPopular(page, success, error);
     }
   }
@@ -232,26 +228,29 @@
       fetchPopular(1, success, error);
     },
 
+    // FIX 3: принимаем url из обоих возможных полей
     view: function (params, success, error) {
       var page = parseInt(params.page, 10) || 1;
-      var url  = params.url || (NAME + '://popular');
+      var url  = params.url || params.playlist_url || (NAME + '://popular');
+
+      console.log('[pexels] view params:', JSON.stringify(params));
+
       routeView(url, page, success, error);
     },
 
+    // FIX 4: поиск — принимаем query и search
     search: function (params, success, error) {
-      var query = (params.query || '').trim();
+      var query = (params.query || params.search || '').trim();
       var page  = parseInt(params.page, 10) || 1;
+
+      console.log('[pexels] search query:', query, 'page:', page);
 
       if (!query) {
         success({ title: '', results: [], collection: true, total_pages: 1 });
         return;
       }
 
-      fetchSearch(query, page, function (data) {
-        data.title = 'Pexels: ' + query;
-        data.url   = NAME + '://search/' + encodeURIComponent(query);
-        success(data);
-      }, error);
+      fetchSearch(query, page, success, error);
     }
   };
 
@@ -261,10 +260,10 @@
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, PexelsParser);
-      console.log('[pexels_test] v1.0.0 зарегистрирован');
+      console.log('[pexels_test] v2.0.0 зарегистрирован');
       try {
         setTimeout(function () {
-          Lampa.Noty.show('Pexels Test v1.0 подключён', { time: 2500 });
+          Lampa.Noty.show('Pexels Test v2.0 подключён', { time: 2500 });
         }, 600);
       } catch (e) {}
       return true;
