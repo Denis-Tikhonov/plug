@@ -3,6 +3,14 @@
 // Version  : 2.0.0  (fix: preview, time, categories, search)
 // =============================================================
 
+	// === ДИАГНОСТИКА — вставить первой строкой ===
+	window.onerror = function (msg, src, line, col, err) {
+	  var text = 'ERR: ' + msg + ' | line: ' + line;
+	  try { Lampa.Noty.show(text, { time: 10000 }); } catch (e) {}
+	  try { console.error('[PEXELS ERROR]', msg, 'line:', line, 'col:', col); } catch (e) {}
+	  return false;
+	};
+
 (function () {
   'use strict';
 
