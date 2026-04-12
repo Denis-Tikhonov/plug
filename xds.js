@@ -1,287 +1,283 @@
 // =============================================================
-// xds.js — ТЕСТОВАЯ ЗАГЛУШКА AdultJS
-// Version  : 1.2.0
-// Изменено :
-//  [1.1.0] постеры соответствуют видео
-//  [1.2.0] BUGFIX: убран playlist_url:'submenu' из группы меню
-//          (AdultJS пытался загрузить URL 'submenu' → Script error)
+// pexels_test.js — ТЕСТОВАЯ ЗАГЛУШКА AdultJS на базе Pexels API
+// Version  : 1.0.0
+// Данные   : api.pexels.com (CORS: open, без прокси)
+// Постеры  : images.pexels.com (без CORS, без прокси)
+// Видео    : Pexels CDN / Vimeo CDN (без прокси)
+// Поиск    : /videos/search
 // =============================================================
 
 (function () {
   'use strict';
 
-  var NAME = 'xds';
+  // ----------------------------------------------------------
+  // КОНФИГ — вставьте свой ключ Pexels
+  // Получить бесплатно: https://www.pexels.com/api/
+  // ----------------------------------------------------------
+  var NAME     = 'xds';
+  var API_KEY  = 'daFtVOPyOPiuaIuuv3JctGOHmKVlCH6tK4PXLXO1kyTxKRwrEihaXyHT';
+  var API_BASE = 'https://api.pexels.com/videos';
+  var PER_PAGE = 15;
 
   // ----------------------------------------------------------
-  // ВИДЕО + ПОСТЕРЫ
+  // КАТЕГОРИИ — поисковые запросы к Pexels
   // ----------------------------------------------------------
-
-  var VIDEOS = [
-
-    {
-      title:'Big Buck Bunny',
-      url:'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-      poster:'https://peach.blender.org/wp-content/uploads/title_anouncement.jpg',
-      dur:'9:56'
-    },
-
-    {
-      title:'Elephants Dream',
-      url:'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-      poster:'https://upload.wikimedia.org/wikipedia/commons/3/3a/Elephants_Dream_s1_proog.jpg',
-      dur:'10:54'
-    },
-
-    {
-      title:'For Bigger Blazes',
-      url:'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-      poster:'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/ForBiggerBlazes.jpg',
-      dur:'0:15'
-    },
-
-    {
-      title:'For Bigger Escapes',
-      url:'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
-      poster:'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/ForBiggerEscape.jpg',
-      dur:'0:15'
-    },
-
-    {
-      title:'For Bigger Fun',
-      url:'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
-      poster:'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/ForBiggerFun.jpg',
-      dur:'0:15'
-    },
-
-    {
-      title:'For Bigger Joyrides',
-      url:'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
-      poster:'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/ForBiggerJoyrides.jpg',
-      dur:'0:15'
-    },
-
-    {
-      title:'For Bigger Meltdowns',
-      url:'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4',
-      poster:'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/ForBiggerMeltdowns.jpg',
-      dur:'0:15'
-    },
-
-    {
-      title:'Subaru Outback',
-      url:'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Subaru_Outback_On_Street_And_Dirt.mp4',
-      poster:'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/SubaruOutbackOnStreetAndDirt.jpg',
-      dur:'5:30'
-    },
-
-    {
-      title:'Tears of Steel',
-      url:'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
-      poster:'https://mango.blender.org/wp-content/uploads/2013/05/01_thom_celia_bridge.jpg',
-      dur:'12:14'
-    },
-
-    {
-      title:'Volkswagen GTI Review',
-      url:'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/VolkswagenGTIReview.mp4',
-      poster:'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/VolkswagenGTIReview.jpg',
-      dur:'0:14'
-    },
-
-    {
-      title:'We Are Going On Bullrun',
-      url:'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4',
-      poster:'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/WeAreGoingOnBullrun.jpg',
-      dur:'0:14'
-    },
-
-    {
-      title:'What Car For A Grand',
-      url:'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WhatCarCanYouGetForAGrand.mp4',
-      poster:'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/WhatCarCanYouGetForAGrand.jpg',
-      dur:'0:14'
-    }
-
+  var CATEGORIES = [
+    { title: '🌿 Природа',     query: 'nature'      },
+    { title: '🏙 Города',      query: 'city'        },
+    { title: '🐾 Животные',    query: 'animals'     },
+    { title: '🏋 Спорт',       query: 'sport'       },
+    { title: '✈ Путешествия',  query: 'travel'      },
+    { title: '🍕 Еда',         query: 'food'        },
+    { title: '💻 Технологии',  query: 'technology'  },
+    { title: '🎭 Люди',        query: 'people'      },
+    { title: '🌊 Океан',       query: 'ocean'       },
+    { title: '🏔 Горы',        query: 'mountain'    },
+    { title: '🌆 Закаты',      query: 'sunset'      },
+    { title: '🚗 Авто',        query: 'cars'        }
   ];
 
   // ----------------------------------------------------------
-  // ГЕНЕРАТОР КАРТОЧЕК
+  // PEXELS ЗАПРОС — Authorization header, CORS open
   // ----------------------------------------------------------
+  function pexelsGet(endpoint, params, onSuccess, onError) {
+    var url = API_BASE + endpoint + '?per_page=' + PER_PAGE;
 
-  function makeCards(count, offset) {
-
-    offset = offset || 0;
-
-    var cards = [];
-
-    var suffix = offset > 0 ? ' [стр.' + (Math.floor(offset / 12) + 1) + ']' : '';
-
-    for (var i = 0; i < count; i++) {
-
-      var idx = (offset + i) % VIDEOS.length;
-
-      var v = VIDEOS[idx];
-
-      cards.push({
-
-        name:'TEST #' + (offset + i + 1) + ' — ' + v.title + suffix,
-
-        video:v.url,
-
-        picture:v.poster,
-
-        preview:null,
-
-        time:v.dur,
-
-        quality:'1080p',
-
-        json:false,
-
-        related:false,
-
-        model:null,
-
-        source:NAME
-
-      });
-
+    if (params) {
+      for (var key in params) {
+        if (params.hasOwnProperty(key)) {
+          url += '&' + key + '=' + encodeURIComponent(params[key]);
+        }
+      }
     }
 
-    return cards;
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', url, true);
+    xhr.timeout = 12000;
+    xhr.setRequestHeader('Authorization', API_KEY);
 
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState !== 4) return;
+
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          onSuccess(JSON.parse(xhr.responseText));
+        } catch (e) {
+          onError('JSON parse error: ' + e.message);
+        }
+      } else {
+        onError('HTTP ' + xhr.status);
+      }
+    };
+
+    xhr.ontimeout = function () { onError('Timeout'); };
+    xhr.onerror   = function () { onError('Network error'); };
+
+    xhr.send();
+  }
+
+  // ----------------------------------------------------------
+  // ВЫБОР ВИДЕО ФАЙЛА
+  // Приоритет: sd → hd → первый доступный mp4
+  // SD выбирается намеренно — лучше совместимость с TV
+  // ----------------------------------------------------------
+  function pickVideoFile(video_files, prefer_quality) {
+    if (!video_files || !video_files.length) return '';
+
+    prefer_quality = prefer_quality || 'sd';
+
+    var preferred = null;
+    var fallback  = null;
+
+    for (var i = 0; i < video_files.length; i++) {
+      var f = video_files[i];
+      if (f.file_type !== 'video/mp4') continue;
+      if (f.quality === prefer_quality) { preferred = f.link; break; }
+      if (!fallback) fallback = f.link;
+    }
+
+    return preferred || fallback || '';
+  }
+
+  // ----------------------------------------------------------
+  // ФОРМАТИРОВАНИЕ ВРЕМЕНИ
+  // ----------------------------------------------------------
+  function formatDuration(seconds) {
+    if (!seconds) return '';
+    var m = Math.floor(seconds / 60);
+    var s = seconds % 60;
+    return m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  // ----------------------------------------------------------
+  // ГЕНЕРАЦИЯ ИМЕНИ КАРТОЧКИ
+  // У Pexels нет заголовков — используем категорию + id
+  // ----------------------------------------------------------
+  function makeName(video, category) {
+    var tag = '';
+    if (category) {
+      tag = category + ' — ';
+    }
+    return tag + 'Видео #' + video.id;
+  }
+
+  // ----------------------------------------------------------
+  // КОНВЕРТАЦИЯ Pexels video → карточка AdultJS
+  // ----------------------------------------------------------
+  function videoToCard(video, index, category) {
+    var poster    = video.image || '';                       // thumbnail
+    var videoUrl  = pickVideoFile(video.video_files, 'sd'); // SD для TV
+    var previewUrl = pickVideoFile(video.video_files, 'sd');// тот же файл
+
+    // Альтернативный постер из video_pictures если нет image
+    if (!poster && video.video_pictures && video.video_pictures.length) {
+      poster = video.video_pictures[0].picture || '';
+    }
+
+    return {
+      name             : makeName(video, category),
+      video            : videoUrl,
+      picture          : poster,
+      preview          : previewUrl,
+      background_image : poster,
+      img              : poster,
+      poster           : poster,
+      time             : formatDuration(video.duration),
+      quality          : 'HD',
+      json             : false,
+      related          : false,
+      model            : null,
+      source           : NAME,
+
+      // Доп. поля
+      pexels_id        : video.id,
+      author           : video.user ? video.user.name : '',
+      pexels_url       : video.url  || ''
+    };
   }
 
   // ----------------------------------------------------------
   // МЕНЮ
   // ----------------------------------------------------------
-
-  function buildMenu(){
-
-    return [{
-      title:'Категория: Все',
-      // [1.2.0] НЕТ playlist_url у группы — только submenu:[].
-      // Если прописать playlist_url:'submenu', AdultJS.View.filter()
-      // попытается загрузить страницу с URL 'submenu' → Script error.
-      submenu:[
-        {title:'[TEST] Все',     playlist_url:'xds://test/all'  },
-        {title:'[TEST] Короткие',playlist_url:'xds://test/short'},
-        {title:'[TEST] Длинные', playlist_url:'xds://test/long' }
-      ]
-    }];
-
+  function buildMenu() {
+    var sections = [
+      { title: '🔥 Популярное',  playlist_url: NAME + '://popular'  },
+      { title: '🆕 Категории',   playlist_url: 'submenu',
+        submenu: CATEGORIES.map(function (c) {
+          return {
+            title        : c.title,
+            playlist_url : NAME + '://search/' + encodeURIComponent(c.query)
+          };
+        })
+      }
+    ];
+    return sections;
   }
 
   // ----------------------------------------------------------
-  // API
+  // FETCH → CARDS → ОТВЕТ
   // ----------------------------------------------------------
+  function fetchPopular(page, success, error) {
+    pexelsGet('/popular', { page: page }, function (data) {
+      var results = (data.videos || []).map(function (v, i) {
+        return videoToCard(v, i, 'Популярное');
+      });
 
-  var XdsStub = {
+      success({
+        results     : results,
+        collection  : true,
+        total_pages : Math.min(Math.ceil((data.total_results || 100) / PER_PAGE), 10),
+        menu        : buildMenu()
+      });
+    }, error);
+  }
 
-    main:function(params,success,error){
+  function fetchSearch(query, page, success, error) {
+    pexelsGet('/search', { query: query, page: page }, function (data) {
+      var results = (data.videos || []).map(function (v, i) {
+        return videoToCard(v, i, query);
+      });
 
-      setTimeout(function(){
+      success({
+        results     : results,
+        collection  : true,
+        total_pages : Math.min(Math.ceil((data.total_results || 0) / PER_PAGE), 10),
+        menu        : buildMenu()
+      });
+    }, error);
+  }
 
-        success({
-          results:makeCards(12,0),
-          collection:true,
-          total_pages:3,
-          menu:buildMenu()
-        });
+  // ----------------------------------------------------------
+  // РОУТЕР — разбираем playlist_url
+  // ----------------------------------------------------------
+  function routeView(url, page, success, error) {
+    var searchPrefix = NAME + '://search/';
+    var popularUrl   = NAME + '://popular';
 
-      },0);
-
-    },
-
-    view:function(params,success,error){
-
-      var page=parseInt(params.page,10)||1;
-
-      var offset=(page-1)*12;
-
-      setTimeout(function(){
-
-        success({
-          results:makeCards(12,offset),
-          collection:true,
-          total_pages:3,
-          menu:buildMenu()
-        });
-
-      },0);
-
-    },
-
-    search:function(params,success,error){
-
-      var query=params.query||'';
-
-      setTimeout(function(){
-
-        var results=makeCards(4,0).map(function(c,i){
-
-          c.name='ПОИСК['+query+'] #'+(i+1)+' — '+VIDEOS[i].title;
-
-          return c;
-
-        });
-
-        success({
-          title:'xds: '+query,
-          results:results,
-          url:'xds://test/search?q='+encodeURIComponent(query),
-          collection:true,
-          total_pages:1
-        });
-
-      },0);
-
+    if (url.indexOf(searchPrefix) === 0) {
+      var query = decodeURIComponent(url.replace(searchPrefix, ''));
+      fetchSearch(query, page, success, error);
+    } else {
+      // popular или любой неизвестный → popular
+      fetchPopular(page, success, error);
     }
+  }
 
+  // ----------------------------------------------------------
+  // ПАРСЕР API
+  // ----------------------------------------------------------
+  var PexelsParser = {
+
+    main: function (params, success, error) {
+      fetchPopular(1, success, error);
+    },
+
+    view: function (params, success, error) {
+      var page = parseInt(params.page, 10) || 1;
+      var url  = params.url || (NAME + '://popular');
+      routeView(url, page, success, error);
+    },
+
+    search: function (params, success, error) {
+      var query = (params.query || '').trim();
+      var page  = parseInt(params.page, 10) || 1;
+
+      if (!query) {
+        success({ title: '', results: [], collection: true, total_pages: 1 });
+        return;
+      }
+
+      fetchSearch(query, page, function (data) {
+        data.title = 'Pexels: ' + query;
+        data.url   = NAME + '://search/' + encodeURIComponent(query);
+        success(data);
+      }, error);
+    }
   };
 
   // ----------------------------------------------------------
   // РЕГИСТРАЦИЯ
   // ----------------------------------------------------------
-
-  function tryRegister(){
-
-    if(window.AdultPlugin && typeof window.AdultPlugin.registerParser==='function'){
-
-      window.AdultPlugin.registerParser(NAME,XdsStub);
-
-      console.log('[xds-stub] v1.1.0 registered');
-
-      try{
-
-        setTimeout(function(){
-
-          Lampa.Noty.show('xds: тестовая заглушка v1.1.0',{time:2500});
-
-        },500);
-
-      }catch(e){}
-
+  function tryRegister() {
+    if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
+      window.AdultPlugin.registerParser(NAME, PexelsParser);
+      console.log('[pexels_test] v1.0.0 зарегистрирован');
+      try {
+        setTimeout(function () {
+          Lampa.Noty.show('Pexels Test v1.0 подключён', { time: 2500 });
+        }, 600);
+      } catch (e) {}
       return true;
-
     }
-
     return false;
-
   }
 
-  if(!tryRegister()){
-
-    var elapsed=0;
-
-    var poll=setInterval(function(){
-
-      elapsed+=100;
-
-      if(tryRegister()||elapsed>=10000) clearInterval(poll);
-
-    },100);
-
+  if (!tryRegister()) {
+    var _elapsed = 0;
+    var _poll = setInterval(function () {
+      _elapsed += 100;
+      if (tryRegister() || _elapsed >= 10000) clearInterval(_poll);
+    }, 100);
   }
 
 })();
