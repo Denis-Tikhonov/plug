@@ -689,7 +689,7 @@
           // pornobriz.com → 'briz'
           var domainMap = {
             'pornobriz.com': 'briz',
-            'eporner.com':   'eporner',
+            'eporner.com':   'epor',
             'yjizz.com':     'yjizz',
             'phub.net':      'phub',
             'xds.com':       'xds',
@@ -749,7 +749,13 @@
           if (_ps.indexOf('http') === 0 || _ps.indexOf('//') === 0) {
             try {
               var _hn = new URL(ch.playlist_url).hostname.replace('www.', '');
-              var _dm = { 'pornobriz.com':'briz','eporner.com':'eporner','yjizz.com':'yjizz','phub.net':'phub','xds.com':'xds' };
+              var _dm = { 		
+		'pornobriz.com':'briz',
+		'eporner.com':'epor',
+		'yjizz.com':'yjizz',
+		'phub.net':'phub',
+		'xds.com':'xds' 
+};
               _pn = _dm[_hn] || _ps.split('/')[0];
             } catch(e2) { _pn = 'briz'; }
           } else {
