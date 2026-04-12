@@ -780,7 +780,7 @@
             'rt.pornhub.com':       'phub',
             'top.porno365tube.win': 'p365',
             'xv-ru.com':            'xv-ru',
-            'xds.com':              'xds',
+            'https://api.pexels.com/videos':              'xds',
           };
           parserName = domainMap[hostname] || stripped.split('/')[0];
         } catch(e) {
@@ -844,7 +844,7 @@
                 'rt.pornhub.com':       'phub',
                 'top.porno365tube.win': 'p365',
                 'xv-ru.com':            'xv-ru',
-                'xds.com':              'xds',
+                'https://api.pexels.com/videos':              'xds',
               };
               _pn = _dm[_hn] || _ps.split('/')[0];
             } catch(e2) { _pn = 'briz'; }
