@@ -692,6 +692,7 @@
             'eporner.com':   'epor',
             'yjizz.com':     'yjizz',
             'rt.pornhub.com':      'phub',
+			'top.porno365tube.win',
             'xds.com':       'xds',
           };
           parserName = domainMap[hostname] || stripped.split('/')[0];
@@ -754,6 +755,7 @@
 		'eporner.com':'epor',
 		'yjizz.com':'yjizz',
 		'rt.pornhub.com':'phub',
+		'top.porno365tube.win',
 		'xds.com':'xds' 
 };
               _pn = _dm[_hn] || _ps.split('/')[0];
