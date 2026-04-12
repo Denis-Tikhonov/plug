@@ -266,7 +266,7 @@ try {
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, PexelsParser);
-      console.log('[pexels_test] v2.0.0 зарегистрирован');
+    //  console.log('[pexels_test] v2.0.0 зарегистрирован');
       try {
         setTimeout(function () {
           Lampa.Noty.show('Pexels Test v2.0 подключён', { time: 2500 });
