@@ -1,11 +1,13 @@
 // =============================================================
 // lkno.js — Lenkino Parser для AdultJS
-// Version  : 1.1.0
+// Version  : 1.2.0
 // Changes  :
-//   [1.1.0] main() → /top-porno
-//           qualities() убрана лишняя обёртка {qualities:{}}
-//           Пагинация → /page/N/
-//           Добавлены категории в меню + роутинг
+//   [1.2.0] Стартовая страница → / (корень сайта)
+//           Пагинация → /page/N (без trailing slash)
+//           Категории → /{slug} (без trailing slash)
+//           Поиск → /?q={query}&page=N
+//           Убран несуществующий slug top-porno из CATS
+//           Фильтрация внешних ссылок в parseHtml
 // =============================================================
 
 (function () {
@@ -15,30 +17,28 @@
   var BASE_URL = 'https://wes.lenkino.adult';
 
   // ----------------------------------------------------------
-  // КАТЕГОРИИ (из анализа сайта)
+  // КАТЕГОРИИ (top-porno удалён — возвращает 404)
   // ----------------------------------------------------------
   var CATS = [
-    { title: '🔥 Топ порно',       val: 'top-porno'      },
-    { title: '🆕 Новинки',         val: 'new-clips'      },
-    { title: '🇷🇺 Русское',        val: 'a1-russian'     },
-    { title: '👩 Зрелые (MILF)',   val: 'milf-porn'      },
-    { title: '💋 Мачеха',          val: 'stepmom'        },
-    { title: '🎭 Анал',            val: 'anal-porno'     },
-    { title: '🍒 Большие сиськи',  val: 'big-tits'       },
-    { title: '🌸 Эротика',         val: 'erotic'         },
-    { title: '❤️ Красивый секс',   val: 'beautiful'      },
-    { title: '🎓 Молодые',         val: 'teen'           },
-    { title: '🌏 Азиатки',         val: 'asian'          },
-    { title: '🎥 Любительское',    val: 'amateur'        },
-    { title: '👅 Минет',           val: 'blowjob'        },
-    { title: '💦 Кремпай',         val: 'creampie'       },
-    { title: '📹 POV',             val: 'pov'            },
-    { title: '🏳‍🌈 Лесби',         val: 'lesbian'        },
-    { title: '🍑 Big Ass',         val: 'big-ass'        },
-    { title: '🌍 Межрасовый',      val: 'interracial'    },
-    { title: '👨‍👩‍👧 Семья',          val: 'family'         },
-    { title: '🎌 Хентай',          val: 'hentai'         },
-    { title: '💆 Массаж',          val: 'massage'        },
+    { title: '🇷🇺 Русское',        val: 'a1-russian'  },
+    { title: '👩 Зрелые (MILF)',   val: 'milf-porn'   },
+    { title: '💋 Мачеха',          val: 'stepmom'     },
+    { title: '🎭 Анал',            val: 'anal-porno'  },
+    { title: '🍒 Большие сиськи',  val: 'big-tits'    },
+    { title: '🌸 Эротика',         val: 'erotic'      },
+    { title: '❤️ Красивый секс',   val: 'beautiful'   },
+    { title: '🎓 Молодые',         val: 'teen'        },
+    { title: '🌏 Азиатки',         val: 'asian'       },
+    { title: '🎥 Любительское',    val: 'amateur'     },
+    { title: '👅 Минет',           val: 'blowjob'     },
+    { title: '💦 Кремпай',         val: 'creampie'    },
+    { title: '📹 POV',             val: 'pov'         },
+    { title: '🏳‍🌈 Лесби',         val: 'lesbian'     },
+    { title: '🍑 Big Ass',         val: 'big-ass'     },
+    { title: '🌍 Межрасовый',      val: 'interracial' },
+    { title: '👨‍👩‍👧 Семья',          val: 'family'      },
+    { title: '🎌 Хентай',          val: 'hentai'      },
+    { title: '💆 Массаж',          val: 'massage'     },
   ];
 
   // ----------------------------------------------------------
@@ -46,24 +46,39 @@
   // ----------------------------------------------------------
   function fixUrl(url) {
     if (!url) return '';
-    if (url.indexOf('//') === 0)  return 'https:' + url;
-    if (url.indexOf('/')  === 0)  return BASE_URL + url;
+    if (url.indexOf('//') === 0) return 'https:' + url;
+    if (url.indexOf('/')  === 0) return BASE_URL + url;
     return url;
+  }
+
+  // Только ссылки нашего сайта — фильтрует рекламные карточки
+  function isInternalUrl(url) {
+    return url && url.indexOf(BASE_URL) === 0;
   }
 
   // ----------------------------------------------------------
   // ПОСТРОЕНИЕ URL
   // ----------------------------------------------------------
-  // Каталог/категория: /top-porno/ или /milf-porn/page/2/
+  // Примеры:
+  //   buildListUrl('', 1)            → https://wes.lenkino.adult/
+  //   buildListUrl('', 2)            → https://wes.lenkino.adult/page/2
+  //   buildListUrl('a1-russian', 1)  → https://wes.lenkino.adult/a1-russian
+  //   buildListUrl('a1-russian', 2)  → https://wes.lenkino.adult/a1-russian/page/2
   function buildListUrl(slug, page) {
     page = parseInt(page, 10) || 1;
-    var base = BASE_URL + '/' + slug;
+    if (!slug) {
+      return page <= 1
+        ? BASE_URL + '/'
+        : BASE_URL + '/page/' + page;
+    }
     return page <= 1
-      ? base + '/'
-      : base + '/page/' + page + '/';
+      ? BASE_URL + '/' + slug
+      : BASE_URL + '/' + slug + '/page/' + page;
   }
 
-  // Поиск: /?q=wife или /?q=wife&page=2
+  // Примеры:
+  //   buildSearchUrl('wife', 1)  → https://wes.lenkino.adult/?q=wife
+  //   buildSearchUrl('wife', 2)  → https://wes.lenkino.adult/?q=wife&page=2
   function buildSearchUrl(query, page) {
     page = parseInt(page, 10) || 1;
     var url = BASE_URL + '/?q=' + encodeURIComponent(query);
@@ -108,25 +123,29 @@
 
       if (!linkEl || !imgEl) continue;
 
+      var href = fixUrl(linkEl.getAttribute('href') || '');
+
+      // Отсекаем рекламные и внешние карточки (например tlenporno.com)
+      if (!isInternalUrl(href)) continue;
+
       var title  = (imgEl.getAttribute('alt') || linkEl.textContent || '').trim();
-      var href   = fixUrl(linkEl.getAttribute('href') || '');
       var poster = fixUrl(
-        imgEl.getAttribute('data-src') ||
+        imgEl.getAttribute('data-src') ||   // lazy-load
         imgEl.getAttribute('src')      || ''
       );
 
-      if (!href || !title) continue;
+      if (!title) continue;
 
       results.push({
-        name:    title,
-        url:     href,      // для перехода / qualities
-        video:   href,      // AdultJS триггерит qualities()
-        picture: poster,
-        img:     poster,
-        poster:  poster,
+        name:             title,
+        url:              href,
+        video:            href,
+        picture:          poster,
+        img:              poster,
+        poster:           poster,
         background_image: poster,
-        source:  NAME,
-        json:    true       // qualities() достаёт MP4
+        source:           NAME,
+        json:             true
       });
     }
 
@@ -168,16 +187,16 @@
         return;
       }
       success({
-        results:     results,
-        collection:  true,
+        results:    results,
+        collection: true,
         total_pages: 50,
-        menu:        buildMenu()
+        menu:       buildMenu()
       });
     }, error);
   }
 
   // ----------------------------------------------------------
-  // РОУТЕР
+  // ВСПОМОГАТЕЛЬНЫЙ РОУТЕР
   // ----------------------------------------------------------
   function parseSearchParam(url) {
     var m = url.match(/[?&]search=([^&]*)/);
@@ -189,9 +208,9 @@
   // ----------------------------------------------------------
   var LenkinoParser = {
 
-    // ★ Стартовая страница → /top-porno
+    // Стартовая страница → корень сайта /
     main: function (params, success, error) {
-      fetchList(buildListUrl('top-porno', 1), success, error);
+      fetchList(buildListUrl('', 1), success, error);
     },
 
     view: function (params, success, error) {
@@ -200,14 +219,14 @@
 
       console.log('[lkno] view → "' + url + '" page=' + page);
 
-      // 1) ?search=запрос (через фильтр AdultJS)
+      // 1) ?search=запрос (фильтр AdultJS)
       var sq = parseSearchParam(url);
       if (sq !== null) {
         fetchList(buildSearchUrl(sq.trim(), page), success, error);
         return;
       }
 
-      // 2) lkno/cat/milf-porn → /milf-porn/page/N/
+      // 2) lkno/cat/milf-porn → /milf-porn или /milf-porn/page/2
       if (url.indexOf(NAME + '/cat/') === 0) {
         var cat = url.replace(NAME + '/cat/', '').split('?')[0].trim();
         if (cat) {
@@ -225,8 +244,8 @@
         }
       }
 
-      // 4) По умолчанию → top-porno
-      fetchList(buildListUrl('top-porno', page), success, error);
+      // 4) По умолчанию → главная страница /
+      fetchList(buildListUrl('', page), success, error);
     },
 
     search: function (params, success, error) {
@@ -245,19 +264,17 @@
       }, error);
     },
 
-    // ★ ИСПРАВЛЕНО: убрана лишняя обёртка {qualities:{}}
-    //              Теперь: success({ '720p': url })
     qualities: function (videoPageUrl, success, error) {
       console.log('[lkno] qualities →', videoPageUrl);
 
       request(videoPageUrl, function (html) {
-        // Паттерны в порядке приоритета
+        // Паттерны поиска MP4 в порядке приоритета
         var patterns = [
-          // get_file — основной паттерн Lenkino
+          // Основной паттерн Lenkino: /get_file/.../xxx.mp4/
           /["'](https?:\/\/[^"']*\/get_file\/[^"']*\.mp4\/?)[^"']*/i,
           // Любой MP4 в кавычках
           /"(https?:\/\/[^"]+?\.mp4[^"]*?)"/i,
-          // Без кавычек
+          // Fallback без кавычек
           /(https?:\/\/\S+\.mp4\/?)/i
         ];
 
@@ -266,13 +283,12 @@
           if (match && match[1]) {
             var cleanUrl = match[1].replace(/\\/g, '').replace(/\/$/, '') + '/';
             console.log('[lkno] MP4 найден:', cleanUrl.substring(0, 80));
-            // ★ Возвращаем плоский объект без обёртки
             success({ '720p': cleanUrl });
             return;
           }
         }
 
-        // Fallback: тег <video source>
+        // Fallback: тег <video>
         var container = document.createElement('div');
         container.innerHTML = html;
         var srcEl = container.querySelector('video source[src], video[src]');
@@ -297,7 +313,7 @@
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, LenkinoParser);
-      console.log('[lkno] v1.1.0 зарегистрирован OK');
+      console.log('[lkno] v1.2.0 зарегистрирован OK');
       return true;
     }
     return false;
