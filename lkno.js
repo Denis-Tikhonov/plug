@@ -1,35 +1,3 @@
-- Search URL: `/search/step-sister-1.html` (spaces to hyphens)
-- Image: `data-original` attribute on `img.lazy`, protocol-relative URLs need `https:` prepended
-- Preview: `data-clip` attribute on `a.frame.video`
-- The parser was based on briz204 structure
-
-I don't have the full previous context, so I need to piece together the complete parser file from these HTML patterns and the AdultJS framework conventions.
-
-Looking at how other parsers like xds.js are structured, I need to build out the main methods that handle the homepage with horizontal bands, the catalog/category/search views, global search functionality, and individual video details. For YouJizz specifically, I'm working with the main domain structure and category pages, then search endpoints that convert spaces to hyphens in the URL.
-
-Writing the parser structure... I'm structuring the complete parser with the key methods needed: config for the host and name, URL builders for search and catalog pages, a fetch function to retrieve and parse the HTML, and a card parser that extracts the video link, thumbnail image with proper URL formatting, and preview clip data. Writing the parser code... Still writing parser... Setting up the request handler to parse the response and extract video items from the DOM using multiple selector strategies, then falling back to alternative selectors if the initial ones don't find anything. I should prioritize the `data-original` attribute for image URLs since that's where the actual poster is stored, rather than filtering out spacer.gif. Looking at how other plugins handle this, I notice that `json: false` in xds.js means it returns direct MP4 URLs, whereas YouJizz requires navigating to a video page first to extract the actual playable URL — so I'll need to implement a separate method to handle that extraction step. I need to figure out how the plugin handles video extraction—whether to use a direct URL, an API endpoint, or extract from the page itself. Since YouJizz requires parsing the video page to get the actual stream, I'll structure the parser to use the `qualities` function for that extraction, and I'll start writing out the complete parser code now. Writing the parser structure... Still writing parser... Still writing the HTTP helper... Writing the menu structure... Writing routing logic...
-
-Now I'm setting up a function to extract the video URL from the page HTML by trying multiple regex patterns to find the MP4 file link, then returning it with quality metadata or an error if nothing's found.
-
-Building the parser API... I'm setting up a polling mechanism that attempts to register the parser every 100 milliseconds until it succeeds or times out after 10 seconds. Now I'm examining the HTML structure of the video cards to identify the correct selectors for extracting video information from the page.
-
-Looking at the frame-wrapper element, I notice it contains the link and image but no title, which means the title must be in a parent or sibling element. The `.video-item` container is likely the proper card selector since it would hold both the frame-wrapper and the title element. I'm also confirming that my approach to handle lazy-loaded images is correct by preferring the `data-original` attribute over the spacer.gif placeholder in the `src` attribute.
-
-Now I need to figure out pagination detection from the HTML and decide whether to use the `video` field directly or implement the `qualities` method for the AdultJS plugin.
-
-Looking at how other parsers handle this, I think the right approach is to set the `url` field to the page URL and implement a `qualities` method that fetches the actual video URL when needed, since YouJizz requires extracting the stream from the video page itself.
-
-Finalizing the complete parser... I'm focusing on the image selector strategy — the lazy-loaded images use `data-original` attributes, so my querySelector chain will find them correctly. For titles, I'm trying multiple selector patterns since I don't have the exact HTML structure, and falling back to parsing the URL slug if needed. Now I'm writing out the complete parser code.
-
-I'm settling on version 1.1.0 since we're fixing the search URL format and poster field detection. For the total pages, I should try parsing the pagination links to find the maximum page number rather than hardcoding it to 10, which would give more accurate results.
-
-Writing the complete parser... I need to see the next thinking content to rewrite it. You've provided the guidelines and my current rewritten thinking, but the "next thinking" section appears to be empty or missing.
-
-Could you please share the next thinking that needs to be rewritten?
-
-</div>
-
-```javascript
 // =============================================================
 // yjizz.js — YouJizz Parser для AdultPlugin / Lampa
 // Version  : 1.1.0
