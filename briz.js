@@ -1,34 +1,18 @@
 // =============================================================
 // briz.js — Парсер PornoBriz для AdultJS / AdultPlugin (Lampa)
-// Version  : 2.0.4
+// Version  : 3.0.0
 // Changed  :
 //   [2.0.3] BUGFIX: div.thumb_main, data-original, video[data-preview]
-//   [2.0.4] BUGFIX: json:true + video=HTML-страница (как в v1.5.0)
-//           qualities() парсит страницу видео и возвращает реальные
-//           mp4-ссылки с качеством 1080p/720p/480p/360p/240p
-//           (в v2.0.2/2.0.3 был json:false + video=preview.mp4 —
-//            плеер открывал короткое превью вместо полного видео)
-//
-//   СТРУКТУРА САЙТА (из анализа):
-//     Карточки  : div.logo (НЕ div.thumb_main как было раньше)
-//     Постер    : img[src] — прямой src, без data-lazy
-//     Thumbnail : https://pornobriz.com/content/screen/77/XXXXX_11.jpg
-//     Поиск     : /?q={query}  (НЕ /search/{query}/page1/)
-//     Категории : /{slug}/  затем &page={N}
-//     Пагинация : &page={N} добавляется к любому URL
-//     Сортировка: НА САЙТЕ НЕТ (убрана из меню)
-//     Видео MP4 : /preview/{slug}.mp4 — по slug из URL видео
-//
-//   ИСПРАВЛЕНИЯ:
-//     - XPath исправлен: div.logo вместо div.thumb_main
-//     - Поиск: URL /?q={query}&page={N}
-//     - Категории: /{slug}/?page={N}
-//     - Пагинация: параметр &page=N
-//     - Видео: прямая ссылка по паттерну /preview/{slug}.mp4
-//     - Постеры: img[src] без lazy-атрибутов (они не нужны)
-//     - Все 70 категорий из анализа сайта
-//     - Script error при закладке: защита от не-массива в Storage
-//     - Удалена SORTS (сортировки нет на сайте)
+//   [2.0.4] BUGFIX: json:true + video=HTML-страница
+//           qualities() парсит страницу и возвращает реальные mp4
+//   [3.0.0] BUGFIX совместимости с AdultJS (на основе xds_1.1.0):
+//           buildMenu() — убран аргумент url
+//           buildMenu() — убрана логика активной категории
+//           buildMenu() — playlist_url поиска: HOST → NAME+'/search/'
+//           buildMenu() — добавлен playlist_url:'submenu' для категорий
+//           search()    — добавлен menu:buildMenu() во все ветки ответа
+//           view()      — buildMenu() без аргумента
+//           main()      — buildMenu() без аргумента
 // =============================================================
 
 (function () {
@@ -40,8 +24,7 @@
   var NOTY_TIME = 3000;
 
   // ----------------------------------------------------------
-  // URL Cloudflare Worker
-  // Приоритет: AdultPlugin.workerUrl → константа
+  // CLOUDFLARE WORKER
   // ----------------------------------------------------------
   var WORKER_DEFAULT = 'https://zonaproxy.777b737.workers.dev/?url=';
 
@@ -81,8 +64,8 @@
 
   function safeParams(p) {
     if (!p) return '(null)';
-    try { return JSON.stringify({ url: p.url||'', page: p.page||'', query: p.query||'' }); }
-    catch(e) { return '(err)'; }
+    try { return JSON.stringify({ url: p.url || '', page: p.page || '', query: p.query || '' }); }
+    catch (e) { return '(err)'; }
   }
 
   // ----------------------------------------------------------
@@ -93,17 +76,16 @@
   function err(m, d)  { console.error(TAG, m, d !== undefined ? d : ''); }
 
   function notyErr(msg) {
-    try { Lampa.Noty.show(TAG + ' ⛔ ' + msg, { time: NOTY_TIME, style: 'error' }); } catch(e) {}
+    try { Lampa.Noty.show(TAG + ' ⛔ ' + msg, { time: NOTY_TIME, style: 'error' }); } catch (e) {}
   }
   function notyOk(msg) {
-    try { Lampa.Noty.show(TAG + ' ✅ ' + msg, { time: NOTY_TIME }); } catch(e) {}
+    try { Lampa.Noty.show(TAG + ' ✅ ' + msg, { time: NOTY_TIME }); } catch (e) {}
   }
 
   // ----------------------------------------------------------
   // СЕТЕВОЙ СЛОЙ
   // Приоритет: AdultPlugin.networkRequest → native+Worker → Reguest → fetch
   // ----------------------------------------------------------
-
   function _native(url, ok, fail) {
     if (!Lampa.Network || typeof Lampa.Network.native !== 'function') {
       fail('no_native'); return;
@@ -128,14 +110,14 @@
         },
         function (e) {
           if (done) return; done = true; clearTimeout(tid);
-          var msg = (e && e.message) ? e.message : String(e||'');
+          var msg = (e && e.message) ? e.message : String(e || '');
           var st  = (e && e.status)  ? e.status  : 0;
           if (st === 403 || msg.indexOf('403') !== -1) { fail('403'); return; }
           fail(msg || 'native_err');
         },
         false, { headers: { 'X-Requested-With': 'XMLHttpRequest' } }
       );
-    } catch(ex) {
+    } catch (ex) {
       if (done) return; done = true; clearTimeout(tid);
       fail(ex.message);
     }
@@ -151,7 +133,7 @@
         function (e) { fail(e || 'req_err'); },
         false, { dataType: 'text', timeout: 10000 }
       );
-    } catch(ex) { fail(ex.message); }
+    } catch (ex) { fail(ex.message); }
   }
 
   function _fetch(url, ok, fail) {
@@ -187,103 +169,96 @@
   }
 
   // ----------------------------------------------------------
-  // ПОСТРОЕНИЕ URL
-  //
-  // Из анализа сайта:
-  //   Главная      : https://pornobriz.com/
-  //   Категория    : https://pornobriz.com/{slug}/
-  //   Поиск        : https://pornobriz.com/?q={query}
-  //   Пагинация    : добавляем &page={N} к любому URL
-  //
-  // Сортировки на сайте НЕТ (sortingOptions: 0)
+  // КАТЕГОРИИ (70 штук из анализа сайта)
   // ----------------------------------------------------------
-
-  // [2.0.0] Полный список 70 категорий из анализа сайта
   var CATS = [
-    { title: 'Азиатки',              val: 'asian'              },
-    { title: 'Анальный секс',        val: 'anal'               },
-    { title: 'БДСМ',                 val: 'bdsm'               },
-    { title: 'Блондинки',            val: 'blonde'             },
-    { title: 'Большая жопа',         val: 'big_ass'            },
-    { title: 'Большие сиськи',       val: 'big_tits'           },
-    { title: 'Большой член',         val: 'big_dick'           },
-    { title: 'Бритая киска',         val: 'shaved'             },
-    { title: 'Брюнетки',             val: 'brunette'           },
-    { title: 'В одежде',             val: 'clothes'            },
-    { title: 'Волосатые киски',      val: 'hairy'              },
-    { title: 'Глотают сперму',       val: 'swallow'            },
-    { title: 'Глубокая глотка',      val: 'deepthroat'         },
-    { title: 'Групповой секс',       val: 'group'              },
-    { title: 'Двойное проникновение',val: 'double_penetration' },
-    { title: 'Длинноволосые',        val: 'long_hair'          },
-    { title: 'Дрочат',               val: 'wanking'            },
-    { title: 'Жесткий секс',         val: 'hardcore'           },
-    { title: 'ЖМЖ порно',            val: 'ffm'                },
-    { title: 'Игрушки',              val: 'toys'               },
-    { title: 'Казашки',              val: 'kazakh'             },
-    { title: 'Камшот',               val: 'cumshot'            },
-    { title: 'Кончают в рот',        val: 'cum_in_mouth'       },
-    { title: 'Красивая задница',     val: 'perfect_ass'        },
-    { title: 'Красивое белье',       val: 'lingerie'           },
-    { title: 'Красивые девушки',     val: 'beautiful'          },
-    { title: 'Красивые сиськи',      val: 'beautiful_tits'     },
-    { title: 'Крупным планом',       val: 'close_up'           },
-    { title: 'Кунилингус',           val: 'pussy_licking'      },
-    { title: 'Лесбиянки',            val: 'lesbian'            },
-    { title: 'Любительское',         val: 'amateur'            },
-    { title: 'Маленькие девушки',    val: 'petite'             },
-    { title: 'Маленькие сиськи',     val: 'small_tits'         },
-    { title: 'Мамочки',              val: 'milf'               },
-    { title: 'Мастурбация',          val: 'masturbation'       },
-    { title: 'Межрасовое',           val: 'interracial'        },
-    { title: 'МЖМ порно',            val: 'mfm'                },
-    { title: 'Милашки',              val: 'cute'               },
-    { title: 'Минет',                val: 'blowjob'            },
-    { title: 'Молодые',              val: 'seks-molodye'       },
-    { title: 'Мулатки',              val: 'mulatto'            },
-    { title: 'Накачанные девушки',   val: 'sporty'             },
-    { title: 'Оральный секс',        val: 'oral'               },
-    { title: 'Оргазм',               val: 'orgasm'             },
-    { title: 'Офис',                 val: 'office'             },
-    { title: 'Пикап',                val: 'pickup'             },
-    { title: 'Порно в чулках',       val: 'stockings'          },
-    { title: 'Порно со зрелыми',     val: 'mature'             },
-    { title: 'Публичный секс',       val: 'public'             },
-    { title: 'Рыжие',                val: 'redhead'            },
-    { title: 'Русское порно',        val: 'russian'            },
-    { title: 'Секс в машине',        val: 'car_sex'            },
-    { title: 'Секс на природе',      val: 'outdoor'            },
-    { title: 'Сквирт',               val: 'squirt'             },
-    { title: 'Смазливые',            val: 'pretty'             },
-    { title: 'Соло девушка',         val: 'solo_girl'          },
-    { title: 'Сперма в жопе',        val: 'creampie'           },
-    { title: 'Сперма на груди',      val: 'cum_on_tits'        },
-    { title: 'Сперма на лице',       val: 'facial'             },
-    { title: 'Страпон',              val: 'strap-on'           },
-    { title: 'Стриптиз',             val: 'striptease'         },
-    { title: 'Темноволосые',         val: 'black-haired'       },
-    { title: 'Фетиш',                val: 'fetish'             },
-    { title: 'Фингеринг',            val: 'fingering'          },
-    { title: 'Фистинг',              val: 'fisting'            },
-    { title: 'Худые девушки',        val: 'skinny'             },
+    { title: 'Азиатки',               val: 'asian'              },
+    { title: 'Анальный секс',         val: 'anal'               },
+    { title: 'БДСМ',                  val: 'bdsm'               },
+    { title: 'Блондинки',             val: 'blonde'             },
+    { title: 'Большая жопа',          val: 'big_ass'            },
+    { title: 'Большие сиськи',        val: 'big_tits'           },
+    { title: 'Большой член',          val: 'big_dick'           },
+    { title: 'Бритая киска',          val: 'shaved'             },
+    { title: 'Брюнетки',              val: 'brunette'           },
+    { title: 'В одежде',              val: 'clothes'            },
+    { title: 'Волосатые киски',       val: 'hairy'              },
+    { title: 'Глотают сперму',        val: 'swallow'            },
+    { title: 'Глубокая глотка',       val: 'deepthroat'         },
+    { title: 'Групповой секс',        val: 'group'              },
+    { title: 'Двойное проникновение', val: 'double_penetration' },
+    { title: 'Длинноволосые',         val: 'long_hair'          },
+    { title: 'Дрочат',                val: 'wanking'            },
+    { title: 'Жесткий секс',          val: 'hardcore'           },
+    { title: 'ЖМЖ порно',             val: 'ffm'                },
+    { title: 'Игрушки',               val: 'toys'               },
+    { title: 'Казашки',               val: 'kazakh'             },
+    { title: 'Камшот',                val: 'cumshot'            },
+    { title: 'Кончают в рот',         val: 'cum_in_mouth'       },
+    { title: 'Красивая задница',      val: 'perfect_ass'        },
+    { title: 'Красивое белье',        val: 'lingerie'           },
+    { title: 'Красивые девушки',      val: 'beautiful'          },
+    { title: 'Красивые сиськи',       val: 'beautiful_tits'     },
+    { title: 'Крупным планом',        val: 'close_up'           },
+    { title: 'Кунилингус',            val: 'pussy_licking'      },
+    { title: 'Лесбиянки',             val: 'lesbian'            },
+    { title: 'Любительское',          val: 'amateur'            },
+    { title: 'Маленькие девушки',     val: 'petite'             },
+    { title: 'Маленькие сиськи',      val: 'small_tits'         },
+    { title: 'Мамочки',               val: 'milf'               },
+    { title: 'Мастурбация',           val: 'masturbation'       },
+    { title: 'Межрасовое',            val: 'interracial'        },
+    { title: 'МЖМ порно',             val: 'mfm'                },
+    { title: 'Милашки',               val: 'cute'               },
+    { title: 'Минет',                 val: 'blowjob'            },
+    { title: 'Молодые',               val: 'seks-molodye'       },
+    { title: 'Мулатки',               val: 'mulatto'            },
+    { title: 'Накачанные девушки',    val: 'sporty'             },
+    { title: 'Оральный секс',         val: 'oral'               },
+    { title: 'Оргазм',                val: 'orgasm'             },
+    { title: 'Офис',                  val: 'office'             },
+    { title: 'Пикап',                 val: 'pickup'             },
+    { title: 'Порно в чулках',        val: 'stockings'          },
+    { title: 'Порно со зрелыми',      val: 'mature'             },
+    { title: 'Публичный секс',        val: 'public'             },
+    { title: 'Рыжие',                 val: 'redhead'            },
+    { title: 'Русское порно',         val: 'russian'            },
+    { title: 'Секс в машине',         val: 'car_sex'            },
+    { title: 'Секс на природе',       val: 'outdoor'            },
+    { title: 'Сквирт',                val: 'squirt'             },
+    { title: 'Смазливые',             val: 'pretty'             },
+    { title: 'Соло девушка',          val: 'solo_girl'          },
+    { title: 'Сперма в жопе',         val: 'creampie'           },
+    { title: 'Сперма на груди',       val: 'cum_on_tits'        },
+    { title: 'Сперма на лице',        val: 'facial'             },
+    { title: 'Страпон',               val: 'strap-on'           },
+    { title: 'Стриптиз',              val: 'striptease'         },
+    { title: 'Темноволосые',          val: 'black-haired'       },
+    { title: 'Фетиш',                 val: 'fetish'             },
+    { title: 'Фингеринг',             val: 'fingering'          },
+    { title: 'Фистинг',               val: 'fisting'            },
+    { title: 'Худые девушки',         val: 'skinny'             },
   ];
 
-  // Построить URL для запроса
-  // page=1 → без параметра, page>1 → добавляем &page=N
+  // ----------------------------------------------------------
+  // ПОСТРОЕНИЕ URL
+  //
+  //   Главная   : https://pornobriz.com/
+  //   Категория : https://pornobriz.com/{slug}/
+  //   Поиск     : https://pornobriz.com/?q={query}
+  //   Страница  : добавляем &page={N}
+  // ----------------------------------------------------------
   function buildUrl(cat, search, page) {
     page = parseInt(page, 10) || 1;
     var base, sep;
 
     if (search) {
-      // Поиск: /?q={query}
       base = HOST + '/?q=' + encodeURIComponent(search);
       sep  = '&';
     } else if (cat) {
-      // Категория: /{slug}/
       base = HOST + '/' + cat + '/';
       sep  = '?';
     } else {
-      // Главная
       base = HOST + '/';
       sep  = '?';
     }
@@ -293,16 +268,20 @@
     return base;
   }
 
-  // Определить cat/search из URL
-  // [2.0.1] BUGFIX:
-  //   - если url = 'briz' (имя парсера из menu.json) — возвращаем пустое (главная)
-  //   - читаем и ?search= и ?q= параметры
-  //   - если clean не совпадает ни с одной CATS — главная, не несуществующая категория
+  // ----------------------------------------------------------
+  // РАЗБОР ВХОДЯЩЕГО URL
+  //
+  // Понимает:
+  //   - просто NAME ('briz')           → главная
+  //   - ?search=... или ?q=...         → поиск
+  //   - https://pornobriz.com/{slug}/  → категория
+  //   - briz/search/?search=...        → поиск через фильтр [3.0.0]
+  // ----------------------------------------------------------
   function parseUrl(url) {
     var cat = '', search = '';
     var s = url || '';
 
-    // Если url — просто имя парсера без '/' и без HOST → главная страница
+    // Просто имя парсера (без '/' и 'http') → главная
     if (s.indexOf('/') === -1 && s.indexOf('http') === -1) {
       log('parseUrl → имя парсера, главная');
       return { cat: '', search: '' };
@@ -316,14 +295,13 @@
       return { cat: '', search: search };
     }
 
-    // Путь категории: убираем HOST, query, слэши
+    // Путь категории: убираем HOST, query-string, слэши
     var clean = s.replace(HOST, '').split('?')[0].replace(/^\//, '').replace(/\/$/, '');
     if (clean) {
       var catObj = arrayFind(CATS, function (c) { return c.val === clean; });
       if (catObj) {
         cat = catObj.val;
       } else {
-        // Неизвестный путь — не создаём несуществующий URL, грузим главную
         log('parseUrl → неизвестный путь "' + clean + '", грузим главную');
       }
     }
@@ -332,52 +310,64 @@
     return { cat: cat, search: search };
   }
 
-  // Построить меню фильтра
-  function buildMenu(url) {
-    var state = parseUrl(url || '');
-
-    // Активная категория
-    var activeCat = arrayFind(CATS, function (c) { return c.val === state.cat; });
-
-    // Подменю категорий
-    var catSubmenu = CATS.map(function (c) {
-      return { title: c.title, playlist_url: HOST + '/' + c.val + '/' };
-    });
-
+  // ----------------------------------------------------------
+  // [3.0.0] МЕНЮ — полностью переработано для совместимости с AdultJS
+  //
+  // ИЗМЕНЕНИЯ vs v2.0.4:
+  //
+  //   1. Убран аргумент url и логика «активная категория» —
+  //      не нужны, только усложняли код и создавали баги.
+  //
+  //   2. Поиск: playlist_url был HOST (полный URL) →
+  //      теперь NAME + '/search/'  (относительный путь).
+  //      AdultJS добавит ?search=запрос к этому пути,
+  //      parseUrl найдёт ?search= и передаст в buildUrl.
+  //
+  //   3. Категории: добавлен обязательный playlist_url:'submenu' —
+  //      без него AdultJS не распознаёт блок как подменю
+  //      и либо падает, либо пытается загрузить undefined.
+  // ----------------------------------------------------------
+  function buildMenu() {
     return [
-      { title: 'Поиск',    playlist_url: HOST, search_on: true },
       {
-        title:   'Категория: ' + (activeCat ? activeCat.title : 'Все'),
-        submenu: catSubmenu,
-        // [1.5.0] НЕТ playlist_url — только submenu, иначе AdultJS пытается загрузить 'submenu'
+        title        : '🔍 Поиск',
+        search_on    : true,
+        playlist_url : NAME + '/search/'   // [3.0.0] было: HOST
       },
+      {
+        title        : '🔥 Популярное',
+        playlist_url : HOST + '/'
+      },
+      {
+        title        : '📂 Категории',
+        playlist_url : 'submenu',          // [3.0.0] добавлено — обязательно для AdultJS
+        submenu      : CATS.map(function (c) {
+          return {
+            title        : c.title,
+            playlist_url : HOST + '/' + c.val + '/'
+          };
+        })
+      }
     ];
   }
 
   // ----------------------------------------------------------
   // ПАРСИНГ КАТАЛОГА
   //
-  // Реальная структура карточки pornobriz.com (из HTML):
-  //
+  // Структура карточки pornobriz.com:
   //   <div class="thumb_main">
-  //     <a href="/video/{slug}/" rel="bookmark">
+  //     <a href="/video/{slug}/">
   //       <video data-preview="https://pornobriz.com/preview/{slug}.mp4"></video>
-  //       <img src="data:image/png;base64,..." 
-  //            data-original="/content/screen/77/XXXXX_11.jpg"
-  //            alt="Название видео" />
-  //       <div class="t-hd">FULL HD</div>
+  //       <img data-original="/content/screen/77/XXXXX_11.jpg" alt="Название" />
   //       <div class="duration">22:31</div>
-  //       <div class="th-title">Название видео</div>
+  //       <div class="th-title">Название</div>
   //     </a>
   //   </div>
   //
-  // Ключевые факты:
-  //   - Селектор карточки: div.thumb_main  (НЕ div.logo!)
-  //   - Постер: img[data-original]  (src — плейсхолдер 1×1px!)
-  //   - Превью: video[data-preview]  (готовый mp4 URL)
-  //   - Название: div.th-title или img[alt]
-  //   - Длительность: div.duration
-  //   - mp4 для плеера = data-preview (он же превью)
+  // Три стратегии поиска карточек:
+  //   1. div.thumb_main  (точный селектор)
+  //   2. XPath для div.thumb_main  (fallback)
+  //   3. a[href*="/video/"]  (последний resort)
   // ----------------------------------------------------------
   function parsePlaylist(html) {
     if (!html || html.length < 100) {
@@ -387,11 +377,11 @@
 
     var doc;
     try { doc = new DOMParser().parseFromString(html, 'text/html'); }
-    catch(e) { err('DOMParser:', e.message); return []; }
+    catch (e) { err('DOMParser:', e.message); return []; }
 
     var cards = [];
 
-    // --- Стратегия 1: div.thumb_main (точный селектор карточки) ---
+    // Стратегия 1: div.thumb_main
     var thumbs = doc.querySelectorAll('div.thumb_main');
     log('parsePlaylist → div.thumb_main найдено:', thumbs.length);
 
@@ -400,7 +390,7 @@
       if (c) cards.push(c);
     });
 
-    // --- Стратегия 2: XPath для div.thumb_main ---
+    // Стратегия 2: XPath
     if (!cards.length) {
       try {
         var nodes = doc.evaluate(
@@ -412,10 +402,10 @@
           var c2 = _card(nodes.snapshotItem(i));
           if (c2) cards.push(c2);
         }
-      } catch(e) { warn('XPath:', e.message); }
+      } catch (e) { warn('XPath:', e.message); }
     }
 
-    // --- Стратегия 3: a[href*="/video/"] как последний fallback ---
+    // Стратегия 3: fallback a[href*="/video/"]
     if (!cards.length) {
       log('parsePlaylist → fallback: a[href*=/video/]');
       forEachNode(doc.querySelectorAll('a[href*="/video/"]'), function (a) {
@@ -432,14 +422,26 @@
           var pic    = _extractPicture(imgEl);
           var name   = _extractName(a, imgEl);
           if (!name || name.length < 3) return;
-          var durEl  = a.querySelector('.duration');
-          var time   = durEl ? (durEl.textContent || '').trim() : '';
 
+          var durEl = a.querySelector('.duration');
+          var time  = durEl ? (durEl.textContent || '').trim() : '';
+
+          // Не дублируем
           for (var ci = 0; ci < cards.length; ci++) {
             if (cards[ci].video === mp4) return;
           }
-          cards.push({ name: name, video: mp4, picture: pic, preview: mp4, time: time, quality: 'HD', json: false, source: NAME });
-        } catch(ex) {}
+
+          cards.push({
+            name:    name,
+            video:   mp4,
+            picture: pic,
+            preview: mp4,
+            time:    time,
+            quality: 'HD',
+            json:    false,
+            source:  NAME
+          });
+        } catch (ex) {}
       });
     }
 
@@ -459,43 +461,37 @@
       }
       notyOk('Найдено ' + cards.length + ' видео');
     }
+
     return cards;
   }
 
   // ----------------------------------------------------------
-  // Вспомогательные функции извлечения полей
+  // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
   // ----------------------------------------------------------
 
-  // Постер: data-original приоритетнее src (src = lazy плейсхолдер 1×1px)
+  // Постер: data-original приоритетнее src (src = lazy-плейсхолдер)
   function _extractPicture(imgEl) {
     if (!imgEl) return '';
     var pic = imgEl.getAttribute('data-original') ||
               imgEl.getAttribute('data-src')       ||
               imgEl.getAttribute('data-lazy')      ||
               imgEl.getAttribute('src')             || '';
-    // Отсекаем base64 плейсхолдеры
     if (pic.indexOf('data:image') === 0) pic = '';
-    // Добавляем хост если относительный путь
     if (pic && pic.indexOf('http') !== 0) pic = HOST + pic;
     return pic;
   }
 
-  // Название: div.th-title → img[alt] → a[title] → текст
+  // Название: div.th-title → img[alt] → a[title] → innerText
   function _extractName(aEl, imgEl) {
     var titleEl = aEl ? aEl.querySelector('.th-title') : null;
-    return (titleEl ? (titleEl.textContent || '').trim() : '') ||
-           (imgEl   ? (imgEl.getAttribute('alt') || '')  : '') ||
-           (aEl     ? (aEl.getAttribute('title') || '')  : '') ||
+    return (titleEl ? (titleEl.textContent || '').trim()                    : '') ||
+           (imgEl   ? (imgEl.getAttribute('alt') || '')                     : '') ||
+           (aEl     ? (aEl.getAttribute('title') || '')                     : '') ||
            (aEl     ? (aEl.textContent || '').trim().replace(/\s+/g, ' ').substring(0, 100) : '');
   }
 
-  // ----------------------------------------------------------
   // Извлечь одну карточку из div.thumb_main
-  // [2.0.4] json:true + video=href (HTML-страница видео).
-  //         qualities() скачивает страницу и извлекает реальные
-  //         mp4-ссылки с качеством 1080p/720p/480p.
-  //         preview берём из video[data-preview] — короткий mp4.
-  // ----------------------------------------------------------
+  // json:true → AdultJS вызовет qualities() для получения реального mp4
   function _card(el) {
     if (!el) return null;
     try {
@@ -505,59 +501,55 @@
       var href = aEl.getAttribute('href') || '';
       if (!href) return null;
       if (href.indexOf('http') !== 0) href = HOST + href;
-
-      // Проверяем что это страница видео
       if (href.indexOf('/video/') === -1) return null;
 
-      // Превью из video[data-preview]
       var vidEl   = el.querySelector('video[data-preview]');
       var preview = vidEl ? (vidEl.getAttribute('data-preview') || null) : null;
 
-      // Постер из img[data-original]
       var imgEl   = el.querySelector('img');
       var picture = _extractPicture(imgEl);
 
-      // Название
       var name = _extractName(aEl, imgEl);
       if (!name || name.length < 3) return null;
 
-      // Длительность
       var durEl = el.querySelector('.duration');
       var time  = durEl ? (durEl.textContent || '').trim() : '';
 
       return {
         name:    name,
-        video:   href,      // [2.0.4] HTML-страница → qualities() найдёт реальный mp4
+        video:   href,      // HTML-страница видео → qualities() найдёт реальный mp4
         picture: picture,
         preview: preview,
         time:    time,
         quality: 'HD',
-        json:    true,      // [2.0.4] true → AdultJS вызовет qualities()
+        json:    true,      // true → AdultJS вызовет qualities()
         source:  NAME,
       };
-    } catch(e) {
+    } catch (e) {
       warn('_card:', e.message); return null;
     }
   }
 
-  // ----------------------------------------------------------
-  // Slug из URL видео
-  // ----------------------------------------------------------
   function _slugFromUrl(videoUrl) {
     var m = (videoUrl || '').match(/\/video\/([^\/]+)\/?/);
     return m ? m[1] : '';
   }
 
   // ----------------------------------------------------------
-  // ПОЛУЧЕНИЕ ПРЯМЫХ ССЫЛОК (qualities)
-  // Восстановлена логика v1.5.0 — скачиваем страницу видео
-  // и ищем реальные mp4-ссылки с качеством (работало в v1.5.0)
+  // QUALITIES — получение прямых mp4-ссылок со страницы видео
+  //
+  // Пять стратегий поиска (от специфичной к универсальной):
+  //   1. src="..." size="N" — стандартный тег <source>
+  //   2. Атрибуты в любом порядке (size/label/res)
+  //   3. JSON sources:[...]
+  //   4. Любые .mp4 в тексте страницы
+  //   5. .m3u8 (HLS)
   // ----------------------------------------------------------
   function getStreamLinks(videoUrl, ok, fail) {
     log('qualities →', videoUrl);
 
     httpGet(videoUrl, function (html) {
-      var q = {}, sizes = ['1080','720','480','360','240'];
+      var q = {}, sizes = ['1080', '720', '480', '360', '240'];
 
       // Стратегия 1: src="..." type="video/mp4" size="N"
       for (var si = 0; si < sizes.length; si++) {
@@ -570,35 +562,35 @@
         for (var si2 = 0; si2 < sizes.length; si2++) {
           var sz = sizes[si2], m2;
           m2 = html.match(new RegExp('size="'  + sz + '"[^>]*src="([^"]+)"'));
-          if (m2 && m2[1]) { q[sz+'p'] = m2[1]; continue; }
+          if (m2 && m2[1]) { q[sz + 'p'] = m2[1]; continue; }
           m2 = html.match(new RegExp('label="' + sz + 'p?"[^>]*src="([^"]+)"'));
-          if (m2 && m2[1]) { q[sz+'p'] = m2[1]; continue; }
+          if (m2 && m2[1]) { q[sz + 'p'] = m2[1]; continue; }
           m2 = html.match(new RegExp('res="'   + sz + '"[^>]*src="([^"]+)"'));
-          if (m2 && m2[1]) q[sz+'p'] = m2[1];
+          if (m2 && m2[1]) q[sz + 'p'] = m2[1];
         }
       }
 
       // Стратегия 3: JSON sources:[...]
       if (!Object.keys(q).length) {
-        var jm = html.match(/sources\s*[:=]\s*(\[[\s\S]*?\])/);
+        var jm = html.match(/sources\s*[:=]\s*($[\s\S]*?$)/);
         if (jm) {
           try {
             var srcs = JSON.parse(jm[1].replace(/'/g, '"'));
             for (var j = 0; j < srcs.length; j++) {
               var lbl = (srcs[j].label || srcs[j].size || srcs[j].quality || 'auto') + '';
-              var u   = srcs[j].file || srcs[j].src || srcs[j].url || '';
-              if (u) q[lbl.replace(/\s/g,'')] = u;
+              var u   = srcs[j].file  || srcs[j].src  || srcs[j].url     || '';
+              if (u) q[lbl.replace(/\s/g, '')] = u;
             }
-          } catch(e) {}
+          } catch (e) {}
         }
       }
 
-      // Стратегия 4: любые .mp4
+      // Стратегия 4: любые .mp4 в тексте
       if (!Object.keys(q).length) {
         var re4 = /["'](https?:\/\/[^"'\s]+\.mp4[^"'\s]*)/g;
         var m4; var i4 = 0;
         while ((m4 = re4.exec(html)) !== null && i4 < 5) {
-          q['auto'+(i4||'')] = m4[1]; i4++;
+          q['auto' + (i4 || '')] = m4[1]; i4++;
         }
       }
 
@@ -617,17 +609,19 @@
       log('qualities → найдено качеств:', Object.keys(q).length);
       notyOk('Качеств: ' + Object.keys(q).length);
       ok({ qualities: q });
-    }, function(e) {
+
+    }, function (e) {
       notyErr('Ошибка страницы видео');
       fail(e);
     });
   }
 
   // ----------------------------------------------------------
-  // ПУБЛИЧНЫЙ ИНТЕРФЕЙС
+  // ПУБЛИЧНЫЙ ИНТЕРФЕЙС ПАРСЕРА
   // ----------------------------------------------------------
   var BrizParser = {
 
+    // Главный экран
     main: function (params, ok, fail) {
       log('main()', safeParams(params));
       try {
@@ -635,12 +629,18 @@
           try {
             var r = parsePlaylist(html);
             if (!r.length) { fail('no_cards'); return; }
-            ok({ results: r, collection: true, total_pages: 30, menu: buildMenu(HOST) });
-          } catch(e) { err('main cb:', e.message); fail(e.message); }
+            ok({
+              results:     r,
+              collection:  true,
+              total_pages: 30,
+              menu:        buildMenu()   // [3.0.0] было: buildMenu(HOST)
+            });
+          } catch (e) { err('main cb:', e.message); fail(e.message); }
         }, fail);
-      } catch(e) { err('main:', e.message); fail(e.message); }
+      } catch (e) { err('main:', e.message); fail(e.message); }
     },
 
+    // Каталог / категория / поиск через фильтр
     view: function (params, ok, fail) {
       log('view()', safeParams(params));
       try {
@@ -657,17 +657,23 @@
               results:     r,
               collection:  true,
               total_pages: r.length >= 20 ? page + 5 : page,
-              menu:        buildMenu(rawUrl),
+              menu:        buildMenu()   // [3.0.0] было: buildMenu(rawUrl)
             });
-          } catch(e) { err('view cb:', e.message); fail(e.message); }
+          } catch (e) { err('view cb:', e.message); fail(e.message); }
         }, fail);
-      } catch(e) { err('view:', e.message); fail(e.message); }
+      } catch (e) { err('view:', e.message); fail(e.message); }
     },
 
-    // [2.0.0] Поиск через /?q={query}
+    // Глобальный поиск через строку поиска Lampa
     search: function (params, ok, fail) {
       var query = (params.query || '').trim();
       log('search() "' + query + '"');
+
+      if (!query) {
+        ok({ title: '', results: [], collection: true, total_pages: 1, menu: buildMenu() });
+        return;
+      }
+
       try {
         httpGet(HOST + '/?q=' + encodeURIComponent(query), function (html) {
           try {
@@ -678,19 +684,24 @@
               url:         HOST + '/?q=' + encodeURIComponent(query),
               collection:  true,
               total_pages: r.length >= 20 ? 6 : 1,
+              menu:        buildMenu()   // [3.0.0] добавлено
             });
-          } catch(e) { err('search cb:', e.message); ok({ title: 'PornoBriz', results: [], collection: true, total_pages: 1 }); }
+          } catch (e) {
+            err('search cb:', e.message);
+            ok({ title: 'PornoBriz', results: [], collection: true, total_pages: 1, menu: buildMenu() });
+          }
         }, function () {
-          ok({ title: 'PornoBriz', results: [], collection: true, total_pages: 1 });
+          ok({ title: 'PornoBriz', results: [], collection: true, total_pages: 1, menu: buildMenu() });
         });
-      } catch(e) { err('search:', e.message); fail(e.message); }
+      } catch (e) { err('search:', e.message); fail(e.message); }
     },
 
+    // Получение прямых ссылок на видео
     qualities: function (videoUrl, ok, fail) {
       log('qualities()', videoUrl);
       try { getStreamLinks(videoUrl, ok, fail); }
-      catch(e) { err('qualities:', e.message); fail(e.message); }
-    },
+      catch (e) { err('qualities:', e.message); fail(e.message); }
+    }
   };
 
   // ----------------------------------------------------------
@@ -699,8 +710,8 @@
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, BrizParser);
-      log('v2.0.4 зарегистрирован');
-      notyOk('PornoBriz v2.0.4');
+      log('v3.0.0 зарегистрирован');
+      notyOk('PornoBriz v3.0.0');
       return true;
     }
     return false;
@@ -710,8 +721,12 @@
     var _e = 0;
     var _t = setInterval(function () {
       _e += 100;
-      if (tryRegister()) clearInterval(_t);
-      else if (_e >= 10000) { clearInterval(_t); notyErr('Таймаут регистрации'); }
+      if (tryRegister()) {
+        clearInterval(_t);
+      } else if (_e >= 10000) {
+        clearInterval(_t);
+        notyErr('Таймаут регистрации');
+      }
     }, 100);
   }
 
