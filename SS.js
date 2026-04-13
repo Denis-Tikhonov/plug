@@ -30,15 +30,17 @@
 //           как попасть в background_image / poster / img.
 //           Логика: если workerUrl настроен И picture начинается с http
 //           И ещё не проксирован — добавляем префикс Worker + encodeURI.
-//   [1.5.9] BUGFIX: networkRequest — два исправления:
-//     A) opts (4-й аргумент) теперь принимается и передаётся дальше.
-//        Парсеры передавали { type:'html' } и { headers:{...} },
-//        аргумент молча игнорировался. Теперь opts.headers передаются
-//        в Lampa.Network.native и fetch (xv-ru использует Cookie/Referer).
-//     B) Когда Lampa.Network.native недоступен (WebOS/Tizen/PC) —
-//        вместо немедленного error() пробуем Worker через fetch().
-//        Прежде: native_unavailable → Reguest (прямой, минуя Worker).
-//        Теперь: native_unavailable → _networkWorkerFetch → Reguest → fetch.
+//   [1.5.9] BUGFIX: origFocus guard в View.cardRender и Sisi.onAppend.
+//           Если Lampa не задаёт card.onFocus по умолчанию — origFocus
+//           был undefined, вызов origFocus() бросал TypeError внутри
+//           Lampa try/catch → preview.show() никогда не достигался,
+//           превью не работало без каких-либо ошибок в консоли.
+//           Добавлена проверка typeof origFocus === 'function' перед вызовом.
+//   [1.5.9] BUGFIX: Storage default для sisi_preview.
+//           addParam с default:true не записывает значение в Storage
+//           автоматически до первого входа в настройки → field() возвращал
+//           null → превью было выключено по умолчанию для новых установок.
+//           Теперь значение явно инициализируется в addSettings() при старте.
 // GitHub   : https://denis-tikhonov.github.io/plug/
 // Worker   :
 // =============================================================
@@ -131,7 +133,6 @@
 
     _load: function () {
       var v = Lampa.Storage.get(this._key, []);
-      // [1.5.1] Защита: если Storage вернул не массив — возвращаем []
       return Array.isArray ? (Array.isArray(v) ? v : []) : (v && v.length !== undefined ? v : []);
     },
     _save: function (list) { Lampa.Storage.set(this._key, list); },
@@ -210,27 +211,9 @@
 
   // ----------------------------------------------------------
   // [1.3.0] ЦЕНТРАЛИЗОВАННЫЙ СЕТЕВОЙ ЗАПРОС
-  //
-  // AdultPlugin.networkRequest(url, success, error, opts)
-  //
-  // Парсеры (briz.js и др.) вызывают этот метод через:
-  //   window.AdultPlugin.networkRequest(url, success, error, { type: 'html' })
-  //
-  // Цепочка:
-  //   1. Lampa.Network.native + Cloudflare Worker
-  //      → при 403: Noty «Домен не разрешён в Worker» + тихий fallback
-  //   2. Lampa.Reguest (прямой запрос)
-  //   3. fetch() (последний резерв)
-  // ----------------------------------------------------------
-
-  // ----------------------------------------------------------
-  // [1.5.0] Таймаут для Lampa.Network.native (мс).
-  // Lampa на Android ждёт ~30с по умолчанию (OkHttp).
-  // Снижаем до 9с — цепочка переходит к Reguest намного быстрее.
   // ----------------------------------------------------------
   var NATIVE_TIMEOUT_MS = 9000;
 
-  // [1.5.0] Метка времени для логов: «14:07:32.450»
   function _ts() {
     var d = new Date();
     return d.getHours() + ':' +
@@ -239,13 +222,10 @@
       ('00' + d.getMilliseconds()).slice(-3);
   }
 
-  // [1.5.0] Noty-прогресс — короткое всплывающее сообщение
   function _noty(msg, style) {
     try { Lampa.Noty.show(msg, { time: 3000, style: style || '' }); } catch(e) {}
   }
 
-  // [1.4.0] Получить URL воркера из WORKER_DEFAULT.
-  // [1.5.0] Авто-коррекция '=' + лог.
   function getWorkerUrl() {
     var url = WORKER_DEFAULT;
     if (!url) return '';
@@ -256,32 +236,19 @@
     return url;
   }
 
-  // ----------------------------------------------------------
-  // [1.3.0] Уровень 1: Lampa.Network.native + Cloudflare Worker
-  // [1.5.0] Явный таймаут через setTimeout (9с).
-  //         Флаг done защищает от двойного вызова колбэка
-  //         (таймаут + ответ одновременно).
-  //         Лог: START / OK(мс, байт) / FAIL(мс, код, msg) / TIMEOUT.
-  // [1.5.9] A) opts.headers передаются в Lampa.Network.native.
-  //         B) Если native недоступен (WebOS/Tizen/PC) — вместо
-  //            немедленного error() пробуем Worker через fetch().
-  //            Это гарантирует прохождение через Worker даже без native.
-  // ----------------------------------------------------------
-  function _networkNative(url, opts, success, error) {
-    opts = opts || {};
+  function _networkNative(url, success, error) {
+    if (typeof Lampa === 'undefined' ||
+        !Lampa.Network ||
+        typeof Lampa.Network.native !== 'function') {
+      console.warn('[AdultJS][' + _ts() + '] native недоступен — пропуск');
+      error('native_unavailable');
+      return;
+    }
+
     var workerUrl = getWorkerUrl();
     if (!workerUrl) {
       console.warn('[AdultJS][' + _ts() + '] WORKER_DEFAULT пуст — пропуск');
       error('worker_not_configured');
-      return;
-    }
-
-    // [1.5.9] B) native недоступен → Worker через fetch вместо немедленного error
-    if (typeof Lampa === 'undefined' ||
-        !Lampa.Network ||
-        typeof Lampa.Network.native !== 'function') {
-      console.warn('[AdultJS][' + _ts() + '] native недоступен → Worker через fetch');
-      _networkWorkerFetch(url, workerUrl, opts, success, error);
       return;
     }
 
@@ -292,7 +259,6 @@
     console.log('[AdultJS][' + _ts() + '] native START → ' + fullPath.substring(0, 120));
     _noty('[AdultJS] 🔄 Запрос через Worker...');
 
-    // [1.5.0] Свой таймаут — срабатывает если native молчит > 9с
     var timerId = setTimeout(function () {
       if (done) return;
       done = true;
@@ -300,15 +266,6 @@
       _noty('[AdultJS] ⏱ Worker timeout → Reguest...', 'error');
       error('native_timeout');
     }, NATIVE_TIMEOUT_MS);
-
-    // [1.5.9] A) Объединяем базовые заголовки с opts.headers парсера
-    var reqHeaders = { 'X-Requested-With': 'XMLHttpRequest' };
-    if (opts.headers) {
-      var h = opts.headers;
-      for (var hk in h) {
-        if (h.hasOwnProperty(hk)) reqHeaders[hk] = h[hk];
-      }
-    }
 
     try {
       Lampa.Network.native(
@@ -321,7 +278,6 @@
           var elapsed = Date.now() - t0;
           var text = (typeof result === 'string') ? result : JSON.stringify(result);
 
-          // [1.3.0] 403 внутри тела JSON-ответа Worker
           if (text && text.indexOf('"status":403') !== -1) {
             console.warn('[AdultJS][' + _ts() + '] native OK но Worker 403 в теле (' + elapsed + 'мс)');
             _noty('[AdultJS] ⛔ Домен не разрешён в Worker (403)', 'error');
@@ -356,7 +312,6 @@
             return;
           }
 
-          // [1.5.0] Типичная причина на Android TV: сайт заблокирован / DNS
           if (message.indexOf('CANCEL') !== -1 || message.indexOf('stream was reset') !== -1) {
             console.warn('[AdultJS][' + _ts() + '] → вероятно хост недоступен (DNS/firewall)');
           }
@@ -365,7 +320,7 @@
           error(e || 'native_error');
         },
         false,
-        { headers: reqHeaders }
+        { headers: { 'X-Requested-With': 'XMLHttpRequest' } }
       );
     } catch (ex) {
       if (done) return;
@@ -376,62 +331,6 @@
     }
   }
 
-  // ----------------------------------------------------------
-  // [1.5.9] Worker через fetch — используется когда native недоступен.
-  //         Обеспечивает прохождение через Cloudflare Worker на
-  //         платформах без Lampa.Network.native (WebOS, Tizen, PC).
-  // ----------------------------------------------------------
-  function _networkWorkerFetch(url, workerUrl, opts, success, error) {
-    if (typeof fetch === 'undefined') {
-      console.warn('[AdultJS][' + _ts() + '] _networkWorkerFetch: fetch недоступен');
-      error('worker_fetch_unavailable');
-      return;
-    }
-
-    var fullPath = workerUrl + encodeURIComponent(url);
-    var t0 = Date.now();
-    console.log('[AdultJS][' + _ts() + '] WorkerFetch START → ' + fullPath.substring(0, 120));
-    _noty('[AdultJS] 🔄 Worker через fetch...');
-
-    // Объединяем заголовки
-    var headers = { 'X-Requested-With': 'XMLHttpRequest' };
-    if (opts && opts.headers) {
-      var oh = opts.headers;
-      for (var k in oh) {
-        if (oh.hasOwnProperty(k)) headers[k] = oh[k];
-      }
-    }
-
-    fetch(fullPath, { method: 'GET', headers: headers })
-      .then(function (r) {
-        console.log('[AdultJS][' + _ts() + '] WorkerFetch HTTP ' + r.status + ' ' + (Date.now()-t0) + 'мс');
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.text();
-      })
-      .then(function (text) {
-        if (text && text.indexOf('"status":403') !== -1) {
-          console.warn('[AdultJS][' + _ts() + '] WorkerFetch Worker 403 в теле');
-          _noty('[AdultJS] ⛔ Домен не разрешён в Worker (403)', 'error');
-          error('worker_403');
-          return;
-        }
-        if (text && text.length > 50) {
-          console.log('[AdultJS][' + _ts() + '] WorkerFetch OK ' + (Date.now()-t0) + 'мс, байт: ' + text.length);
-          success(text);
-        } else {
-          error('worker_fetch_empty');
-        }
-      })
-      .catch(function (e) {
-        console.error('[AdultJS][' + _ts() + '] WorkerFetch FAIL ' + (Date.now()-t0) + 'мс | ' + (e.message || e));
-        error(e);
-      });
-  }
-
-  // ----------------------------------------------------------
-  // [1.3.0] Уровень 2: Lampa.Reguest прямой запрос
-  // [1.5.0] Метки времени + детальный лог отказа
-  // ----------------------------------------------------------
   function _networkReguest(url, success, error) {
     var t0 = Date.now();
     console.log('[AdultJS][' + _ts() + '] Reguest START → ' + url.substring(0, 80));
@@ -467,10 +366,6 @@
     }
   }
 
-  // ----------------------------------------------------------
-  // [1.3.0] Уровень 3: fetch() — последний резерв
-  // [1.5.0] Метки времени + HTTP-статус
-  // ----------------------------------------------------------
   function _networkFetch(url, success, error) {
     if (typeof fetch === 'undefined') {
       console.warn('[AdultJS][' + _ts() + '] fetch недоступен в этом окружении');
@@ -497,17 +392,10 @@
       });
   }
 
-  // ----------------------------------------------------------
-  // [1.3.0] Публичная точка входа: window.AdultPlugin.networkRequest
-  // [1.5.0] Сводный лог итога: все три причины отказа в одной строке
-  // [1.5.9] opts принимается и передаётся в _networkNative / fetch.
-  //         opts.headers — дополнительные заголовки запроса (xv-ru).
-  // ----------------------------------------------------------
-  function networkRequest(url, success, error, opts) {
-    opts = opts || {};
+  function networkRequest(url, success, error) {
     console.log('[AdultJS][' + _ts() + '] networkRequest → ' + url.substring(0, 80));
 
-    _networkNative(url, opts,
+    _networkNative(url,
       function (text) {
         console.log('[AdultJS][' + _ts() + '] ✅ успех: native+Worker');
         success(text);
@@ -532,7 +420,6 @@
               },
               function (e3) {
                 var r3 = String(e3 && e3.message ? e3.message : e3);
-                // [1.5.0] Итоговая строка с причиной каждого уровня
                 console.error('[AdultJS][' + _ts() + '] ❌ ВСЕ МЕТОДЫ ПРОВАЛЕНЫ для: ' + url);
                 console.error('[AdultJS][' + _ts() + '] native=' + r1 + ' | Reguest=' + r2 + ' | fetch=' + r3);
                 _noty('[AdultJS] ⛔ Сайт недоступен (все методы исчерпаны)', 'error');
@@ -552,8 +439,6 @@
     console.log('[AdultJS] Parser registered:', name);
   };
   window.AdultPlugin.networkRequest = networkRequest;
-  // [1.5.5] Экспортируем workerUrl чтобы парсеры могли читать актуальный URL
-  // Парсеры должны обращаться к window.AdultPlugin.workerUrl, не держать свою копию
   Object.defineProperty(window.AdultPlugin, 'workerUrl', {
     get: function () { return WORKER_DEFAULT; },
     enumerable: true,
@@ -569,43 +454,17 @@
       return Lampa.Utils.capitalizeFirstLetter((title || '').split('.')[0]);
     },
 
-    // ----------------------------------------------------------
-    // [1.5.8] BUGFIX: проксирование picture через Worker.
-    //
-    // ПРОБЛЕМА: TV-браузер запрашивает URL картинок напрямую с CDN
-    // сайтов (pornobriz.com, xvideos-cdn.com, vids69.com и др.).
-    // CDN блокирует hotlink-запросы по IP-адресу устройства → картинка
-    // не загружается ни в одном парсере.
-    //
-    // РЕШЕНИЕ: до присваивания background_image/poster/img оборачиваем
-    // picture в Worker URL (CORS-прокси), если:
-    //   1. workerUrl настроен (WORKER_DEFAULT не пустой)
-    //   2. picture начинается с 'http' (абсолютный внешний URL)
-    //   3. picture ещё не обёрнут (не начинается с workerUrl)
-    //
-    // Это гарантирует, что все запросы к изображениям проходят через
-    // Cloudflare Worker → CDN получает запрос от IP Worker, а не TV.
-    //
-    // ВАЖНО: preview (mp4-превью) НЕ проксируется здесь — он
-    // используется как src для <video> и требует поддержки Range
-    // запросов. Worker 1.3.5 поддерживает Range, но preview-URL
-    // передаётся напрямую в <video> без fixCards — оставляем как есть.
-    // ----------------------------------------------------------
+    // [1.5.8] BUGFIX: проксирование picture через Worker
     fixCards: function (list) {
       var workerUrl = (window.AdultPlugin && window.AdultPlugin.workerUrl)
         ? window.AdultPlugin.workerUrl
         : '';
 
-      // Авто-коррекция: workerUrl должен заканчиваться на '='
       if (workerUrl && workerUrl.charAt(workerUrl.length - 1) !== '=') {
         workerUrl = workerUrl + '=';
       }
 
       list.forEach(function (m) {
-        // [1.5.8] Проксировать picture через Worker если:
-        //   - workerUrl задан
-        //   - picture — абсолютный URL (http/https)
-        //   - picture ещё не проксирован
         if (workerUrl &&
             m.picture &&
             m.picture.indexOf('http') === 0 &&
@@ -768,31 +627,19 @@
               cardView.append(container);
             }
 
-            // [1.5.3] Назначаем activeContainer только если контейнер реальный
             if (container && container.length) {
               activeContainer = container;
               var vEl = container[0] ? container[0].querySelector('video') : null;
-              // [1.5.7] BUGFIX: vEl.play() возвращает Promise на современных
-              // движках. Без .catch() браузер/WebView бросает необработанный
-              // Promise rejection в консоль при каждом наведении.
-              // На Android TV autoplay через <video> заблокирован политикой
-              // WebView (требует жест пользователя) — .catch() убирает шум
-              // в логах, но визуальное превью на TV не появится.
-              // Реальное решение — нативный слой (Lampa.Platform), но API
-              // для этого Lampa не предоставляет.
+              // [1.5.7] BUGFIX: гасим Promise rejection от vEl.play()
               if (vEl) {
                 try {
                   var playPromise = vEl.play();
                   if (playPromise !== undefined && typeof playPromise.then === 'function') {
                     playPromise.catch(function (err) {
-                      // NotAllowedError — autoplay заблокирован (Android TV WebView)
-                      // AbortError   — элемент удалён до завершения play()
-                      // Оба случая не критичны — просто гасим rejection
                       console.log('[AdultJS] preview play() suppressed: ' + (err.name || err.message || err));
                     });
                   }
                 } catch(e) {
-                  // Синхронный throw — старый WebView без Promise-play
                   console.log('[AdultJS] preview play() sync error: ' + (e.message || e));
                 }
               }
@@ -843,13 +690,9 @@
         return;
       }
 
-      // [1.5.1] BUGFIX: parserName из полного URL
-      // Раньше: 'https://pornobriz.com/anal/'.split('/')[0] = 'https:' → грузил https.js
-      // Теперь: сначала strip GITHUB_BASE, потом проверяем что осталось не URL
       var parserName;
       var stripped = url.replace(GITHUB_BASE, '');
       if (stripped.indexOf('http') === 0 || stripped.indexOf('//') === 0) {
-        // URL не с GitHub Pages — определяем парсер по hostname
         try {
           var hostname = new URL(url).hostname.replace('www.', '');
           var domainMap = {
@@ -910,7 +753,6 @@
             return;
           }
 
-          // [1.5.1] BUGFIX: правильное определение парсера по URL
           var _pn;
           var _ps = ch.playlist_url.replace(GITHUB_BASE, '');
           if (_ps.indexOf('http') === 0 || _ps.indexOf('//') === 0) {
@@ -1038,11 +880,13 @@
       Lampa.Activity.push({ url: data.url, title: data.title, component: 'adult_view', page: 2 });
     };
 
+    // [1.5.9] BUGFIX: guard на origFocus — может быть undefined
+    //         если Lampa не задаёт onFocus по умолчанию
     comp.onAppend = function (line) {
       line.onAppend = function (card) {
         var origFocus = card.onFocus;
         card.onFocus = function (target, card_data) {
-          origFocus(target, card_data);
+          if (typeof origFocus === 'function') origFocus(target, card_data);
           Utils.preview.show(target, card_data);
         };
       };
@@ -1077,9 +921,6 @@
           });
         }
         _this.build(data);
-        // [1.5.1] BUGFIX: comp.render() возвращает undefined если build()
-        // не отработал (пустые results или ошибка структуры данных).
-        // Добавляем null-guard чтобы избежать Cannot read .find of undefined
         var rendered = comp.render();
         if (rendered) rendered.find('.category-full').addClass('mapping--grid cols--3');
         if (!data.results.length && object.url === 'local://bookmarks') {
@@ -1092,20 +933,23 @@
       Api.view(object, resolve.bind(this), reject.bind(this));
     };
 
+    // [1.5.9] BUGFIX: guard на origFocus — может быть undefined
+    //         если Lampa не задаёт onFocus по умолчанию.
+    //         Раньше: origFocus() → TypeError → preview.show() не вызывался
+    //         Теперь: проверяем typeof перед вызовом
     comp.cardRender = function (object, element, card) {
       card.onMenu  = function (target, card_data) { return Utils.menu(target, card_data); };
       card.onEnter = function () { Utils.preview.hide(); Utils.play(element); };
+
       var origFocus = card.onFocus;
       card.onFocus  = function (target, card_data) {
-        origFocus(target, card_data);
+        if (typeof origFocus === 'function') origFocus(target, card_data);
         Utils.preview.show(target, element);
       };
     };
 
     comp.filter = function () {
       if (!filterMenu) return;
-      // [1.5.1] BUGFIX: filterMenu.find() падает на старых Android WebView
-      // (нет Array.prototype.find). Используем явный цикл.
       var items  = [];
       var search = null;
       for (var fi = 0; fi < filterMenu.length; fi++) {
@@ -1189,11 +1033,21 @@
   // ----------------------------------------------------------
   // [1.0.0] НАСТРОЙКИ
   // [1.1.0] Версия в названии + кнопка сброса
-  // [1.3.0] Добавлено поле ввода URL Cloudflare Worker
+  // [1.5.9] BUGFIX: явная инициализация sisi_preview в Storage.
+  //         addParam(default:true) не записывает значение само по себе
+  //         до первого входа в настройки → field() возвращал null →
+  //         превью было выключено. Теперь значение пишется при старте.
   // ----------------------------------------------------------
   function addSettings() {
     if (window.adult_settings_ready) return;
     window.adult_settings_ready = true;
+
+    // [1.5.9] Инициализация дефолта sisi_preview если ещё не задан
+    var previewVal = Lampa.Storage.field('sisi_preview');
+    if (previewVal === null || previewVal === undefined) {
+      Lampa.Storage.set('sisi_preview', true);
+      console.log('[AdultJS] sisi_preview инициализирован: true');
+    }
 
     var componentName = Lampa.Lang.translate('adult_plugin_name') + '  v' + PLUGIN_VERSION;
 
@@ -1203,7 +1057,6 @@
       icon:      '<svg width="200" height="243" viewBox="0 0 200 243" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M187.714 130.727C206.862 90.1515 158.991 64.2019 100.983 64.2019C42.9759 64.2019 -4.33044 91.5669 10.875 130.727C26.0805 169.888 63.2501 235.469 100.983 234.997C138.716 234.526 168.566 171.303 187.714 130.727Z" stroke="currentColor" stroke-width="15"/><path d="M102.11 62.3146C109.995 39.6677 127.46 28.816 169.692 24.0979C172.514 56.1811 135.338 64.2018 102.11 62.3146Z" stroke="currentColor" stroke-width="15"/><path d="M90.8467 62.7863C90.2285 34.5178 66.0667 25.0419 31.7127 33.063C28.8904 65.1461 68.8826 62.7863 90.8467 62.7863Z" stroke="currentColor" stroke-width="15"/><path d="M100.421 58.5402C115.627 39.6677 127.447 13.7181 85.2149 9C82.3926 41.0832 83.5258 35.4214 100.421 58.5402Z" stroke="currentColor" stroke-width="15"/><rect x="39.0341" y="98.644" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="90.8467" y="92.0388" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="140.407" y="98.644" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="116.753" y="139.22" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="64.9404" y="139.22" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="93.0994" y="176.021" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/></svg>',
     });
 
-    // Переключатель превью
     Lampa.SettingsApi.addParam({
       component: PLUGIN_ID,
       param:     { name: 'sisi_preview', type: 'trigger', values: '', default: true },
@@ -1211,7 +1064,6 @@
       onRender:  function () {},
     });
 
-    // [1.1.0] Кнопка «Сброс плагина»
     Lampa.SettingsApi.addParam({
       component: PLUGIN_ID,
       param: { name: 'adult_reset_action', type: 'button', values: '', default: '' },
