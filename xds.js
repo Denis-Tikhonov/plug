@@ -1,11 +1,11 @@
 // =============================================================
-// xds.js — Pexels Test Parser для AdultJS
-// Version  : 1.1.0
+// xds.js — Pexels Parser для AdultJS
+// Version  : 1.2.0
 // Changed  :
-//   [1.0.0] Базовый парсер Pexels: popular, search, категории
-//   [1.1.0] Поиск через фильтр (кнопка ≡):
-//           buildMenu() → search_on:true → AdultJS показывает «Найти»
-//           routeView() → разбирает ?search=запрос из URL
+//   [1.0.0] Базовый парсер Pexels
+//   [1.1.0] Поиск через фильтр (search_on)
+//   [1.2.0] Добавлен раздел «Новое» в меню
+//            Длительность на карточке через Lampa.Listener
 // =============================================================
 
 (function () {
@@ -36,6 +36,86 @@
     { title: '🌆 Закаты',     query: 'sunset'     },
     { title: '🚗 Авто',       query: 'cars'       }
   ];
+
+  // ----------------------------------------------------------
+  // CSS — стиль бейджа длительности
+  // Вставляется один раз при регистрации парсера
+  // ----------------------------------------------------------
+  function injectStyles() {
+    if (document.getElementById('xds-styles')) return;
+
+    var style = document.createElement('style');
+    style.id  = 'xds-styles';
+    style.textContent = [
+      '.card__duration {',
+      '  position: absolute;',
+      '  bottom: 4px;',
+      '  left: 4px;',
+      '  background: rgba(0,0,0,0.65);',
+      '  color: #fff;',
+      '  font-size: 11px;',
+      '  padding: 2px 5px;',
+      '  border-radius: 3px;',
+      '  z-index: 2;',
+      '  pointer-events: none;',
+      '}'
+    ].join('\n');
+
+    document.head.appendChild(style);
+  }
+
+  // ----------------------------------------------------------
+  // HOOK — длительность на карточке
+  // Lampa.Listener.follow('card') срабатывает при каждом
+  // создании карточки. Фильтруем только наши карточки
+  // (source === NAME) и вставляем .card__duration в .card__view
+  // ----------------------------------------------------------
+  function setupDurationHook() {
+    try {
+      Lampa.Listener.follow('card', function (event) {
+        // Lampa использует опечатку 'complite' — это норма
+        if (event.type !== 'complite') return;
+
+        var card = event.card;
+        if (!card || !card.data) return;
+
+        // Только наши карточки
+        if (card.data.source !== NAME) return;
+
+        // Длительность в секундах
+        var seconds = card.data.duration_sec;
+        if (!seconds) return;
+
+        // Форматируем через утилиту Lampa
+        var timeStr = '';
+        try {
+          timeStr = Lampa.Utils.secondsToTime(seconds, true);
+        } catch (e) {
+          // Fallback если утилита недоступна
+          var m = Math.floor(seconds / 60);
+          var s = seconds % 60;
+          timeStr = m + ':' + (s < 10 ? '0' : '') + s;
+        }
+
+        if (!timeStr) return;
+
+        var $html = card.html;
+        if (!$html) return;
+
+        // Не дублируем если уже добавлено
+        if ($html.find('.card__duration').length) return;
+
+        var $view = $html.find('.card__view');
+        if ($view.length) {
+          $view.append('<div class="card__duration">' + timeStr + '</div>');
+        }
+      });
+
+      console.log('[xds] durationHook установлен');
+    } catch (e) {
+      console.warn('[xds] durationHook ошибка:', e);
+    }
+  }
 
   // ----------------------------------------------------------
   // PEXELS HTTP-ЗАПРОС
@@ -76,7 +156,6 @@
 
   // ----------------------------------------------------------
   // ВЫБОР ВИДЕО-ФАЙЛА
-  // Приоритет: sd → hd → первый mp4
   // ----------------------------------------------------------
   function pickVideoFile(video_files, prefer_quality) {
     if (!video_files || !video_files.length) return '';
@@ -96,45 +175,48 @@
   }
 
   // ----------------------------------------------------------
-  // УТИЛИТЫ
+  // КОНВЕРТАЦИЯ Pexels video → карточка
+  //
+  // duration_sec — секунды, нужны для hook'а (числовые)
+  // time         — строка для штатного поля карточки Lampa
   // ----------------------------------------------------------
-  function formatDuration(seconds) {
-    if (!seconds) return '';
-    var m = Math.floor(seconds / 60);
-    var s = seconds % 60;
-    return m + ':' + (s < 10 ? '0' : '') + s;
-  }
-
-  function makeName(video, category) {
-    return (category ? category + ' — ' : '') + 'Видео #' + video.id;
-  }
-
-  // ----------------------------------------------------------
-  // КОНВЕРТАЦИЯ Pexels video → карточка AdultJS
-  // ----------------------------------------------------------
-  function videoToCard(video, index, category) {
+  function videoToCard(video, category) {
     var poster     = video.image || '';
     var videoUrl   = pickVideoFile(video.video_files, 'sd');
     var previewUrl = pickVideoFile(video.video_files, 'sd');
+    var seconds    = video.duration || 0;
 
     if (!poster && video.video_pictures && video.video_pictures.length) {
       poster = video.video_pictures[0].picture || '';
     }
 
+    // Форматируем строку времени
+    var timeStr = '';
+    try {
+      timeStr = seconds ? Lampa.Utils.secondsToTime(seconds, true) : '';
+    } catch (e) {
+      if (seconds) {
+        var m = Math.floor(seconds / 60);
+        var s = seconds % 60;
+        timeStr = m + ':' + (s < 10 ? '0' : '') + s;
+      }
+    }
+
     return {
-      name             : makeName(video, category),
+      name             : (category ? category + ' — ' : '') + 'Видео #' + video.id,
       video            : videoUrl,
       picture          : poster,
       preview          : previewUrl,
       background_image : poster,
       img              : poster,
       poster           : poster,
-      time             : formatDuration(video.duration),
       quality          : 'HD',
+      time             : timeStr,        // штатное поле — может подхватиться само
+      duration_sec     : seconds,        // секунды для hook'а
       json             : false,
       related          : false,
       model            : null,
-      source           : NAME,
+      source           : NAME,           // нужен для фильтра в hook'е
       pexels_id        : video.id,
       author           : video.user ? video.user.name : '',
       pexels_url       : video.url || ''
@@ -142,29 +224,28 @@
   }
 
   // ----------------------------------------------------------
-  // [1.1.0] МЕНЮ — пункт поиска с search_on:true
-  //
-  // AdultJS при наличии search_on:true вставляет «Найти» в фильтр.
-  // После ввода запроса AdultJS пушит URL:
-  //   playlist_url + '?search=' + encodeURIComponent(query)
-  //   → 'xds/search/?search=закат'
-  //
-  // playlist_url пункта поиска НЕ должен содержать '?' — тогда
-  // AdultJS сам добавит ?search=... (а не &search=...).
+  // МЕНЮ
+  // [1.2.0] Добавлен пункт «Новое»
   // ----------------------------------------------------------
   function buildMenu() {
     return [
       {
         title        : '🔍 Поиск',
-        search_on    : true,              // ← AdultJS покажет «Найти» в фильтре
-        playlist_url : NAME + '/search/' // ← AdultJS добавит ?search=запрос
+        search_on    : true,
+        playlist_url : NAME + '/search/'
       },
       {
         title        : '🔥 Популярное',
         playlist_url : NAME + '/popular'
       },
       {
-        title        : '🆕 Категории',
+        // [1.2.0] Pexels не имеет отдельного /latest,
+        // используем /search с sort=latest и широким запросом
+        title        : '🆕 Новое',
+        playlist_url : NAME + '/latest'
+      },
+      {
+        title        : '📂 Категории',
         playlist_url : 'submenu',
         submenu      : CATEGORIES.map(function (c) {
           return {
@@ -182,8 +263,8 @@
   function fetchPopular(page, success, error) {
     pexelsGet('/popular', { page: page }, function (data) {
       success({
-        results     : (data.videos || []).map(function (v, i) {
-          return videoToCard(v, i, 'Популярное');
+        results     : (data.videos || []).map(function (v) {
+          return videoToCard(v, 'Популярное');
         }),
         collection  : true,
         total_pages : Math.min(Math.ceil((data.total_results || 100) / PER_PAGE), 10),
@@ -192,13 +273,29 @@
     }, error);
   }
 
+  // [1.2.0] «Новое» — Pexels не даёт /latest для видео,
+  // поэтому используем /search с sort=latest.
+  // 'nature' — широкий запрос, возвращает свежий контент.
+  function fetchLatest(page, success, error) {
+    pexelsGet('/search', { query: 'nature', sort: 'latest', page: page }, function (data) {
+      success({
+        results     : (data.videos || []).map(function (v) {
+          return videoToCard(v, 'Новое');
+        }),
+        collection  : true,
+        total_pages : Math.min(Math.ceil((data.total_results || 0) / PER_PAGE), 10),
+        menu        : buildMenu()
+      });
+    }, error);
+  }
+
   function fetchSearch(query, page, success, error) {
-    console.log('[xds] fetchSearch → query="' + query + '" page=' + page);
+    console.log('[xds] поиск → "' + query + '" стр.' + page);
 
     pexelsGet('/search', { query: query, page: page }, function (data) {
       success({
-        results     : (data.videos || []).map(function (v, i) {
-          return videoToCard(v, i, query);
+        results     : (data.videos || []).map(function (v) {
+          return videoToCard(v, query);
         }),
         collection  : true,
         total_pages : Math.min(Math.ceil((data.total_results || 0) / PER_PAGE), 10),
@@ -208,57 +305,45 @@
   }
 
   // ----------------------------------------------------------
-  // [1.1.0] РОУТЕР — разбираем входящий URL
-  //
-  // Возможные форматы url из AdultJS:
-  //
-  //   1. Фильтр-поиск (пользователь ввёл запрос через «Найти»):
-  //      'xds/search/?search=закат'
-  //      → parseQs → query = 'закат' → fetchSearch
-  //
-  //   2. Категория (клик по пункту подменю):
-  //      'xds/search/sunset'
-  //      → path-query = 'sunset' → fetchSearch
-  //
-  //   3. Популярное (стартовая страница или пункт меню):
-  //      'xds/popular'  /  ''  /  всё остальное
-  //      → fetchPopular
+  // РОУТЕР
   // ----------------------------------------------------------
   function parseSearchParam(url) {
-    // Ищем ?search= или &search= в URL
     var match = url.match(/[?&]search=([^&]*)/);
-    if (match) return decodeURIComponent(match[1]);
-    return null;
+    return match ? decodeURIComponent(match[1]) : null;
   }
 
   function routeView(url, page, success, error) {
     var searchPrefix = NAME + '/search/';
+    var latestPrefix = NAME + '/latest';
 
-    console.log('[xds] routeView → url="' + url + '" page=' + page);
+    console.log('[xds] routeView → "' + url + '" стр.' + page);
 
-    // Случай 1: фильтр-поиск → xds/search/?search=закат
+    // Фильтр-поиск: xds/search/?search=закат
     var searchParam = parseSearchParam(url);
     if (searchParam !== null) {
       fetchSearch(searchParam.trim(), page, success, error);
       return;
     }
 
-    // Случай 2: категория → xds/search/sunset
+    // [1.2.0] Новое: xds/latest
+    if (url.indexOf(latestPrefix) === 0) {
+      fetchLatest(page, success, error);
+      return;
+    }
+
+    // Категория: xds/search/sunset
     if (url.indexOf(searchPrefix) === 0) {
-      // Убираем префикс и возможный query-string
       var rawQuery = url.replace(searchPrefix, '').split('?')[0];
       var query    = decodeURIComponent(rawQuery).trim();
-
       if (query) {
         fetchSearch(query, page, success, error);
       } else {
-        // xds/search/ без запроса и без ?search= → popular
         fetchPopular(page, success, error);
       }
       return;
     }
 
-    // Случай 3: popular / неизвестное
+    // Популярное и всё остальное
     fetchPopular(page, success, error);
   }
 
@@ -267,19 +352,16 @@
   // ----------------------------------------------------------
   var PexelsParser = {
 
-    // Главный экран (горизонтальные полосы)
     main: function (params, success, error) {
       fetchPopular(1, success, error);
     },
 
-    // Каталог / категория / поиск через фильтр
     view: function (params, success, error) {
       var page = parseInt(params.page, 10) || 1;
       var url  = params.url || (NAME + '/popular');
       routeView(url, page, success, error);
     },
 
-    // Глобальный поиск через строку поиска Lampa
     search: function (params, success, error) {
       var query = (params.query || '').trim();
       var page  = parseInt(params.page, 10) || 1;
@@ -303,12 +385,18 @@
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, PexelsParser);
-      console.log('[xds] v1.1.0 зарегистрирован');
+
+      injectStyles();      // CSS для card__duration
+      setupDurationHook(); // Lampa.Listener hook
+
+      console.log('[xds] v1.2.0 зарегистрирован');
+
       try {
         setTimeout(function () {
-          Lampa.Noty.show('Pexels [xds] v1.1 подключён', { time: 2500 });
+          Lampa.Noty.show('Pexels [xds] v1.2 подключён', { time: 2500 });
         }, 600);
       } catch (e) {}
+
       return true;
     }
     return false;
