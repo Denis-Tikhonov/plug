@@ -283,33 +283,90 @@
     httpGet(videoPageUrl, function (html) {
       var qualitys = {};
 
-      // --- Метод 1: var encodings = [...] ---
-      // quality: число (240,360,480,720,1080) или строка "Auto"
-      // filename: "//abre-videos.youjizz.com/...master.m3u8?..."
+      // --- Метод 1: поиск dataEncodings через indexOf (без regex) ---
       try {
-    var reEnc = new RegExp('dataEncodings\\s*=\\s*(\$[\\s\\S]*?\$)\\s*;');
-    var mEnc  = html.match(reEnc);
-    if (mEnc && mEnc[1]) {
-        var dataEnc = JSON.parse(mEnc[1]);
-        dataEnc.forEach(function (enc) {
-            if (!enc.filename || enc.quality === undefined) return;
-            var u = enc.filename.replace(/\\\//g, '/');
-            if (u.indexOf('http') !== 0) u = 'https:' + u;
-            var key = (String(enc.quality).toLowerCase() === 'auto')
-                ? 'auto'
-                : (enc.quality + 'p');
-            // Предпочитаем m3u8 (abre-videos) над mp4 (cdne-mobile)
-            if (!qualitys[key] || u.indexOf('.m3u8') !== -1) {
-                qualitys[key] = u;
+        var searchStr = 'dataEncodings';
+        var idx = html.indexOf(searchStr);
+        if (idx !== -1) {
+          var arrStart = html.indexOf('[', idx);
+          if (arrStart !== -1) {
+            var depth = 0;
+            var arrEnd = -1;
+            for (var ci = arrStart; ci < html.length; ci++) {
+              if (html[ci] === '[') depth++;
+              else if (html[ci] === ']') {
+                depth--;
+                if (depth === 0) { arrEnd = ci; break; }
+              }
             }
-        });
-        if (Object.keys(qualitys).length) {
-            console.log('[yjizz] qualitys via dataEncodings:', Object.keys(qualitys));
+            if (arrEnd !== -1) {
+              var jsonStr = html.substring(arrStart, arrEnd + 1);
+              var dataEnc = JSON.parse(jsonStr);
+              dataEnc.forEach(function (enc) {
+                if (!enc.filename || enc.quality === undefined) return;
+                var u = enc.filename.replace(/\\\//g, '/');
+                if (u.indexOf('http') !== 0) u = 'https:' + u;
+                var key = (String(enc.quality).toLowerCase() === 'auto')
+                  ? 'auto'
+                  : (enc.quality + 'p');
+                if (!qualitys[key] || u.indexOf('.m3u8') !== -1) {
+                  qualitys[key] = u;
+                }
+              });
+              if (Object.keys(qualitys).length) {
+                console.log('[yjizz] qualitys via dataEncodings:', Object.keys(qualitys));
+              }
+            }
+          }
         }
-    }
-} catch (e) {
-    console.warn('[yjizz] dataEncodings parse error:', e.message || e);
-}
+      } catch (e) {
+        console.warn('[yjizz] dataEncodings parse error:', e.message || e);
+      }
+
+      // --- Метод 2: <source src title> ---
+      if (!Object.keys(qualitys).length) {
+        try {
+          var doc     = new DOMParser().parseFromString(html, 'text/html');
+          var sources = doc.querySelectorAll('video source[src][title]');
+          for (var si = 0; si < sources.length; si++) {
+            var src   = sources[si].getAttribute('src')   || '';
+            var title = sources[si].getAttribute('title') || 'auto';
+            if (!src || src.indexOf('blob:') === 0) continue;
+            if (src.indexOf('http') !== 0) src = 'https:' + src;
+            var key2 = (title.toLowerCase() === 'auto') ? 'auto' : (title + 'p');
+            qualitys[key2] = src;
+          }
+          if (Object.keys(qualitys).length) {
+            console.log('[yjizz] qualitys via <source>:', Object.keys(qualitys));
+          }
+        } catch (e) {
+          console.warn('[yjizz] <source> parse error:', e.message || e);
+        }
+      }
+
+      // --- Метод 3: regex m3u8 только (не mp4 превью) ---
+      if (!Object.keys(qualitys).length) {
+        var re3 = /((?:https?:)?\/\/abre-videos\.youjizz\.com\/[^"'\s]+\.m3u8[^"'\s]*)/g;
+        var m3;
+        while ((m3 = re3.exec(html)) !== null) {
+          var u3 = m3[1];
+          if (u3.indexOf('http') !== 0) u3 = 'https:' + u3;
+          qualitys['auto'] = u3;
+          console.log('[yjizz] qualitys via regex m3u8:', u3.substring(0, 80));
+          break;
+        }
+      }
+
+      if (!Object.keys(qualitys).length) {
+        error('YouJizz: видео не найдено на странице');
+        return;
+      }
+
+      success(qualitys);
+
+    }, error);
+  }
+
 
 
       // --- Метод 2: <source src title> ---
