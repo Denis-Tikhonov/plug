@@ -1,6 +1,6 @@
 // =============================================================
 // AdultJS.js — Lampa Adult Plugin
-// Version  : 1.5.8
+// Version  : 1.5.9
 // Changed  :
 //   [1.0.0] Полный рефакторинг с ab2024.ru → GitHub Pages
 //   [1.0.0] Убраны: RCH, история, лицензионные проверки
@@ -30,6 +30,15 @@
 //           как попасть в background_image / poster / img.
 //           Логика: если workerUrl настроен И picture начинается с http
 //           И ещё не проксирован — добавляем префикс Worker + encodeURI.
+//   [1.5.9] BUGFIX: networkRequest — два исправления:
+//     A) opts (4-й аргумент) теперь принимается и передаётся дальше.
+//        Парсеры передавали { type:'html' } и { headers:{...} },
+//        аргумент молча игнорировался. Теперь opts.headers передаются
+//        в Lampa.Network.native и fetch (xv-ru использует Cookie/Referer).
+//     B) Когда Lampa.Network.native недоступен (WebOS/Tizen/PC) —
+//        вместо немедленного error() пробуем Worker через fetch().
+//        Прежде: native_unavailable → Reguest (прямой, минуя Worker).
+//        Теперь: native_unavailable → _networkWorkerFetch → Reguest → fetch.
 // GitHub   : https://denis-tikhonov.github.io/plug/
 // Worker   :
 // =============================================================
@@ -48,7 +57,7 @@
   //         Менять здесь вручную, поле Settings удалено.
   // ----------------------------------------------------------
   var PLUGIN_ID      = 'adult_lampac';
-  var PLUGIN_VERSION = '1.5.8';
+  var PLUGIN_VERSION = '1.5.9';
 
   // ----------------------------------------------------------
   // [1.5.1] ПОЛИФИЛЛЫ — старые Android WebView не имеют
@@ -253,20 +262,26 @@
   //         Флаг done защищает от двойного вызова колбэка
   //         (таймаут + ответ одновременно).
   //         Лог: START / OK(мс, байт) / FAIL(мс, код, msg) / TIMEOUT.
+  // [1.5.9] A) opts.headers передаются в Lampa.Network.native.
+  //         B) Если native недоступен (WebOS/Tizen/PC) — вместо
+  //            немедленного error() пробуем Worker через fetch().
+  //            Это гарантирует прохождение через Worker даже без native.
   // ----------------------------------------------------------
-  function _networkNative(url, success, error) {
-    if (typeof Lampa === 'undefined' ||
-        !Lampa.Network ||
-        typeof Lampa.Network.native !== 'function') {
-      console.warn('[AdultJS][' + _ts() + '] native недоступен — пропуск');
-      error('native_unavailable');
-      return;
-    }
-
+  function _networkNative(url, opts, success, error) {
+    opts = opts || {};
     var workerUrl = getWorkerUrl();
     if (!workerUrl) {
       console.warn('[AdultJS][' + _ts() + '] WORKER_DEFAULT пуст — пропуск');
       error('worker_not_configured');
+      return;
+    }
+
+    // [1.5.9] B) native недоступен → Worker через fetch вместо немедленного error
+    if (typeof Lampa === 'undefined' ||
+        !Lampa.Network ||
+        typeof Lampa.Network.native !== 'function') {
+      console.warn('[AdultJS][' + _ts() + '] native недоступен → Worker через fetch');
+      _networkWorkerFetch(url, workerUrl, opts, success, error);
       return;
     }
 
@@ -285,6 +300,15 @@
       _noty('[AdultJS] ⏱ Worker timeout → Reguest...', 'error');
       error('native_timeout');
     }, NATIVE_TIMEOUT_MS);
+
+    // [1.5.9] A) Объединяем базовые заголовки с opts.headers парсера
+    var reqHeaders = { 'X-Requested-With': 'XMLHttpRequest' };
+    if (opts.headers) {
+      var h = opts.headers;
+      for (var hk in h) {
+        if (h.hasOwnProperty(hk)) reqHeaders[hk] = h[hk];
+      }
+    }
 
     try {
       Lampa.Network.native(
@@ -341,7 +365,7 @@
           error(e || 'native_error');
         },
         false,
-        { headers: { 'X-Requested-With': 'XMLHttpRequest' } }
+        { headers: reqHeaders }
       );
     } catch (ex) {
       if (done) return;
@@ -350,6 +374,58 @@
       console.error('[AdultJS][' + _ts() + '] native исключение: ' + ex.message);
       error(ex.message);
     }
+  }
+
+  // ----------------------------------------------------------
+  // [1.5.9] Worker через fetch — используется когда native недоступен.
+  //         Обеспечивает прохождение через Cloudflare Worker на
+  //         платформах без Lampa.Network.native (WebOS, Tizen, PC).
+  // ----------------------------------------------------------
+  function _networkWorkerFetch(url, workerUrl, opts, success, error) {
+    if (typeof fetch === 'undefined') {
+      console.warn('[AdultJS][' + _ts() + '] _networkWorkerFetch: fetch недоступен');
+      error('worker_fetch_unavailable');
+      return;
+    }
+
+    var fullPath = workerUrl + encodeURIComponent(url);
+    var t0 = Date.now();
+    console.log('[AdultJS][' + _ts() + '] WorkerFetch START → ' + fullPath.substring(0, 120));
+    _noty('[AdultJS] 🔄 Worker через fetch...');
+
+    // Объединяем заголовки
+    var headers = { 'X-Requested-With': 'XMLHttpRequest' };
+    if (opts && opts.headers) {
+      var oh = opts.headers;
+      for (var k in oh) {
+        if (oh.hasOwnProperty(k)) headers[k] = oh[k];
+      }
+    }
+
+    fetch(fullPath, { method: 'GET', headers: headers })
+      .then(function (r) {
+        console.log('[AdultJS][' + _ts() + '] WorkerFetch HTTP ' + r.status + ' ' + (Date.now()-t0) + 'мс');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.text();
+      })
+      .then(function (text) {
+        if (text && text.indexOf('"status":403') !== -1) {
+          console.warn('[AdultJS][' + _ts() + '] WorkerFetch Worker 403 в теле');
+          _noty('[AdultJS] ⛔ Домен не разрешён в Worker (403)', 'error');
+          error('worker_403');
+          return;
+        }
+        if (text && text.length > 50) {
+          console.log('[AdultJS][' + _ts() + '] WorkerFetch OK ' + (Date.now()-t0) + 'мс, байт: ' + text.length);
+          success(text);
+        } else {
+          error('worker_fetch_empty');
+        }
+      })
+      .catch(function (e) {
+        console.error('[AdultJS][' + _ts() + '] WorkerFetch FAIL ' + (Date.now()-t0) + 'мс | ' + (e.message || e));
+        error(e);
+      });
   }
 
   // ----------------------------------------------------------
@@ -424,11 +500,14 @@
   // ----------------------------------------------------------
   // [1.3.0] Публичная точка входа: window.AdultPlugin.networkRequest
   // [1.5.0] Сводный лог итога: все три причины отказа в одной строке
+  // [1.5.9] opts принимается и передаётся в _networkNative / fetch.
+  //         opts.headers — дополнительные заголовки запроса (xv-ru).
   // ----------------------------------------------------------
-  function networkRequest(url, success, error) {
+  function networkRequest(url, success, error, opts) {
+    opts = opts || {};
     console.log('[AdultJS][' + _ts() + '] networkRequest → ' + url.substring(0, 80));
 
-    _networkNative(url,
+    _networkNative(url, opts,
       function (text) {
         console.log('[AdultJS][' + _ts() + '] ✅ успех: native+Worker');
         success(text);
@@ -780,7 +859,7 @@
             'rt.pornhub.com':       'phub',
             'top.porno365tube.win': 'p365',
             'xv-ru.com':            'xv-ru',
-            'https://api.pexels.com/videos':              'xds',
+            'xds.com':              'xds',
           };
           parserName = domainMap[hostname] || stripped.split('/')[0];
         } catch(e) {
@@ -844,7 +923,7 @@
                 'rt.pornhub.com':       'phub',
                 'top.porno365tube.win': 'p365',
                 'xv-ru.com':            'xv-ru',
-                'https://api.pexels.com/videos':              'xds',
+                'xds.com':              'xds',
               };
               _pn = _dm[_hn] || _ps.split('/')[0];
             } catch(e2) { _pn = 'briz'; }
