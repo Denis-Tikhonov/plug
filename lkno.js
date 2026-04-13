@@ -1,12 +1,9 @@
 // =============================================================
 // lkno.js — Lenkino Parser для AdultJS
-// Version  : 1.3.0
+// Version  : 1.4.0
 // Changes  :
-//   [1.3.0] MP4 берётся из data-preview прямо в карточке
-//           qualities() не делает доп. запрос если URL уже MP4
-//           title берётся из .itm-tit (чище чем alt)
-//           duration из .itm-dur
-//           poster берётся из img[src]
+//   [1.4.0] Поиск → /search/{query} (был /?q={query})
+//           Пагинация поиска → /search/{query}/page/N
 // =============================================================
 
 (function () {
@@ -69,11 +66,14 @@
       : BASE_URL + '/' + slug + '/page/' + page;
   }
 
+  // ★ ИСПРАВЛЕНО: /search/{query} вместо /?q={query}
+  // Пагинация: /search/{query}/page/N
   function buildSearchUrl(query, page) {
     page = parseInt(page, 10) || 1;
-    var url = BASE_URL + '/?q=' + encodeURIComponent(query);
-    if (page > 1) url += '&page=' + page;
-    return url;
+    var base = BASE_URL + '/search/' + encodeURIComponent(query);
+    return page <= 1
+      ? base
+      : base + '/page/' + page;
   }
 
   // ----------------------------------------------------------
@@ -120,19 +120,14 @@
       // Фильтруем внешние/рекламные карточки
       if (!isInternalUrl(href)) continue;
 
-      // Чистый title из .itm-tit, fallback → alt
+      // Title из .itm-tit, fallback → alt
       var title = '';
       if (titEl) title = titEl.textContent.trim();
       if (!title) title = (imgEl.getAttribute('alt') || '').trim();
       if (!title) continue;
 
-      // Постер
-      var poster = fixUrl(imgEl.getAttribute('src') || '');
-
-      // ★ MP4 прямо из карточки — data-preview
-      var mp4Url = fixUrl(imgEl.getAttribute('data-preview') || '');
-
-      // Длительность
+      var poster   = fixUrl(imgEl.getAttribute('src') || '');
+      var mp4Url   = fixUrl(imgEl.getAttribute('data-preview') || '');
       var duration = durEl ? durEl.textContent.trim() : '';
 
       results.push({
@@ -140,8 +135,6 @@
         title:            title,
         duration:         duration,
         url:              href,
-        // ★ Если есть data-preview (MP4) — используем его,
-        //   иначе URL страницы видео
         video:            mp4Url || href,
         picture:          poster,
         img:              poster,
@@ -221,14 +214,14 @@
 
       console.log('[lkno] view → "' + url + '" page=' + page);
 
-      // 1) ?search=
+      // 1) ?search= (фильтр AdultJS)
       var sq = parseSearchParam(url);
       if (sq !== null) {
         fetchList(buildSearchUrl(sq.trim(), page), success, error);
         return;
       }
 
-      // 2) lkno/cat/slug
+      // 2) lkno/cat/slug → /{slug}/page/N
       if (url.indexOf(NAME + '/cat/') === 0) {
         var cat = url.replace(NAME + '/cat/', '').split('?')[0].trim();
         if (cat) {
@@ -237,7 +230,7 @@
         }
       }
 
-      // 3) lkno/search/query
+      // 3) lkno/search/query → /search/query/page/N
       if (url.indexOf(NAME + '/search/') === 0) {
         var rawQ = url.replace(NAME + '/search/', '').split('?')[0].trim();
         if (rawQ) {
@@ -266,14 +259,10 @@
       }, error);
     },
 
-    // ★ ГЛАВНОЕ ИСПРАВЛЕНИЕ:
-    //   Если videoUrl уже является MP4 (из data-preview) —
-    //   возвращаем напрямую без запроса к странице видео.
-    //   Fallback: запрашиваем страницу и ищем MP4 паттерном.
     qualities: function (videoUrl, success, error) {
       console.log('[lkno] qualities →', videoUrl);
 
-      // ★ MP4 URL напрямую — дополнительный запрос не нужен
+      // MP4 из data-preview — возвращаем сразу
       if (videoUrl && /\.mp4\/?/i.test(videoUrl)) {
         var cleanUrl = videoUrl.replace(/\/$/, '') + '/';
         console.log('[lkno] MP4 из карточки:', cleanUrl.substring(0, 80));
@@ -281,7 +270,7 @@
         return;
       }
 
-      // Fallback: запрос к странице видео
+      // Fallback: запрос страницы видео
       console.log('[lkno] запрос страницы видео:', videoUrl);
       request(videoUrl, function (html) {
         var patterns = [
@@ -323,7 +312,7 @@
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, LenkinoParser);
-      console.log('[lkno] v1.3.0 зарегистрирован OK');
+      console.log('[lkno] v1.4.0 зарегистрирован OK');
       return true;
     }
     return false;
