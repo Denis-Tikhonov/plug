@@ -1,424 +1,404 @@
 // =============================================================
-// yjizz.js — Парсер YouJizz для AdultJS / AdultPlugin (Lampa)
-// Version  : 2.0.1
+// yjizz.js — YouJizz Parser для AdultPlugin / Lampa
+// Version  : 1.1.0
+// Changes  :
+//   [1.0.0] Базовый парсер: популярное, категории, поиск
+//   [1.1.0] Исправлен URL поиска → /search/query-page.html
+//           Исправлены поля постера → img, poster, background_image
+//           Добавлен Noty "Ничего не найдено"
 // =============================================================
 
 (function () {
-  'use strict';
+'use strict';
 
-  var NAME = 'yjizz';
-  var HOST = 'https://www.youjizz.com';
+// ----------------------------------------------------------
+// КОНФИГ
+// ----------------------------------------------------------
+var NAME = 'yjizz';
+var HOST = 'https://www.youjizz.com';
 
-  var SORTS = [
-    { title: 'Популярное',  val: 'most-popular'    },
-    { title: 'Новинки',     val: 'newest-clips'    },
-    { title: 'Топ недели',  val: 'top-rated-week'  },
-    { title: 'Топ месяца',  val: 'top-rated-month' },
-    { title: 'Лучшее',      val: 'top-rated'       },
-    { title: 'В тренде',    val: 'trending'        },
-    { title: 'HD',          val: 'highdefinition'  },
-  ];
+// ----------------------------------------------------------
+// КАТЕГОРИИ
+// ----------------------------------------------------------
+var CATEGORIES = [
+  { title: '🔥 Популярное',      path: 'most-popular'   },
+  { title: '🆕 Новинки',         path: 'new-videos'     },
+  { title: '⭐ Топ рейтинг',     path: 'top-rated'      },
+  { title: '👁 Просматриваемые', path: 'most-viewed'    },
+  { title: '💋 Любительское',    path: 'amateur'        },
+  { title: '🎓 Молодые',         path: 'teens'          },
+  { title: '👩 Зрелые',          path: 'mature'         },
+  { title: '🌸 Азиатки',         path: 'asian'          },
+  { title: '🏳‍🌈 Лесби',         path: 'lesbian'        },
+  { title: '🎭 Анальное',        path: 'anal'           }
+];
 
-  var CATS = [
-    { title: 'Мачеха',         val: 'stepmom'        },
-    { title: 'Японки',         val: 'japanese'       },
-    { title: 'MILF',           val: 'milf'           },
-    { title: 'Анал',           val: 'anal'           },
-    { title: 'Любительское',   val: 'amateur'        },
-    { title: 'Кремпай',        val: 'creampie'       },
-    { title: 'Большие сиськи', val: 'big-tits'       },
-    { title: 'Threesome',      val: 'threesome'      },
-    { title: 'Сводная сестра', val: 'step-sister'    },
-    { title: 'POV',            val: 'pov'            },
-    { title: 'Латинки',        val: 'latina'         },
-    { title: 'Азиатки',        val: 'asian'          },
-    { title: 'Молодые',        val: 'teen'           },
-    { title: 'Хентай',         val: 'hentai'         },
-    { title: 'Межрасовый',     val: 'interracial'    },
-    { title: 'Зрелые',         val: 'mature'         },
-    { title: 'Gangbang',       val: 'gangbang'       },
-    { title: 'Ebony',          val: 'ebony'          },
-    { title: 'Массаж',         val: 'massage'        },
-    { title: 'Компиляция',     val: 'compilation'    },
-    { title: 'Blacked',        val: 'blacked'        },
-    { title: 'Сестра',         val: 'sister'         },
-    { title: 'Taboo',          val: 'taboo'          },
-    { title: 'BBC',            val: 'bbc'            },
-    { title: 'Big Ass',        val: 'big-ass'        },
-    { title: 'Блондинки',      val: 'blonde'         },
-    { title: 'Blowjob',        val: 'blowjob'        },
-    { title: 'Папочка',        val: 'daddy'          },
-    { title: 'Семья',          val: 'family'         },
-    { title: 'Японские жёны',  val: 'japanese-wife'  },
-    { title: 'Stepdaughter',   val: 'stepdaughter'   },
-    { title: 'Casting',        val: 'casting'        },
-    { title: 'Pinay',          val: 'pinay'          },
-    { title: 'Stepsister',     val: 'stepsister'     },
-    { title: 'Czech Streets',  val: 'czech-streets'  },
-    { title: 'Lana Rhoades',   val: 'lana-rhoades'   },
-    { title: 'Riley Reid',     val: 'riley-reid'     },
-    { title: 'Cory Chase',     val: 'cory-chase'     },
-    { title: 'Brandi Love',    val: 'brandi-love'    },
-  ];
+// ----------------------------------------------------------
+// УТИЛИТЫ
+// ----------------------------------------------------------
 
-  // ----------------------------------------------------------
-  // HTTP
-  // ----------------------------------------------------------
-  function httpGet(url, success, error) {
-    if (window.AdultPlugin &&
-        typeof window.AdultPlugin.networkRequest === 'function') {
-      window.AdultPlugin.networkRequest(url, success, error);
+// Протокол-относительный → https
+function prependHttps(url) {
+  if (!url) return '';
+  return (url.indexOf('//') === 0) ? 'https:' + url : url;
+}
+
+// /search/step-sister-1.html
+// Пробелы → дефисы, всё в нижнем регистре
+function buildSearchUrl(query, page) {
+  var slug = query.trim().toLowerCase().replace(/\s+/g, '-');
+  return HOST + '/search/' + slug + '-' + (page || 1) + '.html';
+}
+
+// /most-popular-1.html  /  /categories/milf-1.html
+function buildCatalogUrl(path, page) {
+  return HOST + '/' + path + '-' + (page || 1) + '.html';
+}
+
+// Извлечь title из slug URL: /videos/my-step-sister-16320161.html → "My step sister"
+function titleFromHref(href) {
+  var slug = (href || '').replace(/\.html$/, '').split('/').pop() || '';
+  slug = slug.replace(/-\d+$/, '');                       // убрать ID на конце
+  slug = slug.replace(/-/g, ' ');
+  return slug.charAt(0).toUpperCase() + slug.slice(1);
+}
+
+// Определить кол-во страниц из пагинации
+function detectTotalPages(doc) {
+  var links = doc.querySelectorAll('.pagination a, .pager a, [class*="paginat"] a');
+  var max   = 1;
+  for (var i = 0; i < links.length; i++) {
+    var href = links[i].getAttribute('href') || '';
+    var m    = href.match(/-(\d+)\.html$/);
+    if (m) {
+      var n = parseInt(m[1], 10);
+      if (n > max) max = n;
+    }
+  }
+  return max > 1 ? Math.min(max, 50) : 10; // fallback 10
+}
+
+// ----------------------------------------------------------
+// ПАРСИНГ КАРТОЧКИ
+// ----------------------------------------------------------
+function _parseCard(el) {
+  // Ссылка на видео
+  var linkEl = el.querySelector('a.frame.video') ||
+               el.querySelector('a[href*="/videos/"]');
+  if (!linkEl) return null;
+
+  var href = (linkEl.getAttribute('href') || '').trim();
+  if (!href || href === '#') return null;
+  var videoPageUrl = (href.indexOf('http') === 0) ? href : HOST + href;
+
+  // -------------------------------------------------------
+  // ПОСТЕР — приоритет data-original (lazy-load атрибут)
+  // -------------------------------------------------------
+  var imgEl   = el.querySelector('img[data-original], img.lazy, img');
+  var picture = '';
+
+  if (imgEl) {
+    var raw = imgEl.getAttribute('data-original') ||
+              imgEl.getAttribute('data-src')      ||
+              imgEl.getAttribute('src')           || '';
+
+    picture = prependHttps(raw);
+
+    // Игнорируем spacer-заглушку
+    if (picture.indexOf('spacer.gif') !== -1) picture = '';
+  }
+
+  // -------------------------------------------------------
+  // ПРЕВЬЮ-КЛИП (data-clip на ссылке)
+  // -------------------------------------------------------
+  var clip = prependHttps(linkEl.getAttribute('data-clip') || '');
+
+  // -------------------------------------------------------
+  // ЗАГОЛОВОК
+  // -------------------------------------------------------
+  var titleEl = el.querySelector('.title a, a.title, .video-title a, .video-title, h2 a, h2');
+  var title   = titleEl
+    ? (titleEl.textContent || titleEl.innerText || '').trim()
+    : titleFromHref(href);
+
+  if (!title) title = titleFromHref(href);
+
+  // -------------------------------------------------------
+  // ДЛИТЕЛЬНОСТЬ
+  // -------------------------------------------------------
+  var durEl = el.querySelector('.duration, .video-duration, .time, [class*="duration"]');
+  var dur   = durEl ? (durEl.textContent || '').trim() : '';
+
+  // -------------------------------------------------------
+  // КАРТОЧКА — все поля постера чтобы Lampa точно показал
+  // -------------------------------------------------------
+  return {
+    name             : title,
+    url              : videoPageUrl,
+    picture          : picture,     // ← все четыре поля
+    img              : picture,     //   для совместимости
+    poster           : picture,     //   с разными версиями
+    background_image : picture,     //   AdultPlugin / Lampa
+    preview          : clip,
+    time             : dur,
+    quality          : 'HD',
+    json             : false,
+    source           : NAME
+  };
+}
+
+// ----------------------------------------------------------
+// HTTP-ЗАПРОС
+// ----------------------------------------------------------
+function httpGet(url, success, error) {
+  var xhr = new XMLHttpRequest();
+  xhr.open('GET', url, true);
+  xhr.timeout = 15000;
+
+  xhr.onreadystatechange = function () {
+    if (xhr.readyState !== 4) return;
+    if (xhr.status >= 200 && xhr.status < 300) {
+      success(xhr.responseText);
     } else {
-      if (typeof fetch === 'undefined') { error('fetch unavailable'); return; }
-      fetch(url, {
-        method:  'GET',
-        headers: { 'Cookie': 'mature=1' }
-      })
-        .then(function (r) {
-          if (!r.ok) throw new Error('HTTP ' + r.status);
-          return r.text();
-        })
-        .then(success)
-        .catch(error);
+      error('HTTP ' + xhr.status);
     }
-  }
-
-  // ----------------------------------------------------------
-  // ПОСТРОЕНИЕ URL
-  // ----------------------------------------------------------
-  function buildCatalogUrl(sort, page) {
-    return HOST + '/' + (sort || SORTS[0].val) + '/' + (page || 1) + '.html';
-  }
-
-  function buildCatUrl(cat, page) {
-    return HOST + '/categories/' + cat + '-' + (page || 1) + '.html';
-  }
-
-  function buildSearchUrl(query, page) {
-    page = page || 1;
-    var url = HOST + '/?q=' + encodeURIComponent(query);
-    if (page > 1) url += '&page=' + page;
-    return url;
-  }
-
-  // ----------------------------------------------------------
-  // ПАРСИНГ КАРТОЧЕК
-  // ----------------------------------------------------------
-  function parseCards(html) {
-    if (!html) return [];
-    var doc   = new DOMParser().parseFromString(html, 'text/html');
-    var cards = [];
-
-    var items = doc.querySelectorAll('.video-item');
-    if (!items || !items.length) {
-      items = doc.querySelectorAll('.video-thumb');
-    }
-    if (!items || !items.length) return [];
-
-    for (var i = 0; i < items.length; i++) {
-      var card = _parseCard(items[i]);
-      if (card) cards.push(card);
-    }
-    return cards;
-  }
-
-  function _parseCard(el) {
-    var aEl = el.querySelector('a.frame.video');
-    if (!aEl) aEl = el.querySelector('a.frame');
-    if (!aEl) aEl = el.querySelector('a[href*="/videos/"]');
-    if (!aEl) return null;
-
-    var href = aEl.getAttribute('href') || '';
-    if (!href) return null;
-    if (href.indexOf('http') !== 0) href = HOST + href;
-
-    var preview = aEl.getAttribute('data-clip') || null;
-    if (preview && preview.indexOf('http') !== 0) preview = 'https:' + preview;
-
-    var imgEl   = el.querySelector('img');
-    var picture = '';
-    if (imgEl) {
-      picture = imgEl.getAttribute('data-original') ||
-                imgEl.getAttribute('src') || '';
-    }
-    if (picture && picture.indexOf('http') !== 0 && picture.length > 1) {
-      picture = 'https:' + picture;
-    }
-
-    var titleEl = el.querySelector('.video-title a');
-    if (!titleEl) titleEl = el.querySelector('.video-title');
-    var name = '';
-    if (titleEl) name = titleEl.textContent.trim();
-    if (!name)   name = (aEl.getAttribute('title') || '').trim();
-    if (!name)   return null;
-
-    var durEl = el.querySelector('span.time, .time');
-    var time  = '';
-    if (durEl) time = durEl.textContent.replace(/[^\d:]/g, '').trim();
-
-    var qualEl  = el.querySelector('span.i-hd, [class*="i-hd"]');
-    var quality = qualEl ? 'HD' : '';
-
-    return {
-      name:    name,
-      video:   href,
-      picture: picture,
-      preview: preview,
-      time:    time,
-      quality: quality,
-      json:    true,
-      related: true,
-      model:   null,
-      source:  NAME,
-    };
-  }
-
-  // ----------------------------------------------------------
-  // ИЗВЛЕЧЕНИЕ ВИДЕО СО СТРАНИЦЫ
-  // ----------------------------------------------------------
-  function getVideoLinks(videoPageUrl, success, error) {
-    httpGet(videoPageUrl, function (html) {
-      var qualitys = {};
-
-      // --- Метод 1: поиск dataEncodings через indexOf ---
-      try {
-        var idx = html.indexOf('dataEncodings');
-        if (idx !== -1) {
-          var arrStart = html.indexOf('[', idx);
-          if (arrStart !== -1) {
-            var depth  = 0;
-            var arrEnd = -1;
-            for (var ci = arrStart; ci < html.length; ci++) {
-              if      (html[ci] === '[') depth++;
-              else if (html[ci] === ']') {
-                depth--;
-                if (depth === 0) { arrEnd = ci; break; }
-              }
-            }
-            if (arrEnd !== -1) {
-              var jsonStr = html.substring(arrStart, arrEnd + 1);
-              var dataEnc = JSON.parse(jsonStr);
-              dataEnc.forEach(function (enc) {
-                if (!enc.filename || enc.quality === undefined) return;
-                var u = enc.filename.replace(/\\\//g, '/');
-                if (u.indexOf('http') !== 0) u = 'https:' + u;
-                var key = (String(enc.quality).toLowerCase() === 'auto')
-                  ? 'auto'
-                  : (enc.quality + 'p');
-                if (!qualitys[key] || u.indexOf('.m3u8') !== -1) {
-                  qualitys[key] = u;
-                }
-              });
-              if (Object.keys(qualitys).length) {
-                console.log('[yjizz] qualitys via dataEncodings:', Object.keys(qualitys));
-              }
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('[yjizz] dataEncodings parse error:', e.message || e);
-      }
-
-      // --- Метод 2: <source src title> ---
-      if (!Object.keys(qualitys).length) {
-        try {
-          var doc     = new DOMParser().parseFromString(html, 'text/html');
-          var sources = doc.querySelectorAll('video source[src][title]');
-          for (var si = 0; si < sources.length; si++) {
-            var src   = sources[si].getAttribute('src')   || '';
-            var title = sources[si].getAttribute('title') || 'auto';
-            if (!src || src.indexOf('blob:') === 0) continue;
-            if (src.indexOf('http') !== 0) src = 'https:' + src;
-            var key2 = (title.toLowerCase() === 'auto') ? 'auto' : (title + 'p');
-            qualitys[key2] = src;
-          }
-          if (Object.keys(qualitys).length) {
-            console.log('[yjizz] qualitys via <source>:', Object.keys(qualitys));
-          }
-        } catch (e) {
-          console.warn('[yjizz] <source> parse error:', e.message || e);
-        }
-      }
-
-      // --- Метод 3: regex m3u8 ---
-      if (!Object.keys(qualitys).length) {
-        var re3 = /((?:https?:)?\/\/abre-videos\.youjizz\.com\/[^"'\s]+\.m3u8[^"'\s]*)/g;
-        var m3;
-        while ((m3 = re3.exec(html)) !== null) {
-          var u3 = m3[1];
-          if (u3.indexOf('http') !== 0) u3 = 'https:' + u3;
-          qualitys['auto'] = u3;
-          console.log('[yjizz] qualitys via regex m3u8:', u3.substring(0, 80));
-          break;
-        }
-      }
-
-      if (!Object.keys(qualitys).length) {
-        error('YouJizz: видео не найдено на странице');
-        return;
-      }
-
-      success(qualitys);
-
-    }, error);
-  }
-
-  // ----------------------------------------------------------
-  // МЕНЮ
-  // ----------------------------------------------------------
-  function buildMenu() {
-    return [
-      {
-        title:        '🔍 Поиск',
-        search_on:    true,
-        playlist_url: NAME + '/search/',
-      },
-      {
-        title:        '🗂 Сортировка',
-        playlist_url: 'submenu',
-        submenu:      SORTS.map(function (s) {
-          return {
-            title:        s.title,
-            playlist_url: NAME + '/sort/' + s.val,
-          };
-        }),
-      },
-      {
-        title:        '📂 Категории',
-        playlist_url: 'submenu',
-        submenu:      CATS.map(function (c) {
-          return {
-            title:        c.title,
-            playlist_url: NAME + '/cat/' + c.val,
-          };
-        }),
-      },
-    ];
-  }
-
-  // ----------------------------------------------------------
-  // РОУТЕР
-  // ----------------------------------------------------------
-  function parseSearchParam(url) {
-    var m = url.match(/[?&]search=([^&]*)/);
-    return m ? decodeURIComponent(m[1]) : null;
-  }
-
-  function routeLoad(url, page, success, error) {
-    console.log('[yjizz] routeLoad → "' + url + '" page=' + page);
-
-    var PREFIX_SORT = NAME + '/sort/';
-    var PREFIX_CAT  = NAME + '/cat/';
-    var PREFIX_SRCH = NAME + '/search/';
-
-    var sq = parseSearchParam(url);
-    if (sq !== null) {
-      var q5 = sq.trim();
-      fetchPage(
-        q5 ? buildSearchUrl(q5, page) : buildCatalogUrl(SORTS[0].val, page),
-        page, success, error
-      );
-      return;
-    }
-
-    if (url.indexOf(PREFIX_SORT) === 0) {
-      var sort = url.replace(PREFIX_SORT, '').split('?')[0].trim();
-      fetchPage(buildCatalogUrl(sort || SORTS[0].val, page), page, success, error);
-      return;
-    }
-
-    if (url.indexOf(PREFIX_CAT) === 0) {
-      var cat = url.replace(PREFIX_CAT, '').split('?')[0].trim();
-      if (cat) {
-        fetchPage(buildCatUrl(cat, page), page, success, error);
-        return;
-      }
-    }
-
-    if (url.indexOf(PREFIX_SRCH) === 0) {
-      var rawQ = url.replace(PREFIX_SRCH, '').split('?')[0].trim();
-      if (rawQ) {
-        fetchPage(buildSearchUrl(decodeURIComponent(rawQ), page), page, success, error);
-        return;
-      }
-    }
-
-    fetchPage(buildCatalogUrl(SORTS[0].val, page), page, success, error);
-  }
-
-  // ----------------------------------------------------------
-  // ЗАГРУЗКА КАРТОЧЕК
-  // ----------------------------------------------------------
-  function fetchPage(loadUrl, page, success, error) {
-    console.log('[yjizz] fetchPage → ' + loadUrl);
-    httpGet(loadUrl, function (html) {
-      var results = parseCards(html);
-      if (!results.length) {
-        error('YouJizz: карточки не найдены');
-        return;
-      }
-      success({
-        results:     results,
-        collection:  true,
-        total_pages: results.length >= 20 ? page + 5 : page,
-        menu:        buildMenu(),
-      });
-    }, error);
-  }
-
-  // ----------------------------------------------------------
-  // ПУБЛИЧНЫЙ ИНТЕРФЕЙС
-  // ----------------------------------------------------------
-  var YjizzParser = {
-
-    main: function (params, success, error) {
-      fetchPage(buildCatalogUrl(SORTS[0].val, 1), 1, success, error);
-    },
-
-    view: function (params, success, error) {
-      var page = parseInt(params.page, 10) || 1;
-      var url  = params.url || NAME;
-      routeLoad(url, page, success, error);
-    },
-
-    search: function (params, success, error) {
-      var query = (params.query || '').trim();
-      var page  = parseInt(params.page, 10) || 1;
-      if (!query) {
-        success({ title: '', results: [], collection: true, total_pages: 1 });
-        return;
-      }
-      fetchPage(buildSearchUrl(query, page), page, function (data) {
-        data.title = 'YouJizz: ' + query;
-        data.url   = NAME + '/search/' + encodeURIComponent(query);
-        success(data);
-      }, error);
-    },
-
-    qualities: function (videoUrl, success, error) {
-      getVideoLinks(videoUrl, success, error);
-    },
   };
 
-  // ----------------------------------------------------------
-  // РЕГИСТРАЦИЯ
-  // ----------------------------------------------------------
-  function tryRegister() {
-    if (window.AdultPlugin &&
-        typeof window.AdultPlugin.registerParser === 'function') {
-      window.AdultPlugin.registerParser(NAME, YjizzParser);
-      console.log('[yjizz] v2.0.1 зарегистрирован OK');
-      return true;
-    }
-    return false;
+  xhr.ontimeout = function () { error('Timeout');        };
+  xhr.onerror   = function () { error('Network error'); };
+  xhr.send();
+}
+
+// ----------------------------------------------------------
+// РАЗБОР HTML-СТРАНИЦЫ → массив карточек
+// ----------------------------------------------------------
+function parsePage(html) {
+  var doc;
+  try {
+    doc = (new DOMParser()).parseFromString(html, 'text/html');
+  } catch (e) {
+    return { results: [], totalPages: 1 };
   }
 
-  if (!tryRegister()) {
-    var _elapsed = 0;
-    var _poll = setInterval(function () {
-      _elapsed += 100;
-      if (tryRegister() || _elapsed >= 10000) clearInterval(_poll);
-    }, 100);
+  // Пробуем несколько селекторов контейнера карточки
+  var items = doc.querySelectorAll('li.video-item, .video-item, .thumb-block');
+  if (!items.length) {
+    items = doc.querySelectorAll('.frame-wrapper');
   }
+
+  var results = [];
+  for (var i = 0; i < items.length; i++) {
+    var card = _parseCard(items[i]);
+    if (card) results.push(card);
+  }
+
+  return {
+    results    : results,
+    totalPages : detectTotalPages(doc)
+  };
+}
+
+// ----------------------------------------------------------
+// ЗАГРУЗКА И РАЗБОР ЛИСТИНГА
+// ----------------------------------------------------------
+function fetchListing(pageUrl, success, error) {
+  console.log('[yjizz] fetchListing →', pageUrl);
+
+  httpGet(pageUrl, function (html) {
+    var parsed = parsePage(html);
+
+    if (!parsed.results.length) {
+      try { Lampa.Noty.show('Ничего не найдено'); } catch (e) {}
+      error('Ничего не найдено');
+      return;
+    }
+
+    success({
+      results     : parsed.results,
+      collection  : true,
+      total_pages : parsed.totalPages,
+      menu        : buildMenu()
+    });
+  }, error);
+}
+
+// ----------------------------------------------------------
+// МЕНЮ
+// ----------------------------------------------------------
+function buildMenu() {
+  var menu = [
+    {
+      title        : '🔍 Поиск',
+      search_on    : true,
+      playlist_url : NAME + '/search/'
+    },
+    {
+      title        : '🔥 Популярное',
+      playlist_url : NAME + '/popular'
+    },
+    {
+      title        : '🆕 Новинки',
+      playlist_url : NAME + '/new'
+    }
+  ];
+
+  var submenu = CATEGORIES.map(function (c) {
+    return {
+      title        : c.title,
+      playlist_url : NAME + '/cat/' + c.path
+    };
+  });
+
+  menu.push({
+    title    : '📂 Категории',
+    submenu  : submenu
+  });
+
+  return menu;
+}
+
+// ----------------------------------------------------------
+// РОУТЕР VIEW
+// ----------------------------------------------------------
+function parseSearchParam(url) {
+  var m = url.match(/[?&]search=([^&]*)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+function routeView(url, page, success, error) {
+  var searchPrefix = NAME + '/search/';
+  var catPrefix    = NAME + '/cat/';
+
+  console.log('[yjizz] routeView → url="' + url + '" page=' + page);
+
+  // 1) Фильтр-поиск: yjizz/search/?search=wife
+  var searchParam = parseSearchParam(url);
+  if (searchParam !== null) {
+    fetchListing(buildSearchUrl(searchParam.trim(), page), success, error);
+    return;
+  }
+
+  // 2) Поиск по пути: yjizz/search/wife
+  if (url.indexOf(searchPrefix) === 0) {
+    var rawQ  = url.replace(searchPrefix, '').split('?')[0];
+    var query = decodeURIComponent(rawQ).trim();
+
+    if (query) {
+      fetchListing(buildSearchUrl(query, page), success, error);
+    } else {
+      fetchListing(buildCatalogUrl('most-popular', page), success, error);
+    }
+    return;
+  }
+
+  // 3) Категория: yjizz/cat/milf
+  if (url.indexOf(catPrefix) === 0) {
+    var catPath = url.replace(catPrefix, '').split('?')[0];
+    fetchListing(buildCatalogUrl(catPath, page), success, error);
+    return;
+  }
+
+  // 4) Новинки
+  if (url === NAME + '/new') {
+    fetchListing(buildCatalogUrl('new-videos', page), success, error);
+    return;
+  }
+
+  // 5) Всё остальное → популярное
+  fetchListing(buildCatalogUrl('most-popular', page), success, error);
+}
+
+// ----------------------------------------------------------
+// QUALITIES — извлечь URL видео из страницы видео
+// ----------------------------------------------------------
+function fetchQualities(pageUrl, success, error) {
+  httpGet(pageUrl, function (html) {
+    // Паттерны поиска video URL в исходнике страницы
+    var patterns = [
+      /video_url['":\s]+['"]([^'"]+\.mp4[^'"]*)['"]/i,
+      /file:\s*['"]([^'"]+\.mp4[^'"]*)['"]/i,
+      /['"]([^'"]+youjizz[^'"]+\.mp4[^'"]*)['"]/i,
+      /source\s+src=['"]([^'"]+\.mp4[^'"]*)['"]/i
+    ];
+
+    for (var i = 0; i < patterns.length; i++) {
+      var m = html.match(patterns[i]);
+      if (m && m[1]) {
+        var videoUrl = prependHttps(m[1]);
+        success([{ url: videoUrl, label: 'HD' }]);
+        return;
+      }
+    }
+
+    error('Video URL не найден');
+  }, error);
+}
+
+// ----------------------------------------------------------
+// API ПАРСЕРА
+// ----------------------------------------------------------
+var YJizzParser = {
+
+  // Главный экран
+  main: function (params, success, error) {
+    fetchListing(buildCatalogUrl('most-popular', 1), success, error);
+  },
+
+  // Каталог / категория / поиск
+  view: function (params, success, error) {
+    var page = parseInt(params.page, 10) || 1;
+    var url  = params.url || (NAME + '/popular');
+    routeView(url, page, success, error);
+  },
+
+  // Глобальный поиск через строку Lampa
+  search: function (params, success, error) {
+    var query = (params.query || '').trim();
+    var page  = parseInt(params.page, 10) || 1;
+
+    if (!query) {
+      success({ title: '', results: [], collection: true, total_pages: 1 });
+      return;
+    }
+
+    fetchListing(buildSearchUrl(query, page), function (data) {
+      data.title = 'YouJizz: ' + query;
+      data.url   = NAME + '/search/' + encodeURIComponent(query);
+      success(data);
+    }, error);
+  },
+
+  // Получить прямой URL видео
+  qualities: function (params, success, error) {
+    var url = params.url || '';
+    if (!url) { error('Нет URL'); return; }
+    fetchQualities(url, success, error);
+  }
+};
+
+// ----------------------------------------------------------
+// РЕГИСТРАЦИЯ
+// ----------------------------------------------------------
+function tryRegister() {
+  if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
+    window.AdultPlugin.registerParser(NAME, YJizzParser);
+    console.log('[yjizz] v1.1.0 зарегистрирован');
+    try {
+      setTimeout(function () {
+        Lampa.Noty.show('YouJizz [yjizz] v1.1.0 подключён', { time: 2500 });
+      }, 600);
+    } catch (e) {}
+    return true;
+  }
+  return false;
+}
+
+if (!tryRegister()) {
+  var _elapsed = 0;
+  var _poll = setInterval(function () {
+    _elapsed += 100;
+    if (tryRegister() || _elapsed >= 10000) clearInterval(_poll);
+  }, 100);
+}
 
 })();
