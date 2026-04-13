@@ -1,643 +1,219 @@
 // =============================================================
-// p365.js — Парсер Porno365Tube для AdultJS / AdultPlugin (Lampa)
-// Version  : 2.1.0
-// Changed  :
-//   [1.0.0] Первая версия
-//   [2.0.0] УНИФИКАЦИЯ: структура приведена к briz204 как эталону
-//           — добавлен var VERSION
-//           — добавлен var NOTY_TIME = 3000
-//           — добавлен safeParams() для диагностики
-//           — httpGet: теперь полная цепочка native+Worker → Reguest → fetch
-//             (как в briz204, вместо упрощённого делегирования)
-//           — _native(), _reguest(), _fetch() вынесены отдельно
-//           — заголовок файла в едином формате
-//           — notyOk/notyErr: единый формат с TAG + иконкой
-//   [2.1.0] Убрана сортировка из меню фильтра.
-//           Сайт top.porno365tube.win сортировку не поддерживает —
-//           меню теперь содержит только Поиск и Категории.
-//           buildMenu() и buildUrl() упрощены (нет sort-параметра).
-//           parseUrl() упрощён: убрана обработка sort.
-//
-//   СТРУКТУРА САЙТА (из анализа):
-//     Карточки  : div.item.video-block
-//     Постер    : img[data-src] → img[src]
-//     Превью    : img[data-preview] — прямой mp4
-//     Название  : div.title → img[alt]
-//     Длит-сть  : span.duration
-//     Поиск     : HOST + '/?q={query}'
-//     Категории : HOST + '/categories/{slug}'
-//     Пагинация : &page={N} добавляется к любому URL
-//     Видео     : <source size="N"> + og:video
-//
-// Сайт     : https://top.porno365tube.win/
-// GitHub   : https://denis-tikhonov.github.io/plug/
-// Worker   : https://zonaproxy.777b737.workers.dev/?url=
+// p365.js — Парсер Porno365 для AdultJS / AdultPlugin (Lampa)
+// Version  : 1.0.0
+// Architecture: YouJizz/XDS Routing System
 // =============================================================
 
 (function () {
   'use strict';
 
-  var HOST      = 'https://top.porno365tube.win';
-  var NAME      = 'p365';
-  var TAG       = '[p365]';
-  var VERSION   = '2.1.0';
-  var NOTY_TIME = 3000;
+  var NAME = 'p365';
+  var HOST = 'https://top.porno365tube.win';
+
+  var CATS = [
+    { title: 'HD порно', slug: 'hd-porno' },
+    { title: 'Русское', slug: 'russkoe' },
+    { title: 'Молодые', slug: 'molodye' },
+    { title: 'Анал', slug: 'anal' },
+    { title: 'Домашнее', slug: 'domashnee' },
+    { title: 'Блондинки', slug: 'blondinki' },
+    { title: 'Большие сиськи', slug: 'bolshie-siski' },
+    { title: 'Инцест', slug: 'incest' },
+    { title: 'Минет', slug: 'minet' },
+    { title: 'Зрелые', slug: 'zrelye' },
+    { title: 'Мастурбация', slug: 'masturbaciya' },
+    { title: 'Секс втроем', slug: 'seks-vtroem' }
+  ];
 
   // ----------------------------------------------------------
-  // URL Cloudflare Worker
-  // Приоритет: AdultPlugin.workerUrl → константа
+  // NETWORK
   // ----------------------------------------------------------
-  var WORKER_DEFAULT = 'https://zonaproxy.777b737.workers.dev/?url=';
+  function httpGet(url, success, error) {
+    if (window.AdultPlugin && typeof window.AdultPlugin.networkRequest === 'function') {
+      window.AdultPlugin.networkRequest(url, success, error);
+    } else {
+      fetch(url)
+        .then(function (r) { return r.text(); })
+        .then(success)
+        .catch(error);
+    }
+  }
 
-  function getWorkerUrl() {
-    var url = (window.AdultPlugin && window.AdultPlugin.workerUrl)
-      ? window.AdultPlugin.workerUrl
-      : WORKER_DEFAULT;
-    if (url && url.charAt(url.length - 1) !== '=') url = url + '=';
+  // ----------------------------------------------------------
+  // URL BUILDERS
+  // ----------------------------------------------------------
+  function buildUrl(type, query, page) {
+    var url = HOST + '/';
+    if (type === 'search' && query) {
+      url += '?q=' + encodeURIComponent(query);
+    } else if (type === 'cat' && query) {
+      url += 'categories/' + query;
+    }
+    
+    if (page > 1) {
+      // Судя по JSON pagination pattern "/2257", сайт может использовать специфичный роутинг страниц
+      url += (url.indexOf('?') > -1 ? '&' : '/') + page;
+    }
     return url;
   }
 
   // ----------------------------------------------------------
-  // ПОЛИФИЛЛЫ
+  // PARSER
   // ----------------------------------------------------------
-  if (!Array.prototype.find) {
-    Array.prototype.find = function (fn) {
-      for (var i = 0; i < this.length; i++) {
-        if (fn(this[i], i, this)) return this[i];
-      }
-    };
-  }
-  if (!String.prototype.startsWith) {
-    String.prototype.startsWith = function (s, p) {
-      return this.indexOf(s, p || 0) === (p || 0);
-    };
-  }
+  function parseCards(html) {
+    var doc = new DOMParser().parseFromString(html, 'text/html');
+    var items = doc.querySelectorAll('.video-block');
+    var results = [];
 
-  function forEachNode(list, fn) {
-    if (!list) return;
-    for (var i = 0; i < list.length; i++) fn(list[i], i);
-  }
+    for (var i = 0; i < items.length; i++) {
+      var el = items[i];
+      var a = el.querySelector('a[href*="/videos/"]');
+      var img = el.querySelector('img');
+      if (!a || !img) continue;
 
-  function arrayFind(arr, fn) {
-    if (!arr) return undefined;
-    for (var i = 0; i < arr.length; i++) if (fn(arr[i], i)) return arr[i];
-  }
+      var title = (img.getAttribute('alt') || el.querySelector('.title').textContent || '').trim();
+      var poster = img.getAttribute('data-src') || img.getAttribute('src') || '';
+      if (poster && poster.indexOf('http') !== 0) poster = HOST + poster;
 
-  function safeParams(p) {
-    if (!p) return '(null)';
-    try { return JSON.stringify({ url: p.url||'', page: p.page||'', query: p.query||'' }); }
-    catch(e) { return '(err)'; }
-  }
+      var href = a.getAttribute('href');
+      if (href.indexOf('http') !== -1) { /* ok */ } else href = HOST + href;
 
-  // ----------------------------------------------------------
-  // ЛОГИРОВАНИЕ
-  // ----------------------------------------------------------
-  function log(m, d)  { console.log(TAG,   m, d !== undefined ? d : ''); }
-  function warn(m, d) { console.warn(TAG,  m, d !== undefined ? d : ''); }
-  function err(m, d)  { console.error(TAG, m, d !== undefined ? d : ''); }
+      var durEl = el.querySelector('.duration');
 
-  function notyErr(msg) {
-    try { Lampa.Noty.show(TAG + ' ⛔ ' + msg, { time: NOTY_TIME, style: 'error' }); } catch(e) {}
-  }
-  function notyOk(msg) {
-    try { Lampa.Noty.show(TAG + ' ✅ ' + msg, { time: NOTY_TIME }); } catch(e) {}
-  }
-
-  // ----------------------------------------------------------
-  // СЕТЕВОЙ СЛОЙ
-  // Приоритет: AdultPlugin.networkRequest → native+Worker → Reguest → fetch
-  // (структура идентична briz204)
-  // ----------------------------------------------------------
-
-  function _native(url, ok, fail) {
-    if (!Lampa.Network || typeof Lampa.Network.native !== 'function') {
-      fail('no_native'); return;
-    }
-    var workerUrl = getWorkerUrl();
-    var path = workerUrl + encodeURIComponent(url);
-    var done = false;
-
-    var tid = setTimeout(function () {
-      if (done) return; done = true;
-      warn('native timeout 9с');
-      fail('timeout');
-    }, 9000);
-
-    try {
-      Lampa.Network.native(path,
-        function (r) {
-          if (done) return; done = true; clearTimeout(tid);
-          var t = (typeof r === 'string') ? r : JSON.stringify(r);
-          if (t && t.indexOf('"status":403') !== -1) { fail('403'); return; }
-          if (t && t.length > 50) ok(t); else fail('empty');
-        },
-        function (e) {
-          if (done) return; done = true; clearTimeout(tid);
-          var msg = (e && e.message) ? e.message : String(e||'');
-          var st  = (e && e.status)  ? e.status  : 0;
-          if (st === 403 || msg.indexOf('403') !== -1) { fail('403'); return; }
-          fail(msg || 'native_err');
-        },
-        false, { headers: { 'X-Requested-With': 'XMLHttpRequest' } }
-      );
-    } catch(ex) {
-      if (done) return; done = true; clearTimeout(tid);
-      fail(ex.message);
-    }
-  }
-
-  function _reguest(url, ok, fail) {
-    try {
-      new Lampa.Reguest().silent(url,
-        function (d) {
-          var t = (typeof d === 'string') ? d : '';
-          if (t.length > 50) ok(t); else fail('empty');
-        },
-        function (e) { fail(e || 'req_err'); },
-        false, { dataType: 'text', timeout: 10000 }
-      );
-    } catch(ex) { fail(ex.message); }
-  }
-
-  function _fetch(url, ok, fail) {
-    if (typeof fetch === 'undefined') { fail('no_fetch'); return; }
-    fetch(url, { method: 'GET' })
-      .then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.text();
-      })
-      .then(ok)
-      .catch(function (e) { fail(e.message || String(e)); });
-  }
-
-  function httpGet(url, ok, fail) {
-    log('httpGet →', url);
-
-    if (window.AdultPlugin && typeof window.AdultPlugin.networkRequest === 'function') {
-      window.AdultPlugin.networkRequest(url, ok, fail, { type: 'html' });
-      return;
-    }
-
-    _native(url, ok, function (e1) {
-      log('native fail:', e1);
-      _reguest(url, ok, function (e2) {
-        log('reguest fail:', e2);
-        _fetch(url, ok, function (e3) {
-          err('ALL FAIL | native=' + e1 + ' req=' + e2 + ' fetch=' + e3);
-          notyErr('Сайт недоступен');
-          fail('all_failed');
-        });
+      results.push({
+        name: title,
+        video: href,
+        // Обязательные поля для AdultJS v2
+        picture: poster,
+        img: poster,
+        poster: poster,
+        background_image: poster,
+        time: durEl ? durEl.textContent.trim() : '',
+        quality: 'HD',
+        json: true,
+        source: NAME
       });
-    });
+    }
+    return results;
   }
 
   // ----------------------------------------------------------
-  // 80 КАТЕГОРИЙ (из анализа сайта)
+  // ROUTING (Architecture: YouJizz/XDS)
   // ----------------------------------------------------------
-  var CATS = [
-    { title: 'HD порно',              slug: 'hd-porno'              },
-    { title: 'Азиатки',               slug: 'aziatki'               },
-    { title: 'Анал',                  slug: 'anal'                  },
-    { title: 'Анилингус',             slug: 'anilingus'             },
-    { title: 'БДСМ',                  slug: 'bdsm'                  },
-    { title: 'Блондинки',             slug: 'blondinki'             },
-    { title: 'Большие жопы',          slug: 'bolshie-jopy'          },
-    { title: 'Большие сиськи',        slug: 'bolshie-siski'         },
-    { title: 'Большие члены',         slug: 'bolshie-chleny'        },
-    { title: 'Брат и сестра',         slug: 'brat-i-sestra'         },
-    { title: 'Бритые киски',          slug: 'britye-kiski'          },
-    { title: 'Брюнетки',              slug: 'bryunetki'             },
-    { title: 'Буккаке',               slug: 'bukkake'               },
-    { title: 'В ванной',              slug: 'v-vannoy'              },
-    { title: 'В лосинах',             slug: 'v-losinah'             },
-    { title: 'В машине',              slug: 'v-mashine'             },
-    { title: 'В офисе',               slug: 'v-ofise'               },
-    { title: 'Вечеринки',             slug: 'vecherinki'            },
-    { title: 'Волосатые',             slug: 'volosatye'             },
-    { title: 'Групповое',             slug: 'gruppovoe'             },
-    { title: 'Двойное проникновение', slug: 'dvoynoe-proniknovenie' },
-    { title: 'Домашнее',              slug: 'domashnee'             },
-    { title: 'Доминирование',         slug: 'dominirovanie'         },
-    { title: 'Дрочка',                slug: 'drochka'               },
-    { title: 'Женское доминирование', slug: 'jenskoe-dominirovanie' },
-    { title: 'Жёсткое',               slug: 'jestkoe'               },
-    { title: 'ЖМЖ',                   slug: 'jmj'                   },
-    { title: 'Зрелые',                slug: 'zrelye'                },
-    { title: 'Игрушки',               slug: 'igrushki'              },
-    { title: 'Измена',                slug: 'izmena'                },
-    { title: 'Инцест',                slug: 'incest'                },
-    { title: 'Камшот',                slug: 'sperma'                },
-    { title: 'Кастинг',               slug: 'kasting'               },
-    { title: 'Красивое порно',        slug: 'krasivoe-porno'        },
-    { title: 'Кремпай',               slug: 'krempay'               },
-    { title: 'Крупным планом',        slug: 'krupnym-planom'        },
-    { title: 'Куни',                  slug: 'kuni'                  },
-    { title: 'Любительское',          slug: 'lyubitelskoe-porno'    },
-    { title: 'Маленькие сиськи',      slug: 'malenkie-siski'        },
-    { title: 'Мамки',                 slug: 'mamki'                 },
-    { title: 'Массаж',                slug: 'massaj'                },
-    { title: 'Мастурбация',           slug: 'masturbaciya'          },
-    { title: 'Медсёстры',             slug: 'medsestry'             },
-    { title: 'Межрасовое',            slug: 'mejrassovoe'           },
-    { title: 'МЖМ',                   slug: 'mjm'                   },
-    { title: 'Минет',                 slug: 'minet'                 },
-    { title: 'Молодые',               slug: 'molodye'               },
-    { title: 'Мулатки',               slug: 'mulatki'               },
-    { title: 'На природе',            slug: 'na-prirode'            },
-    { title: 'На публике',            slug: 'na-publike'            },
-    { title: 'Негры',                 slug: 'negry'                 },
-    { title: 'Оргазмы',               slug: 'orgazmy'               },
-    { title: 'Оргии',                 slug: 'orgii'                 },
-    { title: 'Пикап',                 slug: 'pikap'                 },
-    { title: 'Порно Full HD',         slug: 'porno-onlayn-hd'       },
-    { title: 'Порно звёзды',          slug: 'porno-zvezdy'          },
-    { title: 'Ретро',                 slug: 'retro-porno'           },
-    { title: 'Русское',               slug: 'russkoe'               },
-    { title: 'Русское домашнее',      slug: 'russkoe-domashnee-porno'},
-    { title: 'Рыжие',                 slug: 'ryjie'                 },
-    { title: 'Свингеры',              slug: 'svingery'              },
-    { title: 'Секс втроём',           slug: 'seks-vtroem'           },
-    { title: 'Страпон',               slug: 'strapon'               },
-    { title: 'Студенты',              slug: 'studenty'              },
-    { title: 'Сын и мать',            slug: 'syn-i-mat'             },
-    { title: 'Толстые',               slug: 'tolstye'               },
-    { title: 'Фистинг',               slug: 'fisting'               },
-    { title: 'Худые',                 slug: 'hudye'                 },
-    { title: 'Частное',               slug: 'chastnoe-porno'        },
-    { title: 'Чулки',                 slug: 'chulki'                },
-    { title: 'Шатенки',               slug: 'shatenki'              },
-    { title: 'Японское',              slug: 'yaponskoe'             },
-  ];
-
-  // ----------------------------------------------------------
-  // ПОСТРОЕНИЕ URL
-  //
-  // Главная    : HOST + '/'
-  // Категория  : HOST + '/categories/' + slug + (page>1 ? '?page=N' : '')
-  // Поиск      : HOST + '/?q=' + query  (+ &page=N)
-  //
-  // [2.1.0] Сортировка удалена — сайт не поддерживает order-параметр.
-  // ----------------------------------------------------------
-  function buildUrl(cat, search, page) {
-    page = parseInt(page, 10) || 1;
-    var base, sep;
-
-    if (search) {
-      base = HOST + '/?q=' + encodeURIComponent(search);
-      sep  = '&';
-    } else if (cat) {
-      base = HOST + '/categories/' + cat;
-      sep  = '?';
-    } else {
-      base = HOST + '/';
-      sep  = '?';
-    }
-
-    if (page > 1) base = base + sep + 'page=' + page;
-    log('buildUrl →', base);
-    return base;
-  }
-
-  // [2.1.0] Разобрать URL обратно в {cat, search}. Sort-параметр убран.
-  function parseUrl(url) {
-    var s = url || '';
-
-    // Имя парсера без слэша — главная
-    if (s.indexOf('/') === -1 && s.indexOf('http') === -1) {
-      log('parseUrl → имя парсера, главная');
-      return { cat: '', search: '' };
-    }
-
-    // ?q= или ?search=
-    var qm = s.match(/[?&](?:q|search)=([^&]+)/);
-    if (qm) {
-      log('parseUrl → search=' + decodeURIComponent(qm[1] || ''));
-      return { cat: '', search: decodeURIComponent(qm[1] || '') };
-    }
-
-    // /categories/{slug}
-    var cm = s.match(/\/categories\/([^/?&#]+)/);
-    if (cm) {
-      log('parseUrl → cat=' + cm[1]);
-      return { cat: cm[1], search: '' };
-    }
-
-    return { cat: '', search: '' };
-  }
-
-  // [2.1.0] Меню фильтра: только Поиск + Категории. Сортировка удалена.
-  function buildMenu(url) {
-    var state     = parseUrl(url || '');
-    var activeCat = arrayFind(CATS, function (c) { return c.slug === state.cat; });
-
-    var catSubmenu = CATS.map(function (c) {
-      return { title: c.title, playlist_url: HOST + '/categories/' + c.slug };
-    });
-
+  function buildMenu() {
     return [
-      { title: 'Поиск', playlist_url: HOST, search_on: true },
       {
-        title:   'Категория: ' + (activeCat ? activeCat.title : 'Все'),
-        submenu: catSubmenu,
-        // НЕТ playlist_url у группы — иначе AdultJS грузит 'submenu' → Script error
+        title: '🔍 Поиск',
+        search_on: true,
+        playlist_url: NAME + '/search/'
       },
+      {
+        title: '🆕 Новинки',
+        playlist_url: NAME + '/new'
+      },
+      {
+        title: '📂 Категории',
+        playlist_url: 'submenu',
+        submenu: CATS.map(function (c) {
+          return { title: c.title, playlist_url: NAME + '/cat/' + c.slug };
+        })
+      }
     ];
   }
 
-  // ----------------------------------------------------------
-  // ПАРСИНГ КАТАЛОГА
-  //
-  // Реальная разметка карточки:
-  //   <div class="item video-block">
-  //     <a href="/videos/{slug}" class="link">
-  //       <img data-src="/contents/.../426x240/5.jpg"
-  //            data-preview="https://.../preview.mp4"
-  //            src="/contents/.../426x240/5.jpg"
-  //            alt="Название" />
-  //       <span class="duration">24:27</span>
-  //       <div class="title">Название</div>
-  //     </a>
-  //   </div>
-  //
-  // Постер: img[data-src] → img[src] (если уже загружен)
-  // Превью: img[data-preview] — готовый mp4 URL
-  // ----------------------------------------------------------
-  function parsePlaylist(html) {
-    if (!html || html.length < 100) { warn('html пустой'); return []; }
-    log('parsePlaylist → длина:', html.length);
+  function parseSearchParam(url) {
+    var m = url.match(/[?&]search=([^&]*)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  }
 
-    var doc;
-    try { doc = new DOMParser().parseFromString(html, 'text/html'); }
-    catch(e) { err('DOMParser:', e.message); return []; }
-
-    var cards = [];
-
-    // Стратегия 1: div.item.video-block (точный селектор из анализа)
-    var blocks = doc.querySelectorAll('div.item.video-block');
-    log('parsePlaylist → div.item.video-block:', blocks.length);
-
-    // Fallback: просто .video-block
-    if (!blocks.length) {
-      blocks = doc.querySelectorAll('div.video-block');
-      log('parsePlaylist → div.video-block (fallback):', blocks.length);
+  function routeView(url, page, success, error) {
+    var searchParam = parseSearchParam(url);
+    
+    // 1. Прямой поиск через фильтр Lampa
+    if (searchParam !== null) {
+      fetchPage(buildUrl('search', searchParam, page), page, success, error);
+      return;
     }
 
-    forEachNode(blocks, function (el) {
-      try {
-        var aEl  = el.querySelector('a[href]');
-        if (!aEl) return;
-
-        var href = aEl.getAttribute('href') || '';
-        if (!href) return;
-        if (href.indexOf('http') !== 0) href = HOST + href;
-        // Только страницы видео
-        if (href.indexOf('/videos/') === -1) return;
-
-        var imgEl = el.querySelector('img');
-
-        // Постер: data-src приоритетнее src (src может быть плейсхолдером)
-        var picture = '';
-        if (imgEl) {
-          picture = imgEl.getAttribute('data-src') ||
-                    imgEl.getAttribute('src')       || '';
-          if (picture && picture.indexOf('http') !== 0) picture = HOST + picture;
-          if (picture.indexOf('data:image') === 0) picture = '';
-        }
-
-        // Превью: img[data-preview] — прямой mp4 URL
-        var preview = imgEl ? (imgEl.getAttribute('data-preview') || null) : null;
-
-        // Название: .title → img[alt]
-        var titleEl = el.querySelector('.title');
-        var name    = (titleEl ? (titleEl.textContent || '').trim() : '') ||
-                      (imgEl   ? (imgEl.getAttribute('alt') || '')   : '');
-        name = name.replace(/\s+/g, ' ').trim();
-        if (!name || name.length < 3) return;
-
-        // Длительность: span.duration
-        var durEl = el.querySelector('.duration, span.duration');
-        var time  = durEl ? (durEl.textContent || '').trim() : '';
-
-        // Дедупликация
-        for (var ci = 0; ci < cards.length; ci++) {
-          if (cards[ci].video === href) return;
-        }
-
-        cards.push({
-          name:    name,
-          video:   href,      // HTML-страница → qualities() найдёт mp4
-          picture: picture,
-          preview: preview,
-          time:    time,
-          quality: 'HD',
-          json:    true,      // нужен qualities() для получения реального mp4
-          source:  NAME,
-        });
-      } catch(ex) { warn('card ex:', ex.message); }
-    });
-
-    if (!cards.length) {
-      warn('parsePlaylist → карточки не найдены');
-      if (doc.body) {
-        warn('body[0:400]:', (doc.body.innerHTML || '').substring(0, 400));
-        warn('.video-block найдено:', doc.querySelectorAll('.video-block').length);
-        warn('a[/videos/] найдено:', doc.querySelectorAll('a[href*="/videos/"]').length);
-      }
-    } else {
-      log('parsePlaylist → ИТОГО:', cards.length);
-      if (cards[0]) {
-        log('  первая:', cards[0].name);
-        log('  picture:', cards[0].picture || '(пусто)');
-        log('  preview:', cards[0].preview || '(нет)');
-      }
-      notyOk('Найдено ' + cards.length + ' видео');
+    // 2. Роутинг категорий
+    if (url.indexOf(NAME + '/cat/') === 0) {
+      var slug = url.split('/cat/')[1].split('?')[0];
+      fetchPage(buildUrl('cat', slug, page), page, success, error);
+      return;
     }
-    return cards;
+
+    // 3. Роутинг поиска по URL пути
+    if (url.indexOf(NAME + '/search/') === 0) {
+      var query = url.split('/search/')[1].split('?')[0];
+      fetchPage(buildUrl('search', decodeURIComponent(query), page), page, success, error);
+      return;
+    }
+
+    // 4. По умолчанию - главная
+    fetchPage(buildUrl('new', '', page), page, success, error);
+  }
+
+  function fetchPage(loadUrl, page, success, error) {
+    httpGet(loadUrl, function (html) {
+      var cards = parseCards(html);
+      if (!cards.length) return error('Видео не найдены');
+      
+      success({
+        results: cards,
+        collection: true,
+        total_pages: page + 1,
+        menu: buildMenu()
+      });
+    }, error);
   }
 
   // ----------------------------------------------------------
-  // ПОЛУЧЕНИЕ ПРЯМЫХ ССЫЛОК (qualities)
-  //
-  // На странице видео:
-  //   <video src="https://.../1601_480.mp4">
-  //     <source src=".../preview.mp4" size="preview">
-  //     <source src=".../1601_480.mp4" size="480">
-  //   </video>
-  //   <meta property="og:video" content="https://uch3.vids69.com/.../10147_720.mp4">
-  //
-  // Ищем source с size != "preview" + og:video для HD
+  // INTERFACE
   // ----------------------------------------------------------
-  function getStreamLinks(videoUrl, ok, fail) {
-    log('qualities →', videoUrl);
-
-    httpGet(videoUrl, function (html) {
-      var q = {};
-
-      // Стратегия 1: <source src="..." size="N"> — пропускаем preview
-      var srcRe = /<source[^>]+src="([^"]+)"[^>]+size="([^"]+)"/gi;
-      var m;
-      while ((m = srcRe.exec(html)) !== null) {
-        var src  = m[1];
-        var size = m[2];
-        if (size === 'preview') continue;
-        if (src.indexOf('http') !== 0) src = HOST + src;
-        q[size + 'p'] = src;
-        log('source size=' + size + ':', src.substring(0, 80));
-      }
-
-      // Порядок атрибутов может быть обратным: size="N" src="..."
-      if (!Object.keys(q).length) {
-        var srcRe2 = /<source[^>]+size="([^"]+)"[^>]+src="([^"]+)"/gi;
-        while ((m = srcRe2.exec(html)) !== null) {
-          var size2 = m[1], src2 = m[2];
-          if (size2 === 'preview') continue;
-          if (src2.indexOf('http') !== 0) src2 = HOST + src2;
-          q[size2 + 'p'] = src2;
-        }
-      }
-
-      // Стратегия 2: og:video meta — обычно HD с внешнего CDN
-      if (!Object.keys(q).length || !q['720p']) {
-        var ogm = html.match(/<meta[^>]+property="og:video"[^>]+content="([^"]+\.mp4[^"]*)"/i) ||
-                  html.match(/<meta[^>]+content="([^"]+\.mp4[^"]*)"[^>]+property="og:video"/i);
-        if (ogm && ogm[1]) {
-          var ogUrl   = ogm[1];
-          var qLabel  = ogUrl.match(/_(\d+)\.mp4/) ? ogUrl.match(/_(\d+)\.mp4/)[1] + 'p' : 'HD';
-          if (!q[qLabel]) q[qLabel] = ogUrl;
-          log('og:video ' + qLabel + ':', ogUrl.substring(0, 80));
-        }
-      }
-
-      // Стратегия 3: video[src] — прямой атрибут тега video
-      if (!Object.keys(q).length) {
-        var vsm = html.match(/<video[^>]+src="([^"]+\.mp4[^"]*)"/i);
-        if (vsm && vsm[1]) {
-          var vsUrl   = vsm[1].indexOf('http') !== 0 ? HOST + vsm[1] : vsm[1];
-          var vsLabel = vsUrl.match(/_(\d+)\.mp4/) ? vsUrl.match(/_(\d+)\.mp4/)[1] + 'p' : 'auto';
-          q[vsLabel]  = vsUrl;
-          log('video src:', vsUrl.substring(0, 80));
-        }
-      }
-
-      // Стратегия 4: любые mp4 (последний резерв)
-      if (!Object.keys(q).length) {
-        var re4 = /["'](https?:\/\/[^"'\s]+\.mp4[^"'\s]*)/g;
-        var mx; var i4 = 0;
-        while ((mx = re4.exec(html)) !== null && i4 < 5) {
-          if (mx[1].indexOf('preview') === -1) {
-            q['auto' + (i4 || '')] = mx[1]; i4++;
-          }
-        }
-      }
-
-      if (!Object.keys(q).length) {
-        notyErr('Нет ссылок на видео');
-        fail('no_links');
-        return;
-      }
-
-      log('qualities → найдено:', Object.keys(q).length, JSON.stringify(Object.keys(q)));
-      notyOk('Качеств: ' + Object.keys(q).length);
-      ok({ qualities: q });
-    }, function(e) {
-      notyErr('Ошибка страницы видео');
-      fail(e);
-    });
-  }
-
-  // ----------------------------------------------------------
-  // ПУБЛИЧНЫЙ ИНТЕРФЕЙС
-  // ----------------------------------------------------------
-  var P365Parser = {
-
-    main: function (params, ok, fail) {
-      log('main()', safeParams(params));
-      try {
-        httpGet(HOST + '/', function (html) {
-          try {
-            var r = parsePlaylist(html);
-            if (!r.length) { fail('no_cards'); return; }
-            ok({ results: r, collection: true, total_pages: 30, menu: buildMenu(HOST) });
-          } catch(e) { err('main cb:', e.message); fail(e.message); }
-        }, fail);
-      } catch(e) { err('main:', e.message); fail(e.message); }
+  var Parser365 = {
+    main: function (params, success, error) {
+      routeView(NAME + '/new', 1, success, error);
     },
-
-    view: function (params, ok, fail) {
-      log('view()', safeParams(params));
-      try {
-        var rawUrl = (params.url || HOST).replace(/[?&]page=\d+/, '');
-        var page   = parseInt(params.page, 10) || 1;
-        var state  = parseUrl(rawUrl);
-        var url    = buildUrl(state.cat, state.search, page);
-
-        httpGet(url, function (html) {
-          try {
-            var r = parsePlaylist(html);
-            if (!r.length) { fail('no_cards'); return; }
-            ok({
-              results:     r,
-              collection:  true,
-              total_pages: r.length >= 20 ? page + 5 : page,
-              menu:        buildMenu(rawUrl),
-            });
-          } catch(e) { err('view cb:', e.message); fail(e.message); }
-        }, fail);
-      } catch(e) { err('view:', e.message); fail(e.message); }
+    view: function (params, success, error) {
+      routeView(params.url || NAME, params.page || 1, success, error);
     },
-
-    // [2.0.0] Поиск через /?q={query}
-    search: function (params, ok, fail) {
-      var query = (params.query || '').trim();
-      log('search() "' + query + '"');
-      try {
-        httpGet(HOST + '/?q=' + encodeURIComponent(query), function (html) {
-          try {
-            var r = parsePlaylist(html);
-            ok({
-              title:       'p365: ' + query,
-              results:     r,
-              url:         HOST + '/?q=' + encodeURIComponent(query),
-              collection:  true,
-              total_pages: r.length >= 20 ? 6 : 1,
-            });
-          } catch(e) {
-            err('search cb:', e.message);
-            ok({ title: 'p365', results: [], collection: true, total_pages: 1 });
-          }
-        }, function () {
-          ok({ title: 'p365', results: [], collection: true, total_pages: 1 });
-        });
-      } catch(e) { err('search:', e.message); fail(e.message); }
+    search: function (params, success, error) {
+      var q = (params.query || '').trim();
+      if (!q) return success({ results: [] });
+      fetchPage(buildUrl('search', q, params.page || 1), params.page || 1, function (data) {
+        data.title = 'P365: ' + q;
+        success(data);
+      }, error);
     },
-
-    qualities: function (videoUrl, ok, fail) {
-      log('qualities()', videoUrl);
-      try { getStreamLinks(videoUrl, ok, fail); }
-      catch(e) { err('qualities:', e.message); fail(e.message); }
-    },
+    qualities: function (videoUrl, success, error) {
+      httpGet(videoUrl, function (html) {
+        var q = {};
+        // Поиск по видео-тегам или мета-данным из анализа JSON
+        var re = /<video[^>]*src="([^"]+)"/g;
+        var m, i = 0;
+        var labels = ['480p', 'Preview', '720p', '1080p']; // Условный порядок
+        while ((m = re.exec(html)) !== null) {
+           var link = m[1];
+           if (link.indexOf('http') !== 0) link = HOST + link;
+           var label = link.match(/(\d{3,4})\.mp4/) ? link.match(/(\d{3,4})\.mp4/)[1] + 'p' : labels[i] || 'Alt';
+           q[label] = link;
+           i++;
+        }
+        
+        if (Object.keys(q).length) success({ qualities: q });
+        else error('Потоки не найдены');
+      }, error);
+    }
   };
 
-  // ----------------------------------------------------------
-  // РЕГИСТРАЦИЯ
-  // ----------------------------------------------------------
-  function tryRegister() {
-    if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
-      window.AdultPlugin.registerParser(NAME, P365Parser);
-      log('v' + VERSION + ' зарегистрирован');
-      notyOk('Porno365Tube v' + VERSION);
-      return true;
+  function register() {
+    if (window.AdultPlugin && window.AdultPlugin.registerParser) {
+      window.AdultPlugin.registerParser(NAME, Parser365);
+      console.log('Parser P365 (Porno365) registered');
+    } else {
+      setTimeout(register, 500);
     }
-    return false;
   }
-
-  if (!tryRegister()) {
-    var _e = 0;
-    var _t = setInterval(function () {
-      _e += 100;
-      if (tryRegister()) clearInterval(_t);
-      else if (_e >= 10000) { clearInterval(_t); notyErr('Таймаут регистрации'); }
-    }, 100);
-  }
+  register();
 
 })();
