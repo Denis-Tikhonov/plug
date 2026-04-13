@@ -154,30 +154,52 @@
   // ----------------------------------------------------------
   // ИЗВЛЕЧЕНИЕ ВИДЕО (QUALITIES)
   // ----------------------------------------------------------
+    // ----------------------------------------------------------
+  // ИЗВЛЕЧЕНИЕ ВИДЕО (QUALITIES) - ИСПРАВЛЕНО
+  // ----------------------------------------------------------
   function getQualities(videoUrl, success, error) {
     httpGet(videoUrl, function (html) {
       var q = {};
-      // Стандартный поиск ссылок в скриптах для 365Tube
-      var video_h = html.match(/video_url:\s*['"]([^'"]+)['"]/);
-      var video_l = html.match(/video_alt_url:\s*['"]([^'"]+)['"]/);
 
-      if (video_h) q['720p'] = video_h[1];
-      if (video_l) q['360p'] = video_l[1];
+      // 1. Поиск в JS-функциях плеера (самый надежный метод для этого сайта)
+      var hlsMatch  = html.match(/setVideoHlsUrl\(['"]([^'"]+)['"]/);
+      var highMatch = html.match(/setVideoUrlHigh\(['"]([^'"]+)['"]/);
+      var lowMatch  = html.match(/setVideoUrlLow\(['"]([^'"]+)['"]/);
 
-      // Если в скриптах нет, ищем теги source
+      if (hlsMatch && hlsMatch[1])  q['HLS (Auto)'] = hlsMatch[1];
+      if (highMatch && highMatch[1]) q['720p (MP4)'] = highMatch[1];
+      if (lowMatch && lowMatch[1])  q['480p (MP4)'] = lowMatch[1];
+
+      // 2. Резервный поиск (если переменные называются иначе)
       if (Object.keys(q).length === 0) {
-        var sources = html.match(/<source[^>]+src="([^"]+)"[^>]+label="([^"]+)"/g);
-        if (sources) {
-          sources.forEach(function(s) {
-            var link = s.match(/src="([^"]+)"/)[1];
-            var label = s.match(/label="([^"]+)"/)[1];
-            q[label] = link;
-          });
-        }
+        var v_url = html.match(/video_url:\s*['"]([^'"]+)['"]/);
+        var v_alt = html.match(/video_alt_url:\s*['"]([^'"]+)['"]/);
+        if (v_url) q['720p'] = v_url[1];
+        if (v_alt) q['480p'] = v_alt[1];
       }
 
-      if (Object.keys(q).length > 0) success({ qualities: q });
-      else error('Видео не найдено');
+      // 3. Обработка относительных ссылок (если сайт отдал путь без домена)
+      for (var key in q) {
+        if (q[key].indexOf('//') === 0) {
+          q[key] = 'https:' + q[key];
+        } else if (q[key].indexOf('/') === 0) {
+          q[key] = HOST + q[key];
+        }
+        // Заменяем экранированные слеши, если они есть
+        q[key] = q[key].replace(/\\\//g, '/');
+      }
+
+      if (Object.keys(q).length > 0) {
+        success({ qualities: q });
+      } else {
+        // Последний шанс: ищем вообще любую ссылку на mp4 на странице
+        var anyMp4 = html.match(/https?:\/\/[^"'\s]+\.mp4[^"'\s]*/);
+        if (anyMp4) {
+          success({ qualities: { 'SD': anyMp4[0] } });
+        } else {
+          error('Видео не найдено (ошибка парсинга плеера)');
+        }
+      }
     }, error);
   }
 
