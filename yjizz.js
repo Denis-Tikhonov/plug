@@ -287,27 +287,30 @@
       // quality: число (240,360,480,720,1080) или строка "Auto"
       // filename: "//abre-videos.youjizz.com/...master.m3u8?..."
       try {
-        var reEnc = /\bencodings\s*=\s*($[\s\S]*?$)\s*[;,)]/;
-        var mEnc  = html.match(reEnc);
-        if (mEnc && mEnc[1]) {
-          var encodings = JSON.parse(mEnc[1]);
-          encodings.forEach(function (enc) {
+    var reEnc = /\bdataEncodings\s*=\s*($[\s\S]*?$)\s*;/;
+    var mEnc  = html.match(reEnc);
+    if (mEnc && mEnc[1]) {
+        var dataEnc = JSON.parse(mEnc[1]);
+        dataEnc.forEach(function (enc) {
             if (!enc.filename || enc.quality === undefined) return;
-            var u = enc.filename;
+            var u = enc.filename.replace(/\\\//g, '/');
             if (u.indexOf('http') !== 0) u = 'https:' + u;
-            // Приводим к формату '1080p'/'720p'/... чтобы qualityDefault нашёл нужное
             var key = (String(enc.quality).toLowerCase() === 'auto')
-              ? 'auto'
-              : (enc.quality + 'p');
-            qualitys[key] = u;
-          });
-          if (Object.keys(qualitys).length) {
-            console.log('[yjizz] qualitys via encodings:', Object.keys(qualitys));
-          }
+                ? 'auto'
+                : (enc.quality + 'p');
+            // Предпочитаем m3u8 (abre-videos) над mp4 (cdne-mobile)
+            if (!qualitys[key] || u.indexOf('.m3u8') !== -1) {
+                qualitys[key] = u;
+            }
+        });
+        if (Object.keys(qualitys).length) {
+            console.log('[yjizz] qualitys via dataEncodings:', Object.keys(qualitys));
         }
-      } catch (e) {
-        console.warn('[yjizz] encodings parse error:', e.message || e);
-      }
+    }
+} catch (e) {
+    console.warn('[yjizz] dataEncodings parse error:', e.message || e);
+}
+
 
       // --- Метод 2: <source src title> ---
       // title: "Auto","1080","720","480","360","240"
