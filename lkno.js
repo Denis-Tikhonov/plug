@@ -1,6 +1,9 @@
 // =============================================================
 // lkno.js — Lenkino Parser для AdultJS
-// Version  : 1.5.0
+// Version  : 1.6.0
+// Changes  :
+//   [1.6.0] qualities() парсит video_url + video_alt_url
+//           из JS-конфига плеера kt_player на странице видео
 // =============================================================
 
 (function () {
@@ -214,14 +217,12 @@
 
       console.log('[lkno] view → "' + url + '" page=' + page);
 
-      // 1) ?search= — фильтр AdultJS
       var sq = parseSearchParam(url);
       if (sq !== null) {
         fetchList(buildSearchUrl(sq.trim(), page), success, error);
         return;
       }
 
-      // 2) lkno/cat/slug → /{slug}/page/N
       if (url.indexOf(NAME + '/cat/') === 0) {
         var cat = url.replace(NAME + '/cat/', '').split('?')[0].trim();
         if (cat) {
@@ -230,7 +231,6 @@
         }
       }
 
-      // 3) lkno/search/query → /search/query/page/N
       if (url.indexOf(NAME + '/search/') === 0) {
         var rawQ = url.replace(NAME + '/search/', '').split('?')[0].trim();
         if (rawQ) {
@@ -239,7 +239,6 @@
         }
       }
 
-      // 4) По умолчанию → главная
       fetchList(buildListUrl('', page), success, error);
     },
 
@@ -259,25 +258,46 @@
       }, error);
     },
 
+    // ★ qualities: парсим JS-конфиг kt_player
+    //   video_url      → основное качество (480p)
+    //   video_alt_url  → альтернативное качество (720p)
     qualities: function (videoUrl, success, error) {
       console.log('[lkno] qualities →', videoUrl);
 
       request(videoUrl, function (html) {
+        var found = {};
 
-        // Берём src прямо из тега <video src="...">
-        var m = html.match(/<video[^>]+\bsrc=["'](https?:\/\/[^"']+\.mp4[^"']*)/i);
+        // Хелпер: вытащить значение поля из JS-объекта конфига
+        function getField(field) {
+          var re  = new RegExp(field + "\\s*:\\s*['\"]([^'\"]+)['\"]");
+          var m   = html.match(re);
+          return m ? m[1] : null;
+        }
 
-        if (m && m[1]) {
-          var url   = cleanMp4Url(m[1]);
-          var label = (url.match(/_(\d{3,4}p)\.mp4/i) || ['', '480p'])[1];
-          console.log('[lkno] video src →', label, url.substring(0, 80));
-          var result = {};
-          result[label] = url;
-          success(result);
+        // Основное качество
+        var mainUrl  = getField('video_url');
+        var mainText = getField('video_url_text') || '480p';
+
+        // Альтернативное качество (720p)
+        var altUrl  = getField('video_alt_url');
+        var altText = getField('video_alt_url_text') || '720p';
+
+        if (mainUrl) {
+          found[mainText] = cleanMp4Url(mainUrl);
+          console.log('[lkno] main →', mainText, found[mainText].substring(0, 80));
+        }
+
+        if (altUrl) {
+          found[altText] = cleanMp4Url(altUrl);
+          console.log('[lkno] alt  →', altText, found[altText].substring(0, 80));
+        }
+
+        if (Object.keys(found).length > 0) {
+          success(found);
           return;
         }
 
-        error('Видео не найдено на странице');
+        error('[lkno] video_url не найден в конфиге страницы');
       }, error);
     }
 
@@ -289,7 +309,7 @@
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, LenkinoParser);
-      console.log('[lkno] v1.5.0 зарегистрирован OK');
+      console.log('[lkno] v1.6.0 зарегистрирован OK');
       return true;
     }
     return false;
