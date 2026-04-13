@@ -159,39 +159,45 @@
     // ----------------------------------------------------------
   // ИЗВЛЕЧЕНИЕ ВИДЕО (QUALITIES) — ПОЛНАЯ ВЕРСИЯ
   // ----------------------------------------------------------
-    function getQualities(videoUrl, success, error) {
+      function getQualities(videoUrl, success, error) {
     httpGet(videoUrl, function (html) {
       var q = {};
 
-      // 1. Поиск в стандартных функциях плеера
-      var hlsMatch  = html.match(/setVideoHlsUrl\(['"]([^'"]+)['"]/);
-      var highMatch = html.match(/setVideoUrlHigh\(['"]([^'"]+)['"]/);
-      
-      if (hlsMatch)  q['HLS'] = hlsMatch[1];
-      if (highMatch) q['720p'] = highMatch[1];
-
-      // 2. ДОБАВЛЕНО: Поиск прямой ссылки в мета-тегах или контенте (vids69.com)
-      // Этот паттерн вытащит ссылку: https://uch3.vids69.com/content/.../10147_720.mp4
-      var vids69Match = html.match(/content=["'](https?:\/\/uch3\.vids69\.com\/[^"']+\.mp4)["']/);
-      if (vids69Match) {
-          q['720p (Direct)'] = vids69Match[1];
+      // 1. Ищем прямую ссылку на CDN (обычно 720p в мета-тегах)
+      var directMatch = html.match(/https?:\/\/uch\d+\.vids69\.com\/[^"'\s]+\.mp4/);
+      if (directMatch) {
+          q['720p (Direct CDN)'] = directMatch[0];
       }
 
-      // 3. Обработка и чистка
+      // 2. Ищем ссылки через плеер (те самые /get_file/...)
+      var highMatch = html.match(/setVideoUrlHigh\(['"]([^'"]+)['"]/);
+      var lowMatch  = html.match(/setVideoUrlLow\(['"]([^'"]+)['"]/);
+      var hlsMatch  = html.match(/setVideoHlsUrl\(['"]([^'"]+)['"]/);
+
+      if (hlsMatch)  q['HLS (Auto)'] = hlsMatch[1];
+      if (highMatch) q['720p (Server)'] = highMatch[1];
+      if (lowMatch)  q['480p (Server)'] = lowMatch[1];
+
+      // 3. Обработка всех найденных ссылок
       for (var key in q) {
-        q[key] = q[key].replace(/\\\//g, '/').trim();
-        // Если ссылка без протокола
-        if (q[key].indexOf('//') === 0) q[key] = 'https:' + q[key];
+        var link = q[key].replace(/\\\//g, '/').trim();
+
+        // Если ссылка относительная (как /get_file/...), добавляем HOST
+        if (link.indexOf('http') !== 0) {
+          if (link.indexOf('//') === 0) link = 'https:' + link;
+          else link = HOST + (link.startsWith('/') ? '' : '/') + link;
+        }
+        
+        q[key] = link;
       }
 
       if (Object.keys(q).length > 0) {
         success({ qualities: q });
       } else {
-        error('Видео-файл на vids69 не найден');
+        error('Видео не найдено');
       }
     }, error);
   }
-
   // ----------------------------------------------------------
   // ИНТЕРФЕЙС ПАРСЕРА
   // ----------------------------------------------------------
