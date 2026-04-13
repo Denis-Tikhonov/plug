@@ -284,18 +284,22 @@
       var qualitys = {};
 
       // --- Метод 1: var encodings = [...] ---
+      // quality: число (240,360,480,720,1080) или строка "Auto"
+      // filename: "//abre-videos.youjizz.com/...master.m3u8?..."
       try {
-        // Паттерн: var encodings=[{"quality":"Auto","filename":"//..."}, ...]
-        // или:     encodings = [...]  (без var, внутри блока)
         var reEnc = /\bencodings\s*=\s*($[\s\S]*?$)\s*[;,)]/;
         var mEnc  = html.match(reEnc);
         if (mEnc && mEnc[1]) {
           var encodings = JSON.parse(mEnc[1]);
           encodings.forEach(function (enc) {
-            if (!enc.filename || !enc.quality) return;
+            if (!enc.filename || enc.quality === undefined) return;
             var u = enc.filename;
             if (u.indexOf('http') !== 0) u = 'https:' + u;
-            qualitys[enc.quality] = u;
+            // Приводим к формату '1080p'/'720p'/... чтобы qualityDefault нашёл нужное
+            var key = (String(enc.quality).toLowerCase() === 'auto')
+              ? 'auto'
+              : (enc.quality + 'p');
+            qualitys[key] = u;
           });
           if (Object.keys(qualitys).length) {
             console.log('[yjizz] qualitys via encodings:', Object.keys(qualitys));
@@ -305,7 +309,8 @@
         console.warn('[yjizz] encodings parse error:', e.message || e);
       }
 
-      // --- Метод 2: <source src title> внутри <video> ---
+      // --- Метод 2: <source src title> ---
+      // title: "Auto","1080","720","480","360","240"
       if (!Object.keys(qualitys).length) {
         try {
           var doc     = new DOMParser().parseFromString(html, 'text/html');
@@ -315,7 +320,8 @@
             var title = sources[si].getAttribute('title') || 'auto';
             if (!src || src.indexOf('blob:') === 0) continue;
             if (src.indexOf('http') !== 0) src = 'https:' + src;
-            qualitys[title] = src;
+            var key2 = (title.toLowerCase() === 'auto') ? 'auto' : (title + 'p');
+            qualitys[key2] = src;
           }
           if (Object.keys(qualitys).length) {
             console.log('[yjizz] qualitys via <source>:', Object.keys(qualitys));
@@ -325,7 +331,7 @@
         }
       }
 
-      // --- Метод 3: regex — m3u8/mp4 от abre-videos или cdne-mobile ---
+      // --- Метод 3: regex m3u8/mp4 ---
       if (!Object.keys(qualitys).length) {
         var re3 = /((?:https?:)?\/\/(?:abre-videos|cdne-mobile)\.youjizz\.com\/[^"'\s]+\.(?:m3u8|mp4)[^"'\s]*)/g;
         var m3;
@@ -333,7 +339,7 @@
           var u3 = m3[1];
           if (u3.indexOf('http') !== 0) u3 = 'https:' + u3;
           qualitys['auto'] = u3;
-          console.log('[yjizz] qualitys via regex fallback:', u3.substring(0, 80));
+          console.log('[yjizz] qualitys via regex:', u3.substring(0, 80));
           break;
         }
       }
@@ -343,9 +349,14 @@
         return;
       }
 
-      success({ qualitys: qualitys });
+      // ИСПРАВЛЕНИЕ: передаём объект напрямую
+      // AdultJS: var qualities = data.qualities || data
+      // → data = qualitys → qualities = qualitys ✓
+      success(qualitys);
+
     }, error);
   }
+
 
   // ----------------------------------------------------------
   // МЕНЮ ФИЛЬТРА (по образцу xds_1.1.0)
