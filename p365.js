@@ -64,6 +64,7 @@
    * Ищет все доступные качества видео на странице
    */
   function extractQualities(html) {
+   console.log('[P365] html length:', html.length);
     var q = {};
     
     // Применяем основные правила
