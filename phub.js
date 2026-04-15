@@ -1,8 +1,10 @@
 // =============================================================
 // phub.js — Парсер PornHub для AdultJS (Lampa)
-// Version  : 2.1.0
-// [MOD] Адаптирован под универсальный движок экстракции
-// [FIX] Исправлено воспроизведение (глубокая очистка ссылок)
+// Version  : 2.0.0
+// Changes  : 
+//   - Полная интеграция с JSON-структурой анализатора v3.3
+//   - Роутинг по образцу YouJizz и xds (поддержка фильтра "Найти")
+//   - Извлечение токенизированных MP4 и HLS потоков
 // =============================================================
 
 (function () {
@@ -31,90 +33,9 @@
     { title: 'Кремпай', val: '15' }
   ];
 
-  // ===========================================================
-  // УНИВЕРСАЛЬНЫЙ ДВИЖОК ОЧИСТКИ И ЭКСТРАКЦИИ
-  // ===========================================================
-
-  var VIDEO_CONFIG = {
-    // Правила для PornHub сложнее, так как данные часто зашиты в JSON flashvars
-    rules: [
-      { label: 'HLS', re: /["'](https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)["']/ },
-      { label: 'MP4', re: /["'](https?:\/\/[^"'\s]+\.mp4[^"'\s]*)["']/ }
-    ],
-    // Резервный поиск для PH (поиск по CDN домену)
-    fallback: /https?:\/\/[^"'\s]+phncdn[^"'\s]+\.(mp4|m3u8)[^"'\s]*/g
-  };
-
-  /**
-   * Универсальная очистка URL (Критично для ТВ-плееров)
-   */
-  function cleanUrl(url) {
-    if (!url) return '';
-    
-    // 1. Убираем экранирование слешей (бывает в JSON: https:\/\/...)
-    var clean = url.replace(/\\/g, '');
-    
-    // 2. Убираем лишние кавычки, если они попали из regex
-    clean = clean.replace(/["']/g, '');
-
-    // 3. Добавляем протокол
-    if (clean.indexOf('//') === 0) clean = 'https:' + clean;
-    
-    // 4. Добавляем хост для относительных путей
-    if (clean.indexOf('/') === 0 && clean.indexOf('//') !== 0) clean = HOST + clean;
-
-    return clean;
-  }
-
-  /**
-   * Модуль извлечения качеств (специфичный для PH + универсальный)
-   */
-  function extractQualities(html) {
-    var q = {};
-
-    // 1. Специфика PH: Поиск JSON конфигурации (flashvars)
-    var flashvarsMatch = html.match(/flashvars_\d+\s*=\s*({.+?});/);
-    if (flashvarsMatch) {
-      try {
-        var data = JSON.parse(flashvarsMatch[1]);
-        if (data.mediaDefinitions) {
-          data.mediaDefinitions.forEach(function(m) {
-            if (m.videoUrl && m.remote) {
-              var label = m.quality + 'p';
-              q[label] = cleanUrl(m.videoUrl);
-            }
-          });
-        }
-      } catch(e) {
-        console.warn('[PHUB] Flashvars JSON parse error');
-      }
-    }
-
-    // 2. Универсальный поиск (если JSON не найден или пуст)
-    if (Object.keys(q).length === 0) {
-      VIDEO_CONFIG.rules.forEach(function(rule) {
-        var m = html.match(rule.re);
-        if (m && m[1]) q[rule.label] = cleanUrl(m[1]);
-      });
-    }
-
-    // 3. Крайний случай (Fallback)
-    if (Object.keys(q).length === 0) {
-      var any = html.match(VIDEO_CONFIG.fallback);
-      if (any) {
-        any.forEach(function(url, i) {
-          q['Link ' + (i + 1)] = cleanUrl(url);
-        });
-      }
-    }
-
-    return q;
-  }
-
-  // ===========================================================
-  // СЕТЕВЫЕ ЗАПРОСЫ И ПАРСИНГ КАТАЛОГА
-  // ===========================================================
-
+  // ----------------------------------------------------------
+  // СЕТЕВОЙ ЗАПРОС
+  // ----------------------------------------------------------
   function httpGet(url, success, error) {
     if (window.AdultPlugin && typeof window.AdultPlugin.networkRequest === 'function') {
       window.AdultPlugin.networkRequest(url, success, error);
@@ -123,10 +44,15 @@
     }
   }
 
+  // ----------------------------------------------------------
+  // ПАРСИНГ КАРТОЧЕК
+  // ----------------------------------------------------------
   function parseCards(html) {
     if (!html) return [];
     var doc = new DOMParser().parseFromString(html, 'text/html');
     var results = [];
+    
+    // Селектор согласно JSON: .video или li.videoblock
     var items = doc.querySelectorAll('.video, li.videoblock, li.pcVideoListItem');
     
     for (var i = 0; i < items.length; i++) {
@@ -141,26 +67,163 @@
       var pic = '';
       if (img) {
         pic = img.getAttribute('data-mediumthumb') || img.getAttribute('data-thumb_url') || img.getAttribute('src') || '';
-        pic = cleanUrl(pic);
       }
+      if (pic.indexOf('//') === 0) pic = 'https:' + pic;
 
       var title = el.querySelector('strong, .title, img[alt]');
       var name = title ? (title.textContent || title.getAttribute('alt') || '').trim() : 'Video';
       
       var dur = el.querySelector('.duration, var.duration');
       var time = dur ? dur.textContent.trim() : '';
+      
+      var quality = el.querySelector('.hd-thumbnail, .hd-badge') ? 'HD' : '';
 
-      results.push({
-        name: name,
-        video: href,
-        picture: pic,
-        img: pic,
-        poster: pic,
-        background_image: pic,
-        time: time,
-        quality: el.querySelector('.hd-thumbnail, .hd-badge') ? 'HD' : '',
-        json: true,
-        source: NAME
-      });
+      if (name) {
+        results.push({
+          name: name,
+          video: href,
+          picture: pic,
+          img: pic,
+          poster: pic,
+          background_image: pic,
+          preview: img ? img.getAttribute('data-mediabook') : null,
+          time: time,
+          quality: quality,
+          json: true,
+          source: NAME
+        });
+      }
     }
-    returnВ данный момент модель gemini-3-flash-preview перегружена или недоступна (503), попробуйте позже или смените модель.
+    return results;
+  }
+
+  // ----------------------------------------------------------
+  // ИЗВЛЕЧЕНИЕ ПОТОКА (Qualitys)
+  // ----------------------------------------------------------
+  function getQualities(url, success, error) {
+    httpGet(url, function (html) {
+      var q = {};
+      
+      // 1. Поиск JSON конфигурации (flashvars)
+      var flashvars = html.match(/flashvars_\d+\s*=\s*({.+?});/);
+      if (flashvars) {
+        try {
+          var data = JSON.parse(flashvars[1]);
+          if (data.mediaDefinitions) {
+            data.mediaDefinitions.forEach(function(m) {
+              if (m.videoUrl && m.remote) {
+                var label = m.quality + 'p';
+                q[label] = m.videoUrl;
+              }
+            });
+          }
+        } catch(e) {}
+      }
+
+      // 2. Регулярки для MP4/HLS (согласно отчету токенов)
+      if (Object.keys(q).length === 0) {
+        var m3u8 = html.match(/["'](https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)["']/);
+        if (m3u8) q['HLS'] = m3u8[1].replace(/\\/g, '');
+
+        var mp4 = html.match(/["'](https?:\/\/[^"'\s]+\.mp4[^"'\s]*)["']/g);
+        if (mp4) {
+          mp4.forEach(function(link, idx) {
+             var clean = link.replace(/["']/g, '').replace(/\\/g, '');
+             if (clean.indexOf('phncdn') !== -1) {
+                q['MP4-' + (idx + 1)] = clean;
+             }
+          });
+        }
+      }
+
+      if (Object.keys(q).length > 0) success(q);
+      else error('Видео поток не найден');
+    }, error);
+  }
+
+  // ----------------------------------------------------------
+  // РОУТИНГ И МЕНЮ
+  // ----------------------------------------------------------
+  function buildMenu() {
+    return [
+      { title: '🔍 Найти', search_on: true, playlist_url: NAME + '/search/' },
+      { 
+        title: '📂 Категории', 
+        playlist_url: 'submenu',
+        submenu: CATS.map(function(c) { 
+          return { title: c.title, playlist_url: NAME + '/cat/' + c.val }; 
+        })
+      },
+      { 
+        title: '🔥 Сортировка', 
+        playlist_url: 'submenu',
+        submenu: SORTS.map(function(s) { 
+          return { title: s.title, playlist_url: NAME + '/sort/' + s.val }; 
+        })
+      }
+    ];
+  }
+
+  function routeView(url, page, success, error) {
+    var loadUrl = HOST + '/video?page=' + page;
+    
+    // Обработка поиска через фильтр Lampa (?search=)
+    var searchMatch = url.match(/[?&]search=([^&]*)/);
+    if (searchMatch) {
+      loadUrl = HOST + '/video/search?search=' + searchMatch[1] + '&page=' + page;
+    } else if (url.indexOf('/cat/') !== -1) {
+      var cid = url.split('/cat/')[1];
+      loadUrl = HOST + '/video?c=' + cid + '&page=' + page;
+    } else if (url.indexOf('/sort/') !== -1) {
+      var sid = url.split('/sort/')[1];
+      loadUrl = HOST + '/video?o=' + sid + '&page=' + page;
+    }
+
+    httpGet(loadUrl, function (html) {
+      var cards = parseCards(html);
+      success({
+        results: cards,
+        collection: true,
+        total_pages: cards.length >= 20 ? page + 1 : page,
+        menu: buildMenu()
+      });
+    }, error);
+  }
+
+  // ----------------------------------------------------------
+  // API
+  // ----------------------------------------------------------
+  var phubParser = {
+    main: function (params, success, error) {
+      routeView(NAME, 1, success, error);
+    },
+    view: function (params, success, error) {
+      routeView(params.url || NAME, params.page || 1, success, error);
+    },
+    search: function (params, success, error) {
+      var query = encodeURIComponent(params.query);
+      routeView(NAME + '/search/?search=' + query, params.page || 1, function(data) {
+        data.title = 'PH: ' + params.query;
+        success(data);
+      }, error);
+    },
+    qualities: function (url, success, error) {
+      getQualities(url, success, error);
+    }
+  };
+
+  // Регистрация
+  function tryRegister() {
+    if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
+      window.AdultPlugin.registerParser(NAME, phubParser);
+      return true;
+    }
+    return false;
+  }
+
+  if (!tryRegister()) {
+    var poll = setInterval(function () {
+      if (tryRegister()) clearInterval(poll);
+    }, 200);
+  }
+})();
