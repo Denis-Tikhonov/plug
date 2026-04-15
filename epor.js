@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var NAME = 'eporner';
+  var NAME = 'epor';
   var HOST = 'https://www.eporner.com';
 
   // ----------------------------------------------------------
