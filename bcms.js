@@ -1,238 +1,203 @@
 // =============================================================
-// bcms.js — Парсер BongaCams для AdultJS / AdultPlugin (Lampa)
-// Version  : 1.1.0
-// Changed  : [1.0.0] Первая версия
-//            [1.1.0] FIX: Http.isAndroid вычислялся при определении
-//                    объекта (до инициализации Lampa.Platform) → всегда
-//                    false на Android TV → шёл fetch с User-Agent →
-//                    forbidden header → TypeError. Теперь isAndroid
-//                    вычисляется лениво внутри Http.get().
-//            [1.1.0] FIX: Lampa.Reguest().native() — это не HTTP-метод.
-//                    Правильный метод для HTTP-запроса: silent() с
-//                    { dataType:'text' }. Метод native() в Lampa.Reguest
-//                    предназначен для нативного плеера, не для fetch.
-//            [1.1.0] FIX: fallback fetch() — убран запрещённый
-//                    заголовок User-Agent (forbidden header).
-//            [1.1.0] NOTE: BongaCams может требовать cookies/referer.
-//                    Если сайт отдаёт пустую страницу — нужен прокси.
+// bcms.js — Парсер BongaCams для AdultJS (Lampa)
+// Version  : 2.1.0
+// Based on : phub_210 (архитектура) + arch (данные о сайте)
 // =============================================================
 
 (function () {
   'use strict';
 
-  // ----------------------------------------------------------
-  // [1.0.0] КОНФИГУРАЦИЯ
-  // ----------------------------------------------------------
-  var HOST    = 'https://ukr.bongacams.com';
-  var NAME    = 'bcms';
+  var NAME = 'bcms';
+  var HOST = 'https://ukr.bongacams.com';
 
-  var CATEGORIES = [
-    { title: 'Новые',          url: HOST + '/new-models'          },
-    { title: 'Пары',           url: HOST + '/couples'             },
-    { title: 'Девушки',        url: HOST + '/female'              },
-    { title: 'Русские модели', url: HOST + '/female/tags/russian' },
-    { title: 'Парни',          url: HOST + '/male'                },
-    { title: 'Транссексуалы',  url: HOST + '/trans'               },
+  // Категории из актуального дампа (json/arch)
+  var CATS = [
+    { title: 'Новые',          val: 'new-models' },
+    { title: 'Девушки',        val: 'female' },
+    { title: 'Пары',           val: 'couples' },
+    { title: 'Парни',          val: 'male' },
+    { title: 'Транссексуалы',  val: 'trans' },
+    { title: 'Украинские',     val: 'tags/ukrainian' },
   ];
 
   // ----------------------------------------------------------
-  // [1.1.0] HTTP-ХЕЛПЕР — исправленная версия
-  //
-  // БАГ v1.0.0 #1: isAndroid вычислялся в IIFE при определении объекта.
-  //   Lampa.Platform ещё не готова → isAndroid = false → fetch с User-Agent
-  //   → forbidden header TypeError.
-  //   ИСПРАВЛЕНИЕ: вычисляем isAndroid лениво внутри get().
-  //
-  // БАГ v1.0.0 #2: использовался Lampa.Reguest().native().
-  //   native() в Lampa — метод нативного плеера, не HTTP.
-  //   ИСПРАВЛЕНИЕ: используем silent() с { dataType:'text' }.
-  //
-  // БАГ v1.0.0 #3: fallback fetch() имел заголовок User-Agent.
-  //   ИСПРАВЛЕНИЕ: убран из fetch().
+  // Сетевой запрос с обходом Age Gate (Cookie: disclaimer=усі)
   // ----------------------------------------------------------
-  var Http = {
-    get: function (url) {
-      // [1.1.0] Ленивая проверка платформы (Lampa уже инициализирована)
-      var isAndroid = false;
-      try {
-        isAndroid = window.Lampa &&
-                    window.Lampa.Platform &&
-                    typeof window.Lampa.Platform.is === 'function' &&
-                    window.Lampa.Platform.is('android');
-      } catch (e) {}
+  function httpGet(url, success, error) {
+    if (window.AdultPlugin && typeof window.AdultPlugin.networkRequest === 'function') {
+      // Передаем куки для прохождения проверки возраста
+      var params = {
+        headers: {
+          'Cookie': 'disclaimer=усі'
+        }
+      };
+      window.AdultPlugin.networkRequest(url, success, error, params);
+    } else {
+      fetch(url, { headers: { 'Cookie': 'disclaimer=усі' } })
+        .then(function (r) { return r.text(); })
+        .then(success)
+        .catch(error);
+    }
+  }
 
-      if (isAndroid) {
-        // [1.1.0] Android TV: нативный HTTP через Lampa.Reguest.silent
-        return new Promise(function (resolve, reject) {
-          var req = new window.Lampa.Reguest();
-          req.silent(
-            url,
-            function (data) {
-              resolve(typeof data === 'string' ? data : JSON.stringify(data));
-              req.clear();
-            },
-            reject,
-            false,
-            { dataType: 'text', timeout: 8000 }
-          );
-        });
-      }
-
-      // [1.1.0] Браузер: чистый fetch без запрещённых заголовков
-      return fetch(url, { method: 'GET' })
-        .then(function (r) {
-          if (!r.ok) throw new Error('HTTP ' + r.status);
-          return r.text();
-        });
-    },
-  };
-
-  // ----------------------------------------------------------
-  // [1.0.0] ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ extract
-  // ----------------------------------------------------------
   function extract(str, regex, group) {
-    if (!str) return null;
-    var g   = (group === undefined) ? 1 : group;
-    var m   = str.match(regex);
-    var val = (m && m[g] !== undefined) ? m[g] : null;
-    return (val && val.trim() !== '') ? val.trim() : null;
+    var g = (group === undefined) ? 1 : group;
+    var m = str.match(regex);
+    return (m && m[g]) ? m[g].trim() : null;
   }
 
   // ----------------------------------------------------------
-  // [1.0.0] НОРМАЛИЗАЦИЯ URL ПАГИНАЦИИ
-  // BongaCams: ?page=N; Lampa добавляет: ?pg=N / &pg=N
+  // Парсинг плейлиста (Live-камеры)
   // ----------------------------------------------------------
-  function normalizeUrl(url) {
-    return url.replace('?pg=1', '').replace('pg=', 'page=');
-  }
+  function parseCards(html) {
+    var results = [];
+    if (!html) return results;
 
-  function activeCategoryTitle(url) {
-    var found = CATEGORIES.find(function (cat) {
-      var tail = cat.url.replace(HOST, '').replace(/^\//, '');
-      return tail && url.includes(tail);
-    });
-    return found ? found.title : 'Новые';
-  }
+    // Разбиваем HTML по блокам камер (используем аттрибуты из arch)
+    var blocks = html.split(/class="(ls_thumb js-ls_thumb|mls_item mls_so_)"/);
 
-  // ----------------------------------------------------------
-  // [1.0.0] ПАРСЕР КАРТОЧЕК
-  // Источник логики: AdultJS_debug_v1.3.2 [BLOCK:06] BongaCams.Playlist()
-  //
-  // HTML BongaCams разбивается по CSS-классам блоков камер:
-  //   "ls_thumb js-ls_thumb" / "mls_item mls_so_"
-  // HLS собирается из data-esid + data-chathost.
-  // ----------------------------------------------------------
-  function parsePlaylist(html) {
-    var cards = [];
-    if (!html || !html.length) return cards;
-
-    var parts = html.split(/class="(ls_thumb js-ls_thumb|mls_item mls_so_)"/);
-
-    for (var i = 0; i < parts.length; i++) {
-      var block    = parts[i];
+    for (var i = 0; i < blocks.length; i++) {
+      var block = blocks[i];
+      
       var chathost = extract(block, /data-chathost="([^"]+)"/);
-      if (!chathost) continue;
-
       var esid = extract(block, /data-esid="([^"]+)"/);
-      if (!esid) continue;
+      if (!chathost || !esid) continue;
 
-      var picture = extract(block, /this\.src='\/\/([^']+\.jpg)'/);
-      if (!picture) picture = extract(block, /src="\/\/([^"]+)"/);
-      if (!picture) continue;
+      // Извлечение превью
+      var pic = extract(block, /this\.src='\/\/([^']+\.jpg)'/) || 
+                extract(block, /src="\/\/([^"]+)"/);
+      if (pic) pic = 'https://' + pic.replace(/\\/g, '');
 
-      var name    = extract(block, /lst_topic lst_data">(.*?)</) || chathost;
-      var quality = null;
-      if (block.indexOf('__hd_plus __rt') !== -1)  quality = 'HD+';
-      else if (block.indexOf('__hd __rtl') !== -1) quality = 'HD';
+      // Имя модели или заголовок комнаты
+      var name = extract(block, /lst_topic lst_data">(.*?)</) || 
+                 extract(block, /class="model_name">([^<]+)/) || 
+                 chathost;
 
-      var videoUrl = 'https://' + esid + '.bcvcdn.com/hls/stream_' + chathost
-                   + '/public-aac/stream_' + chathost + '/chunks.m3u8';
+      // Качество
+      var quality = '';
+      if (block.indexOf('__hd_plus') !== -1) quality = 'HD+';
+      else if (block.indexOf('__hd') !== -1) quality = 'HD';
 
-      cards.push({
-        name:    name,
+      // Прямая ссылка на HLS поток (стандартная для BC)
+      var videoUrl = 'https://' + esid + '.bcvcdn.com/hls/stream_' + chathost + 
+                     '/public-aac/stream_' + chathost + '/chunks.m3u8';
+
+      results.push({
+        name:    name.replace(/&amp;/g, '&'),
         video:   videoUrl,
-        picture: 'https://' + picture,
-        preview: null,
-        time:    null,
+        picture: pic,
+        img:     pic,
         quality: quality,
-        json:    false,
-        related: false,
-        model:   null,
-        source:  NAME,
+        json:    false, // HLS ссылка готова сразу
+        source:  NAME
       });
     }
-    return cards;
+    return results;
   }
 
   // ----------------------------------------------------------
-  // [1.0.0] МЕНЮ ФИЛЬТРА
+  // Построение URL
   // ----------------------------------------------------------
-  function buildMenu(currentUrl) {
-    return [{
-      title:        'Сортировка: ' + activeCategoryTitle(currentUrl || ''),
-      playlist_url: 'submenu',
-      submenu:      CATEGORIES.map(function (cat) {
-        return { title: cat.title, playlist_url: cat.url };
-      }),
-    }];
+  function buildUrl(cat, page, query) {
+    var p = (parseInt(page, 10) || 1);
+    var url = HOST;
+
+    if (query) {
+      url += '/?q=' + encodeURIComponent(query);
+    } else if (cat && cat !== NAME) {
+      url += '/' + cat;
+    }
+
+    if (p > 1) {
+      url += (url.indexOf('?') !== -1 ? '&' : '?') + 'page=' + p;
+    }
+    return url;
+  }
+
+  function buildMenu() {
+    return [
+      { title: 'Поиск моделей', search_on: true, playlist_url: NAME + '/search/' },
+      {
+        title: 'Категории',
+        playlist_url: 'submenu',
+        submenu: CATS.map(function (c) {
+          return { title: c.title, playlist_url: NAME + '/cat/' + c.val };
+        })
+      }
+    ];
   }
 
   // ----------------------------------------------------------
-  // [1.0.0] ПУБЛИЧНЫЙ ИНТЕРФЕЙС
+  // Роутинг
+  // ----------------------------------------------------------
+  function routeView(url, page, success, error) {
+    var cat = null;
+    var query = null;
+
+    if (url.indexOf(NAME + '/cat/') === 0) {
+      cat = url.replace(NAME + '/cat/', '');
+    } else if (url.indexOf(NAME + '/search/') === 0) {
+      query = url.replace(NAME + '/search/', '').split('?')[0];
+    }
+
+    var fetchUrl = buildUrl(cat, page, query);
+
+    httpGet(fetchUrl, function (html) {
+      var cards = parseCards(html);
+      if (!cards.length && html.indexOf('id="turnstile-wrapper"') !== -1) {
+        error('Доступ ограничен Cloudflare. Попробуйте обновить плагин или использовать VPN.');
+        return;
+      }
+      success({
+        results:     cards,
+        collection:  true,
+        total_pages: cards.length >= 30 ? page + 1 : page,
+        menu:        buildMenu()
+      });
+    }, error);
+  }
+
+  // ----------------------------------------------------------
+  // Публичный интерфейс
   // ----------------------------------------------------------
   var BcmsParser = {
-
     main: function (params, success, error) {
-      var url = CATEGORIES[0].url;
-      Http.get(url)
-        .then(function (html) {
-          var results = parsePlaylist(html);
-          if (!results.length) { error('BongaCams: нет карточек (возможно, требуется cookies)'); return; }
-          success({ results: results, collection: true, total_pages: 30, menu: buildMenu(url) });
-        })
-        .catch(function (e) { console.error('[bcms] main:', e); error(e); });
+      routeView(NAME, 1, success, error);
     },
 
     view: function (params, success, error) {
-      var rawUrl  = (params.url || CATEGORIES[0].url).split('&pg=')[0].split('?pg=')[0];
-      var page    = parseInt(params.page, 10) || 1;
-      var loadUrl = normalizeUrl(
-        page > 1 ? rawUrl + (rawUrl.indexOf('?') !== -1 ? '&' : '?') + 'page=' + page : rawUrl
-      );
-
-      Http.get(loadUrl)
-        .then(function (html) {
-          var results = parsePlaylist(html);
-          if (!results.length) { error('BongaCams: нет карточек'); return; }
-          success({ results: results, collection: true, total_pages: page + 5, menu: buildMenu(rawUrl) });
-        })
-        .catch(function (e) { console.error('[bcms] view:', e); error(e); });
+      routeView(params.url || NAME, params.page || 1, success, error);
     },
 
     search: function (params, success, error) {
-      // BongaCams — live-сервис, поиск не поддерживается
-      error('BongaCams: поиск не поддерживается');
-    },
+      var query = (params.query || '').trim();
+      var fetchUrl = buildUrl(null, params.page || 1, query);
+      httpGet(fetchUrl, function (html) {
+        var cards = parseCards(html);
+        success({
+          title:       'BC: ' + query,
+          results:     cards,
+          collection:  true,
+          total_pages: cards.length >= 30 ? (params.page || 1) + 1 : 1
+        });
+      }, error);
+    }
   };
 
-  // ----------------------------------------------------------
-  // [1.0.0] РЕГИСТРАЦИЯ с polling
-  // ----------------------------------------------------------
+  // Регистрация
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, BcmsParser);
-      console.log('[bcms] v1.1.0 registered OK');
       return true;
     }
     return false;
   }
 
   if (!tryRegister()) {
-    var _elapsed = 0;
-    var _poll = setInterval(function () {
-      _elapsed += 100;
-      if (tryRegister() || _elapsed >= 10000) clearInterval(_poll);
-    }, 100);
+    var poll = setInterval(function () {
+      if (tryRegister()) clearInterval(poll);
+    }, 200);
+    setTimeout(function () { clearInterval(poll); }, 5000);
   }
 
 })();
