@@ -175,32 +175,56 @@
         });
       }, error);
     },
-    qualities: function (videoPageUrl, success, error) {
+        qualities: function (videoPageUrl, success, error) {
       httpGet(videoPageUrl, function (html) {
         var q = {};
-        // TRH хранит видео в JS переменных или через get_file/
-        // Ищем паттерны URL из JSON данных: /get_file/.../...mp4
-        var videoRe = /"(https?:\/\/[^"]+?\/get_file\/[^"]+?\.mp4)"/g;
+        // Регулярное выражение теперь ищет и полные URL, и относительные пути /get_file/
+        var videoRe = /"(https?:\/\/[^"]+?)?(\/get_file\/[^"]+?\.mp4[^"]*)"/g;
         var match;
         var idx = 0;
         
         while ((match = videoRe.exec(html)) !== null && idx < 10) {
-          var url = match[1].replace(/\\/g, '');
-          if (url.indexOf('preview') !== -1) continue; // Пропускаем превью
+          var hostPart = match[1] || '';
+          var pathPart = match[2];
+          var url = (hostPart + pathPart).replace(/\\/g, '');
+          
+          if (url.indexOf('preview') !== -1) continue; 
+          
+          // Добавляем хост, если ссылка относительная
+          if (url.indexOf('/') === 0) url = HOST + url;
+
+          // Очищаем URL от параметров (как вы и просили: удаляем всё после ?)
+          // Это часто помогает обойти 404, если параметры привязаны к IP или времени
+          var cleanUrl = url.split('?')[0];
 
           var label = 'MP4';
-          var qMatch = url.match(/_(\d{3,4}p)\.mp4/);
-          if (qMatch) label = qMatch[1];
-          else if (url.indexOf('1080') !== -1) label = '1080p';
-          else if (url.indexOf('720')  !== -1) label = '720p';
-          else if (url.indexOf('480')  !== -1) label = '480p';
-          else if (url.indexOf('360')  !== -1) label = '360p';
-          else label = 'HD' + (idx || '');
+          var qMatch = cleanUrl.match(/_(\d{3,4}p)\.mp4/);
+          if (qMatch) {
+            label = qMatch[1];
+          } else {
+            // Пытаемся определить качество по вхождению цифр в путь
+            if (cleanUrl.indexOf('1080') !== -1) label = '1080p';
+            else if (cleanUrl.indexOf('720')  !== -1) label = '720p';
+            else if (cleanUrl.indexOf('480')  !== -1) label = '480p';
+            else if (cleanUrl.indexOf('360')  !== -1) label = '360p';
+            else label = 'HD ' + (idx + 1);
+          }
 
           if (!q[label]) {
-            q[label] = url;
+            q[label] = cleanUrl;
             idx++;
           }
+        }
+
+        // Дополнительная проверка на внешние ссылки (remote_control)
+        // Если через get_file ничего не нашли, ищем ссылки на s4.tkvids.com и аналоги
+        if (Object.keys(q).length === 0) {
+           var remoteRe = /"(https?:\/\/[^"]+?remote_control\.php[^"]+?file=([^"&]+.mp4)[^"]*)"/g;
+           while ((match = remoteRe.exec(html)) !== null) {
+              var fileParam = decodeURIComponent(match[2]);
+              var labelR = fileParam.match(/_(\d{3,4}p)\.mp4/) ? fileParam.match(/_(\d{3,4}p)\.mp4/)[1] : 'HLS';
+              if (!q[labelR]) q[labelR] = match[1].replace(/\\/g, '');
+           }
         }
 
         if (Object.keys(q).length > 0) {
@@ -210,7 +234,6 @@
         }
       }, error);
     }
-  };
 
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
