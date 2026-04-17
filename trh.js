@@ -1,17 +1,97 @@
 // =============================================================
-// eporner.js — Парсер EPorner для AdultJS (Lampa)
+// trh.js — Парсер TrahKino для AdultJS (Lampa)
 // Version  : 1.1.0
-// Based on : phub_210 (Network/Qualities architecture)
+// Based on : trh_100 + json-анализ trahkino.me (v4.0.0, 2026-04-17)
+//
+// [1.1.0] ИСПРАВЛЕНО три критических бага:
+//
+//   БАГ 1 — URL категорий (главная причина 404):
+//     было:  HOST + '/categories/' + cat + '/' + page  ← не существует
+//     стало: HOST + '/?c=' + cat + '&page=' + N
+//     JSON:  "category.pattern": "https://trahkino.me/?c={slug}"
+//
+//   БАГ 2 — Пагинация главной страницы:
+//     было:  HOST + '/latest-updates/' + page + '/'    ← нет такого пути
+//     стало: HOST + '/latest-updates/?page=' + N
+//     JSON:  "pagination.pattern": "&page={N}"
+//
+//   БАГ 3 — Поиск видео (qualities):
+//     было:  regex по /get_file/...mp4 внутри JSON-строк
+//            + split('?')[0] обрезал нужные части URL
+//     стало: ищем video_url и video_alt_url из kt_player конфига
+//            JSON: "video_url\s*[:=]\s*['"]([^'"]+)['"]"
+//            URL вида: trahkino.me/function/0/https://trahkino.me/get_file/36/{hash}/...mp4/
+//            Берём AS-IS — это прокси самого сайта, 404 был из-за неверного URL без /function/0/
+//
+// URL-схема (из JSON):
+//   Главная   : https://trahkino.me/latest-updates/
+//   Страница N: https://trahkino.me/latest-updates/?page={N}
+//   Поиск     : https://trahkino.me/?q={query}
+//   Поиск N   : https://trahkino.me/?q={query}&page={N}
+//   Категория : https://trahkino.me/?c={slug}
+//   Категория N: https://trahkino.me/?c={slug}&page={N}
+//   Видео     : https://trahkino.me/video/{id}/
+//
+// Структура видео URL (kt_player):
+//   video_url     = https://trahkino.me/function/0/https://trahkino.me/get_file/36/{hash}/{folder}/{id}/{id}.mp4/
+//   video_alt_url = https://trahkino.me/function/0/https://trahkino.me/get_file/36/{hash}/{folder}/{id}/{id}_360p.mp4/
+//
+// Worker ALLOWED_TARGETS:
+//   trahkino.me   — сайт + get_file CDN (всё через /function/0/ прокси)
 // =============================================================
 
 (function () {
   'use strict';
 
-  var NAME = 'epor';
-  var HOST = 'https://www.eporner.com';
+  var NAME = 'trh';
+  var HOST = 'https://trahkino.me';
+
+  // Полный список категорий из JSON (40 категорий)
+  var CATS = [
+    { name: 'Любительское',      slug: 'lyubitelskiy-seks'  },
+    { name: 'Минет',             slug: 'minet'              },
+    { name: 'Брюнетки',          slug: 'bryunetki'          },
+    { name: 'Большие члены',     slug: 'bolshie-hui'        },
+    { name: 'Анал',              slug: 'anal'               },
+    { name: 'Милфы',             slug: 'milfy'              },
+    { name: 'Домашнее',          slug: 'domashka'           },
+    { name: 'Соло',              slug: 'solo'               },
+    { name: 'Большие сиськи',    slug: 'bolshie-siski'      },
+    { name: 'От первого лица',   slug: 'ot-pervogo-lica'    },
+    { name: 'Большие попки',     slug: 'bolshie-popki'      },
+    { name: 'Кончают внутрь',    slug: 'konchayut-vnutr'    },
+    { name: 'Мулатки',           slug: 'mulatki'            },
+    { name: 'Красотки',          slug: 'krasotki'           },
+    { name: 'Русское',           slug: 'russkie'            },
+    { name: 'Наездница',         slug: 'naezdnica'          },
+    { name: 'Толстушки',         slug: 'tolstye'            },
+    { name: 'Натуральные сиськи',slug: 'naturalnye-siski'   },
+    { name: 'Раком',             slug: 'rakom'              },
+    { name: 'Ролевые игры',      slug: 'rolevye-igry'       },
+    { name: 'Фетиш',             slug: 'fetish'             },
+    { name: 'Дрочка члена',      slug: 'drochka-chlena'     },
+    { name: 'Татуированные',     slug: 'tatu'               },
+    { name: 'Групповуха',        slug: 'gruppovuha'         },
+    { name: 'Бритые киски',      slug: 'britye-kiski'       },
+    { name: 'Мастурбация',       slug: 'masturbaciya'       },
+    { name: 'Массаж',            slug: 'eroticheskiy-massaj'},
+    { name: 'Сперма',            slug: 'sperma'             },
+    { name: 'Куни',              slug: 'kuni'               },
+    { name: 'Блондинки',         slug: 'blondinki'          },
+    { name: 'Женский оргазм',    slug: 'jenskiy-orgazm'     },
+    { name: 'Развратное',        slug: 'razvrat'            },
+    { name: 'Латинки',           slug: 'latinki'            },
+    { name: 'Француженки',       slug: 'francujenki'        },
+    { name: 'МЖМ',               slug: 'mjm'                },
+    { name: 'В очках',           slug: 'v-ochkah'           },
+    { name: 'Реальное',          slug: 'realnyy-seks'       },
+    { name: 'Бондаж',            slug: 'bondaj'             },
+    { name: 'В ванной',          slug: 'v-vannoy'           },
+    { name: 'Подборки',          slug: 'podborki'           },
+  ];
 
   // ----------------------------------------------------------
-  // СЕТЕВОЙ ЗАПРОС (Архитектура phub_210)
+  // Сетевой запрос
   // ----------------------------------------------------------
   function httpGet(url, success, error) {
     if (window.AdultPlugin && typeof window.AdultPlugin.networkRequest === 'function') {
@@ -24,240 +104,281 @@
     }
   }
 
-  function rx(str, regex, group) {
-    if (!str) return null;
-    var g = group === undefined ? 1 : group;
-    var m = str.match(regex);
-    return m && m[g] ? m[g].trim() : null;
-  }
-
   // ----------------------------------------------------------
-  // ПОСТРОЕНИЕ URL (Синхронизировано с JSON/ARCH)
-  // ----------------------------------------------------------
-  function buildUrl(query, sort, cat, page) {
-    var url = HOST + '/';
-    page = parseInt(page, 10) || 1;
-
-    if (query) {
-      // Схема из JSON: /?q={query}&page={N}
-      url += '?q=' + encodeURIComponent(query);
-    } else if (cat) {
-      // Схема из ARCH: /cat/{slug}/{page}/
-      url += 'cat/' + cat + '/';
-      if (page > 1) url += page + '/';
-    } else {
-      if (page > 1) url += page + '/';
-    }
-
-    if (sort && !query) {
-      url += (url.indexOf('?') === -1 ? '?' : '&') + 'sort=' + sort;
-    }
-    
-    // Для поиска пагинация через &page=N
-    if (query && page > 1) url += '&page=' + page;
-
-    return url;
-  }
-
-  // ----------------------------------------------------------
-  // ПАРСИНГ КАРТОЧЕК
+  // Парсинг карточек
+  // Структура из JSON: cardSelector=".item", thumb=data-original
   // ----------------------------------------------------------
   function parseCards(html) {
     if (!html) return [];
+
+    var doc   = new DOMParser().parseFromString(html, 'text/html');
+    var items = doc.querySelectorAll('.item');
+
+    console.log('[TRH] parseCards → .item найдено:', items.length);
+
     var results = [];
-    
-    // Используем DOMParser для стабильности (как в phub_210)
-    var doc = new DOMParser().parseFromString(html, 'text/html');
-    var items = doc.querySelectorAll('div.mb, div.mb.hdy');
 
     for (var i = 0; i < items.length; i++) {
       var el = items[i];
-      
-      var linkEl = el.querySelector('p.mbtit a');
-      if (!linkEl) continue;
 
-      var href = linkEl.getAttribute('href');
+      // Ссылка на видео: /video/{id}/
+      var a = el.querySelector('a[href*="/video/"]');
+      if (!a) continue;
+
+      var href = a.getAttribute('href') || '';
+      if (!href) continue;
       if (href.indexOf('http') !== 0) href = HOST + href;
 
-      var name = linkEl.textContent.trim();
-      
-      // Картинка и ID для превью
+      // Постер: data-original (из JSON: thumbnail.attribute = "data-original")
       var img = el.querySelector('img');
-      var pic = img ? (img.getAttribute('data-src') || img.getAttribute('src')) : '';
+      var pic = img ? (img.getAttribute('data-original') || img.getAttribute('src') || '') : '';
       if (pic && pic.indexOf('//') === 0) pic = 'https:' + pic;
+      if (pic && pic.indexOf('http') !== 0 && pic.indexOf('/') === 0) pic = HOST + pic;
 
-      var dataId = el.getAttribute('data-id');
-      var preview = (pic && dataId) 
-        ? pic.replace(/\/[^/]+$/, '') + '/' + dataId + '-preview.webm' 
-        : null;
+      // Название: .item .title → strong → a[title]
+      var titleEl = el.querySelector('.title, strong');
+      var name    = (titleEl ? (titleEl.textContent || '').trim() : '') ||
+                    (a.getAttribute('title') || '').trim();
+      name = name.replace(/\s+/g, ' ').trim();
+      if (!name || name.length < 3) continue;
 
-      var dur = el.querySelector('span.mbtim') ? el.querySelector('span.mbtim').textContent.trim() : '';
-      var qual = el.querySelector('div.mvhdico') ? 'HD' : '';
+      // Длительность: .item .duration
+      var durEl = el.querySelector('.duration');
+      var time  = durEl ? durEl.textContent.trim() : '';
 
       results.push({
-        name: name,
-        video: href,
+        name:    name,
+        video:   href,   // страница видео → qualities() извлечёт kt_player URL
         picture: pic,
-        preview: preview,
-        time: dur,
-        quality: qual,
-        json: true,
-        source: NAME
+        img:     pic,
+        poster:  pic,
+        time:    time,
+        json:    true,
+        source:  NAME,
       });
     }
+
+    console.log('[TRH] parseCards → карточек:', results.length);
     return results;
   }
 
   // ----------------------------------------------------------
-  // ОБРАБОТКА ВИДЕО (Base36 + XHR API)
+  // [1.1.0] Построение URL — ИСПРАВЛЕНО
+  //
+  // JSON urlScheme:
+  //   search:   /?q={query}
+  //   category: /?c={slug}
+  //   pagination: &page={N}    ← параметр, не путь
+  //
+  // Главная: /latest-updates/ (не просто /)
   // ----------------------------------------------------------
-  function base36(hexStr) {
-    var n = parseInt(hexStr, 16);
-    var chars = '0123456789abcdefghijklmnopqrstuvwxyz';
-    var result = '';
-    while (n > 0) {
-      result = chars[n % 36] + result;
-      n = Math.floor(n / 36);
+  function buildUrl(cat, page, query) {
+    page = parseInt(page, 10) || 1;
+
+    if (query) {
+      // Поиск: https://trahkino.me/?q={query}&page={N}
+      var url = HOST + '/?q=' + encodeURIComponent(query);
+      if (page > 1) url += '&page=' + page;
+      return url;
     }
-    return result || '0';
+
+    if (cat) {
+      // Категория: https://trahkino.me/?c={slug}&page={N}
+      var url = HOST + '/?c=' + encodeURIComponent(cat);
+      if (page > 1) url += '&page=' + page;
+      return url;
+    }
+
+    // Главная лента: https://trahkino.me/latest-updates/?page={N}
+    if (page > 1) {
+      return HOST + '/latest-updates/?page=' + page;
+    }
+    return HOST + '/latest-updates/';
   }
 
-  function convertHash(hash) {
-    if (!hash || hash.length < 32) return '';
-    return base36(hash.substring(0, 8)) +
-           base36(hash.substring(8, 16)) +
-           base36(hash.substring(16, 24)) +
-           base36(hash.substring(24, 32));
-  }
-
-  // ----------------------------------------------------------
-  // МЕНЮ
-  // ----------------------------------------------------------
   function buildMenu() {
     return [
       { title: 'Поиск', search_on: true, playlist_url: NAME + '/search/' },
-      { 
-        title: 'Сортировка', 
-        playlist_url: 'submenu', 
-        submenu: [
-          { title: 'Новинки', playlist_url: NAME + '/sort/' },
-          { title: 'Топ просмотра', playlist_url: NAME + '/sort/most-viewed' },
-          { title: 'Топ рейтинга', playlist_url: NAME + '/sort/top-rated' },
-          { title: 'Длинные', playlist_url: NAME + '/sort/longest' }
-        ]
-      }
+      {
+        title:        'Категории',
+        playlist_url: 'submenu',
+        submenu:      CATS.map(function (c) {
+          return { title: c.name, playlist_url: NAME + '/cat/' + c.slug };
+        }),
+      },
     ];
   }
 
   // ----------------------------------------------------------
-  // ПУБЛИЧНЫЙ ИНТЕРФЕЙС
+  // Роутинг
   // ----------------------------------------------------------
-  var EpornerParser = {
+  function routeView(url, page, success, error) {
+    var cat   = null;
+    var query = null;
+
+    var searchMatch = url.match(/[?&]search=([^&]*)/);
+    if (searchMatch) {
+      query = decodeURIComponent(searchMatch[1]);
+    } else if (url.indexOf(NAME + '/cat/') === 0) {
+      cat = url.replace(NAME + '/cat/', '').split('?')[0];
+    }
+
+    var fetchUrl = buildUrl(cat, page, query);
+    console.log('[TRH] routeView →', fetchUrl);
+
+    httpGet(fetchUrl, function (html) {
+      console.log('[TRH] html длина:', html.length);
+      var cards = parseCards(html);
+      success({
+        results:     cards,
+        collection:  true,
+        total_pages: cards.length >= 20 ? page + 1 : page,
+        menu:        buildMenu(),
+      });
+    }, error);
+  }
+
+  // ----------------------------------------------------------
+  // [1.1.0] qualities() — ИСПРАВЛЕНО
+  //
+  // Движок: kt_player
+  // В HTML страницы видео содержатся JS-переменные:
+  //   video_url     = 'https://trahkino.me/function/0/https://trahkino.me/get_file/36/{hash}/{folder}/{id}/{id}.mp4/'
+  //   video_alt_url = 'https://trahkino.me/function/0/https://trahkino.me/get_file/36/{hash}/{folder}/{id}/{id}_360p.mp4/'
+  //
+  // URL содержит /function/0/ — прокси самого сайта.
+  // Берём AS-IS, НЕ обрезаем split('?'), НЕ удаляем /function/0/.
+  // Прошлый 404 был именно из-за того что код строил URL без /function/0/.
+  //
+  // Качество определяем по суффиксу в имени файла:
+  //   418475.mp4      → 240p (без суффикса = низшее качество)
+  //   418475_360p.mp4 → 360p
+  //   418475_720p.mp4 → 720p (если есть)
+  // ----------------------------------------------------------
+  function extractQualities(html) {
+    var q = {};
+
+    // Паттерн 1: video_url = '...' или video_url: '...'
+    var urlRe    = /video_url\s*[:=]\s*['"]([^'"]+)['"]/i;
+    var altUrlRe = /video_alt_url\s*[:=]\s*['"]([^'"]+)['"]/i;
+
+    var m1 = html.match(urlRe);
+    var m2 = html.match(altUrlRe);
+
+    if (m1 && m1[1]) {
+      var url1 = m1[1].replace(/\\/g, '');
+      // Качество из имени файла: ищем _360p, _720p, _1080p
+      var qm1  = url1.match(/_(\d{3,4}p)\.mp4/i);
+      var lbl1 = qm1 ? qm1[1] : '240p';  // без суффикса = базовое/низшее
+      q[lbl1]  = url1;
+      console.log('[TRH] video_url ' + lbl1 + ':', url1.substring(0, 80));
+    }
+
+    if (m2 && m2[1]) {
+      var url2 = m2[1].replace(/\\/g, '');
+      var qm2  = url2.match(/_(\d{3,4}p)\.mp4/i);
+      var lbl2 = qm2 ? qm2[1] : '360p';  // alt = лучшее качество обычно
+      if (!q[lbl2]) {
+        q[lbl2] = url2;
+        console.log('[TRH] video_alt_url ' + lbl2 + ':', url2.substring(0, 80));
+      }
+    }
+
+    // Резерв: ищем все kt_player-подобные переменные с /function/0/
+    if (!Object.keys(q).length) {
+      console.log('[TRH] Основные паттерны не нашли, пробуем резерв...');
+      var funcRe = /(https?:\/\/trahkino\.me\/function\/0\/[^"'<\s]+\.mp4[^\s"'<]*)/g;
+      var fm;
+      var fi = 0;
+      while ((fm = funcRe.exec(html)) !== null && fi < 5) {
+        var fUrl = fm[1].replace(/\\/g, '');
+        if (fUrl.indexOf('preview') !== -1) continue;
+        var fQm  = fUrl.match(/_(\d{3,4}p)\.mp4/i);
+        var fLbl = fQm ? fQm[1] : ('MP4_' + fi);
+        if (!q[fLbl]) { q[fLbl] = fUrl; fi++; }
+      }
+    }
+
+    return q;
+  }
+
+  // ----------------------------------------------------------
+  // Публичный интерфейс
+  // ----------------------------------------------------------
+  var trhParser = {
+
     main: function (params, success, error) {
-      httpGet(HOST + '/', function (html) {
-        var cards = parseCards(html);
-        success({ results: cards, collection: true, total_pages: 50, menu: buildMenu() });
-      }, error);
+      routeView(NAME, 1, success, error);
     },
 
     view: function (params, success, error) {
-      var page = params.page || 1;
-      var url = params.url || '';
-      var sort = url.indexOf('/sort/') !== -1 ? url.split('/sort/')[1] : '';
-      var cat = url.indexOf('/cat/') !== -1 ? url.split('/cat/')[1] : '';
-      
-      var fetchUrl = buildUrl(null, sort, cat, page);
-      
-      httpGet(fetchUrl, function (html) {
-        var cards = parseCards(html);
-        success({
-          results: cards,
-          collection: true,
-          total_pages: cards.length > 0 ? page + 1 : page,
-          menu: buildMenu()
-        });
-      }, error);
+      routeView(params.url || NAME, params.page || 1, success, error);
     },
 
     search: function (params, success, error) {
-      var query = params.query || '';
-      var page = params.page || 1;
-      var fetchUrl = buildUrl(query, null, null, page);
-
+      var query    = (params.query || '').trim();
+      var fetchUrl = buildUrl(null, params.page || 1, query);
       httpGet(fetchUrl, function (html) {
         var cards = parseCards(html);
         success({
-          title: 'EP: ' + query,
-          results: cards,
-          collection: true,
-          total_pages: cards.length > 0 ? page + 1 : page
+          title:       'TRH: ' + query,
+          results:     cards,
+          collection:  true,
+          total_pages: cards.length >= 20 ? (params.page || 1) + 1 : 1,
         });
       }, error);
     },
 
-    qualities: function (videoUrl, success, error) {
-      console.log('[EPORNER] Qualities for:', videoUrl);
-      httpGet(videoUrl, function (html) {
-        var vid = rx(html, /vid ?= ?'([^']+)'/);
-        var hash = rx(html, /hash ?= ?'([^']+)'/);
+    // [1.1.0] qualities() — полностью переписан
+    qualities: function (videoPageUrl, success, error) {
+      console.log('[TRH] qualities() → страница:', videoPageUrl);
 
-        if (!vid || !hash) {
-          console.error('[EPORNER] No vid/hash found');
-          return error('EP: Ссылка не найдена');
+      httpGet(videoPageUrl, function (html) {
+        console.log('[TRH] qualities() → html длина:', html.length);
+
+        if (!html || html.length < 500) {
+          error('Страница видео недоступна (html < 500 байт)');
+          return;
         }
 
-        var apiUrl = HOST + '/xhr/video/' + vid +
-          '?hash=' + convertHash(hash) +
-          '&domain=eporner.com&fallback=false&embed=false&supportedFormats=mp4&_=' + Date.now();
+        var found = extractQualities(html);
+        var keys  = Object.keys(found);
 
-        httpGet(apiUrl, function (jsonStr) {
-          try {
-            var data = JSON.parse(jsonStr);
-            var q = {};
-            // Парсинг качеств из JSON ответа API
-            if (data && data.sources) {
-              // Если API вернуло стандартный объект с ключами mp4
-              var mp4 = data.sources.mp4 || [];
-              mp4.forEach(function(src) {
-                var label = src.res || 'SD';
-                q[label + 'p'] = src.src;
-              });
-            } else {
-              // Резервный поиск ссылок через регулярку в строке JSON
-              var re = /"src":\s*"(https?:\\?\/\\?\/[^"]+-([0-9]+p)\.mp4)"/g;
-              var m;
-              while ((m = re.exec(jsonStr)) !== null) {
-                var link = m[1].replace(/\\/g, '');
-                q[m[2]] = link;
-              }
-            }
+        console.log('[TRH] qualities() → найдено:', keys.length, JSON.stringify(keys));
 
-            if (Object.keys(q).length > 0) {
-              success({ qualities: q });
-            } else {
-              error('Видео недоступно');
-            }
-          } catch (e) {
-            error('Ошибка API: ' + e.message);
-          }
-        }, error);
+        if (keys.length > 0) {
+          success({ qualities: found });
+        } else {
+          // Диагностика
+          console.warn('[TRH] qualities() → ничего не найдено');
+          console.warn('[TRH]   video_url:',     (html.match(/video_url/gi)     || []).length);
+          console.warn('[TRH]   video_alt_url:', (html.match(/video_alt_url/gi) || []).length);
+          console.warn('[TRH]   function/0/:',   (html.match(/function\/0\//gi)  || []).length);
+          console.warn('[TRH]   get_file:',      (html.match(/get_file/gi)      || []).length);
+          console.warn('[TRH]   kt_player:',     (html.match(/kt_player/gi)     || []).length);
+          error('TrahKino: видео не найдено');
+        }
       }, error);
-    }
+    },
   };
 
+  // ----------------------------------------------------------
   // Регистрация
+  // ----------------------------------------------------------
   function tryRegister() {
-    if (window.AdultPlugin && window.AdultPlugin.registerParser) {
-      window.AdultPlugin.registerParser(NAME, EpornerParser);
+    if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
+      window.AdultPlugin.registerParser(NAME, trhParser);
+      console.log('[TRH] v1.1.0 зарегистрирован');
       return true;
     }
     return false;
   }
 
   if (!tryRegister()) {
-    var timer = setInterval(function () {
-      if (tryRegister()) clearInterval(timer);
+    var poll = setInterval(function () {
+      if (tryRegister()) clearInterval(poll);
     }, 200);
-    setTimeout(function() { clearInterval(timer); }, 10000);
+    setTimeout(function () { clearInterval(poll); }, 5000);
   }
+
 })();
