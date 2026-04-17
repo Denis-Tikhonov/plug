@@ -90,6 +90,18 @@
     { name: 'Подборки',          slug: 'podborki'           },
   ];
 
+  
+
+  // Функция для очистки ссылки от прокси-префикса trahkino
+	function cleanVideoUrl(url) {
+	    if (!url) return '';
+	    // Если ссылка содержит двойной протокол (прокси сайта), берем вторую часть
+	    if (url.includes('/http')) {
+        url = url.substring(url.lastIndexOf('http'));
+	    }
+	    return url;
+	}
+
   // ----------------------------------------------------------
   // Сетевой запрос
   // ----------------------------------------------------------
@@ -255,52 +267,51 @@
   //   418475_360p.mp4 → 360p
   //   418475_720p.mp4 → 720p (если есть)
   // ----------------------------------------------------------
-  function extractQualities(html) {
-    var q = {};
-
-    // Паттерн 1: video_url = '...' или video_url: '...'
-    var urlRe    = /video_url\s*[:=]\s*['"]([^'"]+)['"]/i;
-    var altUrlRe = /video_alt_url\s*[:=]\s*['"]([^'"]+)['"]/i;
-
-    var m1 = html.match(urlRe);
-    var m2 = html.match(altUrlRe);
-
-    if (m1 && m1[1]) {
-      var url1 = m1[1].replace(/\\/g, '');
-      // Качество из имени файла: ищем _360p, _720p, _1080p
-      var qm1  = url1.match(/_(\d{3,4}p)\.mp4/i);
-      var lbl1 = qm1 ? qm1[1] : '240p';  // без суффикса = базовое/низшее
-      q[lbl1]  = url1;
-      console.log('[TRH] video_url ' + lbl1 + ':', url1.substring(0, 80));
+ // Обновленная функция извлечения качеств
+function extractQualities(html) {
+    var sources = {};
+    
+    // 1. Пытаемся найти массив файлов (часто используется в PlayerJS)
+    var fileData = html.match(/file["']\s*:\s*["']([^"']+)["']/);
+    if (fileData) {
+        var fileContent = fileData[1];
+        // Если это список качеств в формате [720p]url,[1080p]url
+        if (fileContent.includes('[')) {
+            fileContent.split(',').forEach(function(item) {
+                var quality = item.match(/
+\[(.*?)\]/);
+                var link = item.replace(/
+\[.*?\]/, '');
+                if (quality && link) {
+                    sources[quality[1]] = cleanVideoUrl(link);
+                }
+            });
+        } else {
+            sources['Default'] = cleanVideoUrl(fileContent);
+        }
     }
 
-    if (m2 && m2[1]) {
-      var url2 = m2[1].replace(/\\/g, '');
-      var qm2  = url2.match(/_(\d{3,4}p)\.mp4/i);
-      var lbl2 = qm2 ? qm2[1] : '360p';  // alt = лучшее качество обычно
-      if (!q[lbl2]) {
-        q[lbl2] = url2;
-        console.log('[TRH] video_alt_url ' + lbl2 + ':', url2.substring(0, 80));
-      }
+    // 2. Универсальный поиск для тегов <source> (MP4 и HLS)
+    var sourceRegexp = /<source[^>]*src=["']([^"']+)["'][^>]*label=["']([^"']+)["']/g;
+    var match;
+    while ((match = sourceRegexp.exec(html)) !== null) {
+        sources[match[2]] = cleanVideoUrl(match[1]);
     }
 
-    // Резерв: ищем все kt_player-подобные переменные с /function/0/
-    if (!Object.keys(q).length) {
-      console.log('[TRH] Основные паттерны не нашли, пробуем резерв...');
-      var funcRe = /(https?:\/\/trahkino\.me\/function\/0\/[^"'<\s]+\.mp4[^\s"'<]*)/g;
-      var fm;
-      var fi = 0;
-      while ((fm = funcRe.exec(html)) !== null && fi < 5) {
-        var fUrl = fm[1].replace(/\\/g, '');
-        if (fUrl.indexOf('preview') !== -1) continue;
-        var fQm  = fUrl.match(/_(\d{3,4}p)\.mp4/i);
-        var fLbl = fQm ? fQm[1] : ('MP4_' + fi);
-        if (!q[fLbl]) { q[fLbl] = fUrl; fi++; }
-      }
+    // 3. Если ничего не нашли, ищем любые ссылки на m3u8 или mp4
+    if (Object.keys(sources).length === 0) {
+        var anyVideo = html.match(/["'](https?:\/\/[^"']+\.(?:m3u8|mp4)[^"']*)["']/gi);
+        if (anyVideo) {
+            anyVideo.forEach(function(link) {
+                link = link.replace(/["']/g, '');
+                var q = link.includes('m3u8') ? 'HLS (Auto)' : 'MP4';
+                if (!sources[q]) sources[q] = cleanVideoUrl(link);
+            });
+        }
     }
 
-    return q;
-  }
+    return sources;
+}
 
   // ----------------------------------------------------------
   // Публичный интерфейс
