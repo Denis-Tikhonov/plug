@@ -321,10 +321,10 @@
       }
 
       // Формируем qualityMap { '720p': 'https://...', '480p': 'https://...' }
-      var qualitys = {};
-      urls.forEach(function (u) { qualitys[u.quality] = u.url; });
+      var qualities = {};
+      urls.forEach(function (u) { qualities[u.quality] = u.url; });
 
-      success({ qualitys: qualitys });
+      success({ qualities: qualities });
     }, error);
   }
 
