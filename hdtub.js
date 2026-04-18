@@ -1,23 +1,38 @@
 // =============================================================
 // hdtub.js — HDtube Parser для AdultJS (Lampa)
 // =============================================================
-// Версия  : 1.3.0
-// Изменения:
-//   [1.3.0] КРИТИЧЕСКИЙ FIX:
-//           - [FIX] extractQualities: URL вида "function/0/https://..."
+// Версия  : 1.4.0 (VARIANT A: Worker Proxy)
+//
+// Вариант A: Видео-URL срезаются от /function/N/, очищенный URL
+//            пропускается через Cloudflare Worker, который подставляет
+//            необходимые заголовки (Referer, User-Agent).
+//            Worker уже есть в архитектуре и добавляет Referer
+//            автоматически (строка 71 worker.js).
+//
+//   Плюс:  Прямой mp4 URL без мусора — плеер точно распознаёт.
+//   Минус: Весь видеопоток идёт через Worker (дополнительная
+//          нагрузка, но Worker на бесплатном плане Cloudflare
+//          выдерживает до 100 000 запросов/день).
+//
+// [1.4.0] FIX:
+//         - [FIX] qualities(): видео-URL проксируются через Worker
+//           для подстановки Referer заголовка.
+//           hdtube.porn → refererProtected: true, без Referer
+//           сервер отдаёт 403.
+//         - cleanUrl() оставлен из 1.3.0 (срезка /function/N/)
+//
+// [1.3.0] FIX:
+//         - [FIX] extractQualities: URL вида "function/0/https://..."
 //                   → срезаем префикс "function/0/" → получаем чистый https://
-//                   (скрин: hdtub qualities() нашёл 2 ["720p","480p"] но плеер
-//                   говорит "нет подходящего плеера" — именно из-за этого префикса)
-//           - [FIX] cleanUrl: добавлена обрезка "function/0/" и "function/[0-9]+/"
-//   [1.2.0] Переписан под структуру p365
-//   [1.1.0] XHR + Worker fallback
-//   [1.0.0] Базовый парсер
+//         - [FIX] cleanUrl: добавлена обрезка "function/0/" и "function/[0-9]+/"
+//
+// [1.2.0] Переписан под структуру p365
 // =============================================================
 
 (function () {
   'use strict';
 
-  var VERSION = '1.3.0';
+  var VERSION = '1.4.0';
   var NAME    = 'hdtub';
   var HOST    = 'https://www.hdtube.porn';
 
@@ -112,7 +127,7 @@
 
   // ----------------------------------------------------------
   // ОЧИСТКА URL
-  // [1.3.0] ГЛАВНЫЙ FIX: срезаем "function/N/" прокси-префикс hdtube
+  // [1.3.0] Срезаем "function/N/" прокси-префикс hdtube
   //
   // hdtube.porn оборачивает CDN-ссылки через свой endpoint:
   //   https://www.hdtube.porn/function/0/https://www.hdtube.porn/get_file/...
@@ -134,6 +149,20 @@
     if (u.indexOf('//') === 0)                      u = 'https:' + u;
     if (u.charAt(0) === '/' && u.charAt(1) !== '/') u = HOST + u;
     return u;
+  }
+
+  // ----------------------------------------------------------
+  // [1.4.0] Получить Worker URL
+  // ----------------------------------------------------------
+  function getWorkerUrl() {
+    var wu = '';
+    if (window.AdultPlugin && window.AdultPlugin.workerUrl) {
+      wu = window.AdultPlugin.workerUrl;
+    }
+    if (wu && wu.charAt(wu.length - 1) !== '=') {
+      wu = wu + '=';
+    }
+    return wu;
   }
 
   // ----------------------------------------------------------
@@ -179,7 +208,7 @@
   // ----------------------------------------------------------
   // ИЗВЛЕЧЕНИЕ КАЧЕСТВ
   // JSON: kt_player, video_url=720p, video_alt_url=480p
-  // [1.3.0] cleanUrl() теперь срезает function/0/ → URL рабочий
+  // cleanUrl() срезает function/0/ → URL чистый
   // ----------------------------------------------------------
   function extractQualities(html) {
     var q = {};
@@ -307,6 +336,19 @@
         s({ title: 'HDtube: ' + query, results: parsePlaylist(html), collection: true, total_pages: 2 });
       }, e);
     },
+
+    // ----------------------------------------------------------
+    // [1.4.0] CRITICAL FIX: проксирование видео через Worker
+    //
+    // hdtube.porn требует заголовок Referer для get_file URL.
+    // Плеер Lampa делает прямой запрос к mp4 без Referer → 403.
+    //
+    // Решение: оборачиваем каждый видео-URL в Worker URL.
+    // Worker (строка 71) подставляет:
+    //   Referer: https://www.hdtube.porn/
+    //   User-Agent: Mozilla/5.0 ...
+    // что позволяет серверу отдать файл.
+    // ----------------------------------------------------------
     qualities: function (videoPageUrl, success, error) {
       console.log('[hdtub] qualities() →', videoPageUrl);
       httpGet(videoPageUrl, function (html) {
@@ -317,14 +359,31 @@
         var keys  = Object.keys(found);
         console.log('[hdtub] qualities() найдено:', keys.length, JSON.stringify(keys));
 
-        if (keys.length > 0) {
-          success({ qualities: found });
-        } else {
+        if (keys.length === 0) {
           console.warn('[hdtub] video_url:', (html.match(/video_url/gi)  || []).length);
           console.warn('[hdtub] get_file:',  (html.match(/get_file/gi)   || []).length);
           console.warn('[hdtub] .mp4:',      (html.match(/\.mp4/gi)      || []).length);
           error('Видео не найдено');
+          return;
         }
+
+        // [1.4.0] Проксируем видео-URL через Worker для Referer
+        var workerUrl = getWorkerUrl();
+        if (workerUrl) {
+          for (var k in found) {
+            var rawUrl = found[k];
+            // Пропускаем если уже проксирован
+            if (rawUrl.indexOf(workerUrl) === 0) continue;
+
+            found[k] = workerUrl + encodeURIComponent(rawUrl);
+            console.log('[hdtub] proxied', k, '→', found[k].substring(0, 100));
+          }
+        } else {
+          console.warn('[hdtub] Worker URL не найден — видео-URL переданы без прокси');
+          console.warn('[hdtub] Возможна ошибка 403 из-за отсутствия Referer');
+        }
+
+        success({ qualities: found });
       }, error);
     },
   };
@@ -335,7 +394,7 @@
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, HdtubParser);
-      console.log('[hdtub] v' + VERSION + ' зарегистрирован');
+      console.log('[hdtub] v' + VERSION + ' (Worker Proxy) зарегистрирован');
       return true;
     }
     return false;
