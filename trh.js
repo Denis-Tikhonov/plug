@@ -1,21 +1,17 @@
 (function () {
   'use strict';
-  var VERSION = '1.3.1';
-  var NAME    = 'hdtub';
-  var HOST    = 'https://www.hdtube.porn';
+  var NAME = 'trh';
+  var HOST = 'https://trahkino.me';
 
   function cleanUrl(url) {
     if (!url) return '';
-    var u = url.replace(/\\/g, '');
-    // Удаляем любые прокси-префиксы вида /function/N/ или /function/0/
-    // И оставляем всё, что идет после них (начиная с первого встреченного http)
-    var doubleHttps = u.indexOf('https://', 8);
-    if (doubleHttps !== -1) {
-        u = u.substring(doubleHttps);
-    }
-    if (u.indexOf('//') === 0) u = 'https:' + u;
-    if (u.charAt(0) === '/' && u.charAt(1) !== '/') u = HOST + u;
-    return u;
+    // Аналогичная очистка для TRH
+    var doubleHttps = url.indexOf('https://', 8);
+    var clean = (doubleHttps !== -1) ? url.substring(doubleHttps) : url;
+    
+    if (clean.indexOf('//') === 0) clean = 'https:' + clean;
+    if (clean.indexOf('http') !== 0 && clean.indexOf('/') === 0) clean = HOST + clean;
+    return clean;
   }
 
   function httpGet(url, success, error) {
@@ -26,42 +22,44 @@
     }
   }
 
-  // ... [Код CATEGORIES оставлен без изменений для краткости] ...
+  // ... [Код CATS и buildUrl оставлен без изменений] ...
 
   function extractQualities(html) {
-    var q = {};
-    var m720 = html.match(/video_url\s*[:=]\s*['"]([^'"]+)['"]/);
-    if (m720) q['720p'] = cleanUrl(m720[1]);
-    
-    var m480 = html.match(/video_alt_url\s*[:=]\s*['"]([^'"]+)['"]/);
-    if (m480) q['480p'] = cleanUrl(m480[1]);
+    var sources = {};
+    var ktFields = [
+      { regex: /video_url\s*[:=]\s*['"]([^'"]+)['"]/,       label: '240p' },
+      { regex: /video_alt_url\s*[:=]\s*['"]([^'"]+)['"]/,   label: '360p' },
+      { regex: /video_alt_url2\s*[:=]\s*['"]([^'"]+)['"]/,  label: '720p' },
+    ];
 
-    if (!Object.keys(q).length) {
-      var gfRe = /(https?:\/\/[^"'\s]+\/get_file\/[^"'\s]+\.mp4[^"'\s]*)/g;
-      var gf;
-      while ((gf = gfRe.exec(html)) !== null) {
-        if (gf[1].indexOf('preview') !== -1) continue;
-        var gfQ = gf[1].match(/_(\d+)\.mp4/);
-        q[gfQ ? gfQ[1] + 'p' : 'HD'] = cleanUrl(gf[1]);
-        break;
+    for (var i = 0; i < ktFields.length; i++) {
+      var m = html.match(ktFields[i].regex);
+      if (m && m[1]) {
+        var url = cleanUrl(m[1].trim()); // ВАЖНО: Применяем очистку
+        var label = ktFields[i].label;
+        if (url.indexOf('_1080p') !== -1) label = '1080p';
+        else if (url.indexOf('_720p') !== -1) label = '720p';
+        else if (url.indexOf('_480p') !== -1) label = '480p';
+        else if (url.indexOf('_360p') !== -1) label = '360p';
+        sources[label] = url;
       }
     }
-    return q;
+    return sources;
   }
 
-  var HdtubParser = {
-    // ... [методы main, view, search оставлены без изменений] ...
+  var trhParser = {
+    // ... [методы main, view, search без изменений] ...
     qualities: function (videoPageUrl, success, error) {
       httpGet(videoPageUrl, function (html) {
         var found = extractQualities(html);
-        Object.keys(found).length > 0 ? success({ qualities: found }) : error('Видео не найдено');
+        Object.keys(found).length > 0 ? success({ qualities: found }) : error('TrahKino: видео не найдено');
       }, error);
     },
   };
 
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
-      window.AdultPlugin.registerParser(NAME, HdtubParser);
+      window.AdultPlugin.registerParser(NAME, trhParser);
       return true;
     }
     return false;
