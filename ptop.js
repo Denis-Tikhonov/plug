@@ -1,294 +1,288 @@
 // =============================================================
 // ptop.js — PornTop Parser для AdultJS (Lampa)
 // =============================================================
-// Версия  : 1.1.0
+// Версия  : 1.2.0
 // Изменения:
-//   [1.1.0] Исправлено по JSON-анализу:
-//           - [FIX] URL категорий: /category/{slug}/l/ (JSON: category url-паттерн)
-//           - [FIX] Пагинация категорий: /l/?page=N вместо /l/N/
-//           - [FIX] Транспорт: прямой → Worker последовательно
-//           - [FIX] Cookie mature=1 — age gate (JSON: ageGate.cookieValue=1)
-//                   Worker добавляет автоматически через BYPASS_COOKIES
-//           - [FIX] parseList: DOMParser вместо regex, title — .item .title
-//           - [FIX] thumbnail: data-original (JSON: thumbnail.attribute=data-original)
-//           - [FIX] duration: .item .duration (подтверждено JSON)
-//           - [FIX] Поиск: /?q={query} (JSON: search.paramName=q)
-//           - [FIX] backslash unescape в cleanUrl (JSON: backslashEscaped=true)
-//           - [ADD] json:true → qualities() извлекает видео
-//   [1.0.0] Базовый парсер (устаревший)
+//   [1.2.0] Переписан под структуру p365 (эталон):
+//           - [FIX] Транспорт: window.AdultPlugin.networkRequest
+//           - [FIX] extractQualities: video_url на ptop содержит шаблон
+//                   {video_id}/{dir} — ПРОПУСКАЕМ его, ищем реальные URL:
+//                   1) <source src size> теги
+//                   2) og:video mp4
+//                   3) file: 'url' паттерн JW Player
+//                   4) прямые .mp4 ссылки в HTML
+//           - [FIX] qualities() → { qualities: {...} } строки URL
+//           - [FIX] parsePlaylist: DOMParser .item + data-original
+//           - [FIX] URL категорий: /category/{slug}/l/ (JSON)
+//           - [FIX] Пагинация: &page=N (JSON)
+//           - [FIX] Поиск: /?q={query} (JSON)
+//           - [FIX] routeView: NAME/cat/ как в p365
+//   [1.1.0] qualities опечатка + Worker fallback (устарело)
+//   [1.0.0] Базовый парсер
 // =============================================================
 
 (function () {
   'use strict';
 
-  var VERSION    = '1.1.0';
-  var NAME       = 'ptop';
-  var BASE_URL   = 'https://porntop.com';
-  // Worker из W137.js — замените на свой URL
-  var WORKER_URL = 'https://zonaproxy.777b737.workers.dev';
+  var VERSION = '1.2.0';
+  var NAME    = 'ptop';
+  var HOST    = 'https://porntop.com';
 
   // ----------------------------------------------------------
   // КАТЕГОРИИ
-  // JSON: url-паттерн = BASE_URL/category/{name}/l/
-  // Slug в JSON всегда "l" — реальный идентификатор в пути
+  // JSON: url = HOST/category/{name}/l/
   // ----------------------------------------------------------
   var CATEGORIES = [
-    { title: '💎 HD Video',         slug: 'hd' },
-    { title: '👩 Брюнетки',         slug: 'brunette' },
-    { title: '🍑 Большая жопа',     slug: 'big-butt' },
-    { title: '🍒 Сисястые',         slug: 'big-tits' },
-    { title: '👵 Милфы',            slug: 'milf' },
-    { title: '👅 Глубокий отсос',   slug: 'deep-throat' },
-    { title: '🎨 Тату',             slug: 'tattoos' },
-    { title: '👱 Блондинки',        slug: 'blonde' },
-    { title: '🌏 Азиатки',          slug: 'asian' },
-    { title: '🍆 Большой член',     slug: 'big-dick' },
+    { title: '💎 HD Video',        slug: 'hd'          },
+    { title: '👩 Брюнетки',        slug: 'brunette'    },
+    { title: '🍑 Большая жопа',    slug: 'big-butt'    },
+    { title: '🍒 Сисястые',        slug: 'big-tits'    },
+    { title: '👵 Милфы',           slug: 'milf'        },
+    { title: '👅 Глубокий отсос',  slug: 'deep-throat' },
+    { title: '🎨 Тату',            slug: 'tattoos'     },
+    { title: '👱 Блондинки',       slug: 'blonde'      },
+    { title: '🌏 Азиатки',         slug: 'asian'       },
+    { title: '🍆 Большой член',    slug: 'big-dick'    },
   ];
 
   // ----------------------------------------------------------
-  // HTTP-ЗАПРОС — прямой → Worker (fallback)
-  // [1.1.0] Worker автоматически добавляет Cookie: mature=1 через BYPASS_COOKIES
+  // ТРАНСПОРТ — идентично p365
+  // AdultPlugin.networkRequest передаёт Cookie: mature=1 через Worker
   // ----------------------------------------------------------
-  function ptopGet(url, onSuccess, onError) {
-    var workerUrl = WORKER_URL + '/?url=' + encodeURIComponent(url);
-
-    function tryDirect() {
-      var xhr = new XMLHttpRequest();
-      xhr.open('GET', url, true);
-      xhr.timeout = 15000;
-      xhr.setRequestHeader('Referer', 'https://denis-tikhonov.github.io/');
-      // [1.1.0] age gate: Cookie mature=1
-      xhr.setRequestHeader('Cookie', 'mature=1');
-      xhr.onreadystatechange = function () {
-        if (xhr.readyState !== 4) return;
-        if (xhr.status >= 200 && xhr.status < 300 && xhr.responseText) {
-          onSuccess(xhr.responseText);
-        } else {
-          console.log('[ptop] direct fail (' + xhr.status + '), trying worker...');
-          tryWorker();
-        }
-      };
-      xhr.ontimeout = function () { console.log('[ptop] direct timeout, trying worker...'); tryWorker(); };
-      xhr.onerror   = function () { console.log('[ptop] direct error, trying worker...');  tryWorker(); };
-      xhr.send();
+  function httpGet(url, success, error) {
+    if (window.AdultPlugin && typeof window.AdultPlugin.networkRequest === 'function') {
+      window.AdultPlugin.networkRequest(url, success, error);
+    } else {
+      fetch(url)
+        .then(function (r) { return r.text(); })
+        .then(success)
+        .catch(error);
     }
-
-    function tryWorker() {
-      var xhr = new XMLHttpRequest();
-      xhr.open('GET', workerUrl, true);
-      xhr.timeout = 18000;
-      // Worker сам добавляет mature=1 через BYPASS_COOKIES (W137 v1.3.8)
-      xhr.onreadystatechange = function () {
-        if (xhr.readyState !== 4) return;
-        if (xhr.status >= 200 && xhr.status < 300 && xhr.responseText) {
-          onSuccess(xhr.responseText);
-        } else {
-          onError('HTTP ' + xhr.status + ' (worker)');
-        }
-      };
-      xhr.ontimeout = function () { onError('Worker timeout'); };
-      xhr.onerror   = function () { onError('Worker network error'); };
-      xhr.send();
-    }
-
-    tryDirect();
   }
 
   // ----------------------------------------------------------
-  // УТИЛИТЫ
-  // [1.1.0] FIX: добавлен backslash unescape (JSON: backslashEscaped=true)
+  // ОЧИСТКА URL
+  // JSON: backslashEscaped=true, rootRelative=true
   // ----------------------------------------------------------
-  function cleanUrl(raw) {
-    if (!raw) return '';
-    var url = raw.trim();
-
-    // 1. Unescape backslash  [1.1.0 FIX]
-    url = url.replace(/\\\//g, '/');
-
-    // 2. Protocol-relative
-    if (url.indexOf('//') === 0) return 'https:' + url;
-
-    // 3. Root-relative
-    if (url.charAt(0) === '/' && url.charAt(1) !== '/') return BASE_URL + url;
-
-    // 4. Относительный
-    if (url.indexOf('http') !== 0) return BASE_URL + '/' + url;
-
-    return url;
+  function cleanUrl(url) {
+    if (!url) return '';
+    var u = url.replace(/\\/g, '');
+    if (u.indexOf('//') === 0)                      u = 'https:' + u;
+    if (u.charAt(0) === '/' && u.charAt(1) !== '/') u = HOST + u;
+    return u;
   }
 
   // ----------------------------------------------------------
-  // ПАРСИНГ КАРТОЧЕК
-  // JSON: cardSelector=".item"
-  //   title  → .item .title (strong)
-  //   link   → .item a[href]  | pattern /video/{id}/{slug}/
-  //   thumb  → .item img[data-original]
-  //   time   → .item .duration
-  // [1.1.0] DOMParser вместо regex + json:true
+  // ПАРСИНГ КАТАЛОГА
+  // JSON: cardSelector=".item", thumb=data-original, title=.title, link=a[href]
   // ----------------------------------------------------------
-  function parseList(html) {
-    var parser = new DOMParser();
-    var doc    = parser.parseFromString(html, 'text/html');
-    var items  = doc.querySelectorAll('.item');
-    var cards  = [];
+  function parsePlaylist(html) {
+    var results = [];
+    var doc     = new DOMParser().parseFromString(html, 'text/html');
+    var items   = doc.querySelectorAll('.item');
+    console.log('[ptop] parsePlaylist → .item найдено:', items.length);
 
     for (var i = 0; i < items.length; i++) {
-      var item   = items[i];
-      var linkEl = item.querySelector('a[href]');
+      var el     = items[i];
+      var linkEl = el.querySelector('a[href]');
       if (!linkEl) continue;
 
-      var link = cleanUrl(linkEl.getAttribute('href') || '');
-      if (!link) continue;
+      var href = cleanUrl(linkEl.getAttribute('href') || '');
+      if (!href) continue;
 
-      // [1.1.0] title: .title strong или textContent
-      var titleEl = item.querySelector('.title, strong');
-      var title   = titleEl ? titleEl.textContent.trim() : (linkEl.getAttribute('title') || '').trim();
-      // Убираем лишние пробелы/табы (JSON example содержит много \t)
-      title = title.replace(/[\t\n\r]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
-
-      // [1.1.0] thumbnail: data-original (JSON: thumbnail.attribute=data-original)
-      var imgEl = item.querySelector('img');
-      var thumb = '';
+      // JSON: thumbnail.attribute = data-original
+      var imgEl = el.querySelector('img');
+      var pic   = '';
       if (imgEl) {
-        thumb = cleanUrl(
+        pic = cleanUrl(
           imgEl.getAttribute('data-original') ||
           imgEl.getAttribute('data-src')      ||
           imgEl.getAttribute('src')           || ''
         );
       }
 
-      // [1.1.0] duration: .duration
-      var timeEl = item.querySelector('.duration, .time');
-      var time   = timeEl ? timeEl.textContent.trim() : '';
+      // JSON: title selector = .item .title (strong)
+      var titleEl = el.querySelector('.title, strong');
+      var name    = (titleEl ? titleEl.textContent : (linkEl.getAttribute('title') || linkEl.textContent))
+        .replace(/[\t\n\r]+/g, ' ').replace(/\s{2,}/g, ' ').trim() || 'Video';
 
-      cards.push({
-        name             : title || 'Video',
-        video            : link,
-        picture          : thumb,
-        preview          : thumb,
-        background_image : thumb,
-        img              : thumb,
-        poster           : thumb,
-        quality          : 'HD',
-        time             : time,
-        // [1.1.0] json:true — qualities() извлечёт MP4
-        json             : true,
-        source           : NAME,
+      var durEl = el.querySelector('.duration, .time');
+      var time  = durEl ? durEl.textContent.trim() : '';
+
+      results.push({
+        name:             name,
+        video:            href,
+        picture:          pic,
+        img:              pic,
+        poster:           pic,
+        background_image: pic,
+        time:             time,
+        quality:          'HD',
+        json:             true,
+        source:           NAME,
       });
     }
 
-    return cards;
+    console.log('[ptop] parsePlaylist → карточек:', results.length);
+    return results;
   }
 
   // ----------------------------------------------------------
-  // ПАГИНАЦИЯ
-  // JSON: pagination.pattern = "&page={N}"
+  // ИЗВЛЕЧЕНИЕ КАЧЕСТВ
+  //
+  // ВАЖНО: на porntop.com video_url в kt_player содержит ШАБЛОН:
+  //   video_url: 'https://porntop.com/video/{video_id}/{dir}/?r=1'
+  // Это заглушка — реального URL там нет.
+  //
+  // Реальные источники ищем в таком порядке:
+  //   1) <source src size> или <source src label> — прямые mp4
+  //   2) og:video content="...mp4"
+  //   3) JW Player: file: 'https://...mp4'
+  //   4) Любой прямой https://...mp4 в HTML
   // ----------------------------------------------------------
-  function addPage(url, page) {
-    if (page <= 1) return url;
-    var sep = url.indexOf('?') > -1 ? '&' : '?';
-    return url + sep + 'page=' + page;
-  }
+  function extractQualities(html) {
+    var q = {};
 
-  function detectTotalPages(html) {
-    var m = html.match(/[?&]page=(\d+)/g);
-    if (!m || !m.length) return 10;
-    var max = 1;
-    m.forEach(function (s) {
-      var n = parseInt(s.replace(/[^0-9]/g, ''), 10);
-      if (n > max) max = n;
-    });
-    return Math.min(max, 50);
-  }
+    // Стратегия 1а: <source src="..." size="480">
+    var re1 = /<source[^>]+src="([^"]+)"[^>]+size="([^"]+)"/gi;
+    var re2 = /<source[^>]+size="([^"]+)"[^>]+src="([^"]+)"/gi;
+    var m;
+    while ((m = re1.exec(html)) !== null) {
+      if (m[2] === 'preview') continue;
+      if (m[1].indexOf('.mp4') === -1) continue;
+      q[m[2] + 'p'] = cleanUrl(m[1]);
+      console.log('[ptop] <source> size=' + m[2] + ':', m[1].substring(0, 80));
+    }
+    if (!Object.keys(q).length) {
+      while ((m = re2.exec(html)) !== null) {
+        if (m[1] === 'preview') continue;
+        if (m[2].indexOf('.mp4') === -1) continue;
+        q[m[1] + 'p'] = cleanUrl(m[2]);
+        console.log('[ptop] <source> rev size=' + m[1] + ':', m[2].substring(0, 80));
+      }
+    }
 
-  // ----------------------------------------------------------
-  // ИЗВЛЕЧЕНИЕ ВИДЕО
-  // JSON: jsConfigs kt_player, hint = video_url[:=]['"]...['"]
-  // ----------------------------------------------------------
-  function extractVideoUrls(html) {
-    var sources = {};
+    // Стратегия 1б: <source src="..." label="480p">
+    if (!Object.keys(q).length) {
+      var rl1 = /<source[^>]+src="([^"]+)"[^>]+label="([^"]+)"/gi;
+      var rl2 = /<source[^>]+label="([^"]+)"[^>]+src="([^"]+)"/gi;
+      while ((m = rl1.exec(html)) !== null) {
+        if (m[1].indexOf('.mp4') !== -1) q[m[2]] = cleanUrl(m[1]);
+      }
+      if (!Object.keys(q).length) {
+        while ((m = rl2.exec(html)) !== null) {
+          if (m[2].indexOf('.mp4') !== -1) q[m[1]] = cleanUrl(m[2]);
+        }
+      }
+    }
 
-    var vm = html.match(/video_url\s*[:=]\s*['"]([^'"]+)['"]/);
-    if (vm) sources['480p'] = cleanUrl(vm[1]);
+    // Стратегия 2: og:video
+    if (!Object.keys(q).length) {
+      var og = html.match(/property="og:video"[^>]+content="([^"]+\.mp4[^"]*)"/i)
+            || html.match(/content="([^"]+\.mp4[^"]*)"[^>]+property="og:video"/i);
+      if (og) {
+        var ogUrl = cleanUrl(og[1]);
+        var ogQ   = ogUrl.match(/_(\d+)\.mp4/);
+        var label = ogQ ? ogQ[1] + 'p' : 'HD';
+        q[label]  = ogUrl;
+        console.log('[ptop] og:video ' + label + ':', ogUrl.substring(0, 80));
+      }
+    }
 
-    var vm2 = html.match(/video_alt_url\s*[:=]\s*['"]([^'"]+)['"]/);
-    if (vm2) sources['720p'] = cleanUrl(vm2[1]);
-
-    // JW Player fallback
-    if (!Object.keys(sources).length) {
+    // Стратегия 3: JW Player — file: 'url'
+    if (!Object.keys(q).length) {
       var jw = html.match(/file\s*:\s*['"]([^'"]+\.mp4[^'"]*)['"]/i);
-      if (jw) sources['HD'] = cleanUrl(jw[1]);
+      if (jw) {
+        q['HD'] = cleanUrl(jw[1]);
+        console.log('[ptop] JW file:', jw[1].substring(0, 80));
+      }
     }
 
-    // source tag fallback
-    if (!Object.keys(sources).length) {
-      var src = html.match(/<source[^>]*src="([^"]+)"/i);
-      if (src) sources['HD'] = cleanUrl(src[1]);
+    // Стратегия 4: любой прямой https://...mp4 (НЕ шаблон с {})
+    if (!Object.keys(q).length) {
+      var allMp4 = html.match(/https?:\/\/[^'"<>\s]+\.mp4[^'"<>\s]*/gi);
+      if (allMp4) {
+        for (var i = 0; i < allMp4.length; i++) {
+          var u = allMp4[i];
+          // Пропускаем шаблоны с фигурными скобками
+          if (u.indexOf('{') !== -1) continue;
+          var qm = u.match(/_(\d+)\.mp4/);
+          var ql = qm ? qm[1] + 'p' : ('HD' + i);
+          if (!q[ql]) {
+            q[ql] = cleanUrl(u);
+            console.log('[ptop] mp4 fallback ' + ql + ':', u.substring(0, 80));
+          }
+        }
+      }
     }
 
-    return sources;
+    return q;
   }
 
   // ----------------------------------------------------------
-  // МЕНЮ
-  // [1.1.0] FIX: URL категорий = BASE_URL/category/{slug}/l/
+  // URL BUILDER
+  // JSON: search=/?q=, category=/category/{slug}/l/, page=&page=N
   // ----------------------------------------------------------
+  function buildUrl(type, value, page) {
+    var url = HOST;
+    page    = parseInt(page, 10) || 1;
+
+    if (type === 'search') {
+      url += '/?q=' + encodeURIComponent(value);
+      if (page > 1) url += '&page=' + page;
+    } else if (type === 'cat') {
+      // JSON: /category/{slug}/l/
+      url += '/category/' + value + '/l/';
+      if (page > 1) url += '?page=' + page;
+    } else {
+      if (page > 1) url += '/?page=' + page;
+    }
+    return url;
+  }
+
   function buildMenu() {
     return [
       { title: '🔍 Поиск',     search_on: true, playlist_url: NAME + '/search/' },
       { title: '🔥 Популярное', playlist_url: NAME + '/popular' },
       {
-        title        : '📂 Категории',
-        playlist_url : 'submenu',
-        submenu      : CATEGORIES.map(function (c) {
-          return { title: c.title, playlist_url: NAME + '/category/' + c.slug };
+        title:        '📂 Категории',
+        playlist_url: 'submenu',
+        submenu:      CATEGORIES.map(function (c) {
+          return { title: c.title, playlist_url: NAME + '/cat/' + c.slug };
         }),
       },
     ];
   }
 
   // ----------------------------------------------------------
-  // РОУТИНГ
+  // РОУТИНГ — идентично p365
   // ----------------------------------------------------------
   function routeView(url, page, success, error) {
-    var searchPrefix   = NAME + '/search/';
-    var categoryPrefix = NAME + '/category/';
+    var fetchUrl;
+    var searchMatch = url.match(/[?&]search=([^&]*)/);
 
-    // Поиск через фильтр: ptop/search/?search=query
-    var sm = url.match(/[?&]search=([^&]*)/);
-    if (sm) {
-      var q = decodeURIComponent(sm[1]).trim();
-      return fetchPage(addPage(BASE_URL + '/?q=' + encodeURIComponent(q), page), success, error);
+    if (searchMatch) {
+      fetchUrl = buildUrl('search', decodeURIComponent(searchMatch[1]), page);
+    } else if (url.indexOf(NAME + '/cat/') === 0) {
+      var cat = url.replace(NAME + '/cat/', '').split('?')[0];
+      fetchUrl = buildUrl('cat', cat, page);
+    } else if (url.indexOf(NAME + '/search/') === 0) {
+      var q = decodeURIComponent(url.replace(NAME + '/search/', '').split('?')[0]).trim();
+      fetchUrl = buildUrl('search', q, page);
+    } else {
+      fetchUrl = buildUrl('main', null, page);
     }
 
-    // [1.1.0] FIX: категория → BASE_URL/category/{slug}/l/?page=N
-    if (url.indexOf(categoryPrefix) === 0) {
-      var slug    = url.replace(categoryPrefix, '').split('?')[0].trim();
-      var catBase = BASE_URL + '/category/' + slug + '/l/';
-      return fetchPage(addPage(catBase, page), success, error);
-    }
-
-    // Поиск через путь: ptop/search/query
-    if (url.indexOf(searchPrefix) === 0) {
-      var rawQ = decodeURIComponent(url.replace(searchPrefix, '').split('?')[0]).trim();
-      if (rawQ) return fetchPage(addPage(BASE_URL + '/?q=' + encodeURIComponent(rawQ), page), success, error);
-    }
-
-    // Главная / популярное
-    fetchPage(addPage(BASE_URL, page), success, error);
-  }
-
-  function fetchPage(fullUrl, success, error) {
-    console.log('[ptop ' + VERSION + '] fetch → ' + fullUrl);
-    ptopGet(fullUrl, function (html) {
-      var cards = parseList(html);
-      var total = detectTotalPages(html);
-      if (total <= 1 && cards.length > 0) total = 10;
+    console.log('[ptop] routeView →', fetchUrl);
+    httpGet(fetchUrl, function (html) {
+      console.log('[ptop] html длина:', html.length);
+      var results = parsePlaylist(html);
+      if (!results.length) { error('Контент не найден'); return; }
       success({
-        results     : cards,
-        collection  : true,
-        total_pages : total,
-        menu        : buildMenu(),
+        results:     results,
+        collection:  true,
+        total_pages: page + 1,
+        menu:        buildMenu(),
       });
     }, error);
   }
@@ -299,59 +293,68 @@
   var PtopParser = {
 
     main: function (params, success, error) {
-      fetchPage(BASE_URL, success, error);
+      routeView(NAME + '/popular', 1, success, error);
     },
 
     view: function (params, success, error) {
-      var page = parseInt(params.page, 10) || 1;
-      var url  = params.url || (NAME + '/popular');
-      routeView(url, page, success, error);
+      routeView(params.url || NAME, params.page || 1, success, error);
     },
 
     search: function (params, success, error) {
       var query = (params.query || '').trim();
-      if (!query) { success({ title: '', results: [], collection: true }); return; }
-      ptopGet(BASE_URL + '/?q=' + encodeURIComponent(query), function (html) {
-        success({ title: 'PornTop: ' + query, results: parseList(html), collection: true });
+      httpGet(buildUrl('search', query, 1), function (html) {
+        var results = parsePlaylist(html);
+        success({
+          title:       'PornTop: ' + query,
+          results:     results,
+          collection:  true,
+          total_pages: results.length >= 20 ? 2 : 1,
+        });
       }, error);
     },
 
-    // [1.1.0] qualities — извлекает MP4 со страницы видео
     qualities: function (videoPageUrl, success, error) {
-      ptopGet(videoPageUrl, function (html) {
-        var sources = extractVideoUrls(html);
-        if (Object.keys(sources).length > 0) {
-          success({ qualities: sources });
+      console.log('[ptop] qualities() →', videoPageUrl);
+      httpGet(videoPageUrl, function (html) {
+        console.log('[ptop] qualities() html длина:', html.length);
+        if (!html || html.length < 500) { error('html < 500'); return; }
+
+        var found = extractQualities(html);
+        var keys  = Object.keys(found);
+        console.log('[ptop] qualities() найдено:', keys.length, JSON.stringify(keys));
+
+        if (keys.length > 0) {
+          success({ qualities: found });
         } else {
-          error('Video not found');
+          // Диагностика для следующего дебага
+          console.warn('[ptop] <source>:',   (html.match(/<source/gi)   || []).length);
+          console.warn('[ptop] og:video:',   (html.match(/og:video/gi)  || []).length);
+          console.warn('[ptop] .mp4:',       (html.match(/\.mp4/gi)     || []).length);
+          console.warn('[ptop] video_url:',  (html.match(/video_url/gi) || []).length);
+          console.warn('[ptop] {video_id}:', (html.match(/video_id/gi)  || []).length);
+          error('Видео не найдено');
         }
       }, error);
     },
   };
 
   // ----------------------------------------------------------
-  // РЕГИСТРАЦИЯ
+  // РЕГИСТРАЦИЯ — идентично p365
   // ----------------------------------------------------------
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, PtopParser);
       console.log('[ptop] v' + VERSION + ' зарегистрирован');
-      try {
-        setTimeout(function () {
-          Lampa.Noty.show('PornTop [ptop] v' + VERSION + ' подключён', { time: 2500 });
-        }, 600);
-      } catch (e) {}
       return true;
     }
     return false;
   }
 
   if (!tryRegister()) {
-    var _elapsed = 0;
-    var _poll = setInterval(function () {
-      _elapsed += 100;
-      if (tryRegister() || _elapsed >= 10000) clearInterval(_poll);
-    }, 100);
+    var poll = setInterval(function () {
+      if (tryRegister()) clearInterval(poll);
+    }, 200);
+    setTimeout(function () { clearInterval(poll); }, 5000);
   }
 
 })();
