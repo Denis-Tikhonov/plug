@@ -1,35 +1,21 @@
 // =============================================================
 // hdtub.js — HDtube Parser для AdultJS (Lampa)
 // =============================================================
-// Версия  : 1.4.0 (VARIANT B: Native Proxy Pass-through)
+// Версия  : 1.4.0
+// Изменения:
+//   [1.4.0] КРИТИЧЕСКИЙ FIX cleanUrl():
+//           Лог показывал: [hdtub] 720p: function/0/https://...
+//           → cleanUrl НЕ срезал префикс, потому что video_url в HTML
+//             содержит ОТНОСИТЕЛЬНЫЙ путь: 'function/0/https://...'
+//             (без ведущего https://host/), а regex v1.3.0 требовал
+//             полный абсолютный URL как входные данные.
 //
-// Вариант B: Префикс /function/N/ НЕ срезается — это встроенный
-//            прокси самого hdtube.porn, который подставляет
-//            Referer и раздаёт файл.
-//            URL очищается от мусора (backslash, trailing /,
-//            query string) но структура /function/N/ сохраняется.
+//           Исправление: cleanUrl теперь проверяет ДВА случая:
+//           A) Абсолютный:  https://host/function/0/https://... → срезаем
+//           B) Относительный: function/0/https://...            → срезаем напрямую
 //
-//   Плюс:  Нет нагрузки на Cloudflare Worker — видео идёт
-//          напрямую через CDN самого сайта.
-//   Минус:  Плеер получает URL с вложенным протоколом:
-//            https://www.hdtube.porn/function/0/https://...
-//           Некоторые плееры Lampa могут не распознать формат.
-//           Если Lampa не поддерживает такой URL — используйте
-//           Вариант A (Worker Proxy).
-//
-// [1.4.0] FIX:
-//         - [FIX] cleanUrl(): НЕ срезаем /function/N/ — это
-//           серверный прокси, решающий Referer-проблему.
-//         - [FIX] cleanUrl(): убираем trailing slash и query
-//           string (/?br=3971) — некоторые плееры ломаются
-//           на trailing slash в mp4 URL.
-//         - [FIX] extractQualities: cleanUrl без срезки prefix.
-//
-// [1.3.0] FIX (отменён в этом варианте):
-//         - Раньше cleanUrl срезал /function/0/, что ломало
-//           Referer-протекцию → 403 на прямых get_file URL.
-//
-// [1.2.0] Переписан под структуру p365
+//   [1.3.0] Срезание function/N/ (работало только для абсолютных URL)
+//   [1.2.0] Переписан под структуру p365
 // =============================================================
 
 (function () {
@@ -129,36 +115,41 @@
   }
 
   // ----------------------------------------------------------
-  // [1.4.0 VARIANT B] ОЧИСТКА URL
+  // ОЧИСТКА URL
   //
-  // НЕ срезаем /function/N/ — это серверный прокси hdtube.porn,
-  // который автоматически подставляет заголовок Referer и
-  // проксирует запрос к CDN. Без него get_file URL отдают 403.
+  // [1.4.0] FIX: function/0/ встречается в ДВУХ формах:
   //
-  // Что делаем:
-  //   1. Убираем backslash-экранирование
-  //   2. Убираем trailing query string (/?br=3971)
-  //   3. Убираем trailing slash (/)
-  //   4. Нормализуем protocol-relative и root-relative URL
+  //   Форма A (абсолютная — из Worker/страницы):
+  //     "https://www.hdtube.porn/function/0/https://www.hdtube.porn/get_file/..."
   //
-  // Пример:
-  //   Было: https://www.hdtube.porn/function/0/https://www.hdtube.porn/get_file/6/.../720p.mp4/?br=3971
-  //   Стало: https://www.hdtube.porn/function/0/https://www.hdtube.porn/get_file/6/.../720p.mp4
+  //   Форма B (относительная — прямо из video_url в JS):
+  //     "function/0/https://www.hdtube.porn/get_file/..."
+  //
+  //   Оба случая → нужно вытащить вложенный https://
   // ----------------------------------------------------------
-  function cleanUrl(url) {
-    if (!url) return '';
-    var u = url.replace(/\\/g, '');
+  function cleanUrl(raw) {
+    if (!raw) return '';
+    var u = raw.replace(/\\/g, '').trim();
 
-    // НЕ срезаем /function/N/ — это прокси, решающий Referer
-
-    // Убираем trailing query string: /?br=3971 → /
-    u = u.replace(/\/\?.*$/, '');
-
-    // Убираем trailing slash
-    if (u.charAt(u.length - 1) === '/' && u.indexOf('/function/') !== -1) {
-      u = u.replace(/\/+$/, '');
+    // Форма A: абсолютный URL с /function/N/ внутри
+    // https://host/function/0/https://...
+    var absMatch = u.match(/^https?:\/\/[^/]+\/function\/\d+\/(https?:\/\/.+)$/);
+    if (absMatch) {
+      u = absMatch[1];
+      console.log('[hdtub] cleanUrl A (abs):', u.substring(0, 100));
+      return u;
     }
 
+    // Форма B: относительный путь function/N/https://...
+    // Может начинаться как "function/0/https://" или "/function/0/https://"
+    var relMatch = u.match(/^\/??function\/\d+\/(https?:\/\/.+)$/);
+    if (relMatch) {
+      u = relMatch[1];
+      console.log('[hdtub] cleanUrl B (rel):', u.substring(0, 100));
+      return u;
+    }
+
+    // Стандартная нормализация
     if (u.indexOf('//') === 0)                      u = 'https:' + u;
     if (u.charAt(0) === '/' && u.charAt(1) !== '/') u = HOST + u;
     return u;
@@ -207,12 +198,11 @@
   // ----------------------------------------------------------
   // ИЗВЛЕЧЕНИЕ КАЧЕСТВ
   // JSON: kt_player, video_url=720p, video_alt_url=480p
-  // [1.4.0] cleanUrl НЕ срезает /function/N/ — оставляем прокси
+  // cleanUrl() теперь корректно срезает function/0/ в обеих формах
   // ----------------------------------------------------------
   function extractQualities(html) {
     var q = {};
 
-    // Стратегия 1: kt_player (основная для hdtube)
     var m720 = html.match(/video_url\s*[:=]\s*['"]([^'"]+)['"]/);
     if (m720) {
       q['720p'] = cleanUrl(m720[1]);
@@ -225,7 +215,7 @@
       console.log('[hdtub] 480p:', q['480p'].substring(0, 100));
     }
 
-    // Стратегия 2: <source size>
+    // <source size> fallback
     if (!Object.keys(q).length) {
       var re1 = /<source[^>]+src="([^"]+)"[^>]+size="([^"]+)"/gi;
       var re2 = /<source[^>]+size="([^"]+)"[^>]+src="([^"]+)"/gi;
@@ -240,7 +230,7 @@
       }
     }
 
-    // Стратегия 3: og:video
+    // og:video fallback
     if (!Object.keys(q).length) {
       var og = html.match(/property="og:video"[^>]+content="([^"]+\.mp4[^"]*)"/i)
             || html.match(/content="([^"]+\.mp4[^"]*)"[^>]+property="og:video"/i);
@@ -248,18 +238,6 @@
         var ogUrl = cleanUrl(og[1]);
         var ogQ   = ogUrl.match(/_(\d+)\.mp4/);
         q[ogQ ? ogQ[1] + 'p' : 'HD'] = ogUrl;
-      }
-    }
-
-    // Fallback: get_file URL
-    if (!Object.keys(q).length) {
-      var gfRe = /(https?:\/\/[^"'\s]+\/get_file\/[^"'\s]+\.mp4[^"'\s]*)/g;
-      var gf;
-      while ((gf = gfRe.exec(html)) !== null) {
-        if (gf[1].indexOf('preview') !== -1) continue;
-        var gfQ = gf[1].match(/_(\d+)\.mp4/);
-        q[gfQ ? gfQ[1] + 'p' : 'HD'] = cleanUrl(gf[1]);
-        break;
       }
     }
 
@@ -330,24 +308,11 @@
     main: function (p, s, e) { routeView(NAME + '/new', 1, s, e); },
     view: function (p, s, e) { routeView(p.url || NAME, p.page || 1, s, e); },
     search: function (p, s, e) {
-      var query = (p.query || '').trim();
-      httpGet(buildUrl('search', query, p.page || 1), function (html) {
-        s({ title: 'HDtube: ' + query, results: parsePlaylist(html), collection: true, total_pages: 2 });
+      var q = (p.query || '').trim();
+      httpGet(buildUrl('search', q, p.page || 1), function (html) {
+        s({ title: 'HDtube: ' + q, results: parsePlaylist(html), collection: true, total_pages: 2 });
       }, e);
     },
-
-    // ----------------------------------------------------------
-    // [1.4.0 VARIANT B] qualities — без Worker, через native proxy
-    //
-    // URL передаётся плееру ВМЕСТЕ с /function/N/ прокси.
-    // Сайт hdtube.porn сам:
-    //   - подставляет заголовок Referer
-    //   - проксирует запрос к своему CDN
-    //   - отдаёт mp4 поток
-    //
-    // Если плеер не воспроизведёт такой URL (вложенный https://),
-    // переключитесь на Вариант A (Worker Proxy).
-    // ----------------------------------------------------------
     qualities: function (videoPageUrl, success, error) {
       console.log('[hdtub] qualities() →', videoPageUrl);
       httpGet(videoPageUrl, function (html) {
@@ -363,7 +328,7 @@
         } else {
           console.warn('[hdtub] video_url:', (html.match(/video_url/gi)  || []).length);
           console.warn('[hdtub] get_file:',  (html.match(/get_file/gi)   || []).length);
-          console.warn('[hdtub] .mp4:',      (html.match(/\.mp4/gi)      || []).length);
+          console.warn('[hdtub] function/0:',(html.match(/function\/0/gi)|| []).length);
           error('Видео не найдено');
         }
       }, error);
@@ -376,7 +341,7 @@
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, HdtubParser);
-      console.log('[hdtub] v' + VERSION + ' (Native Proxy) зарегистрирован');
+      console.log('[hdtub] v' + VERSION + ' зарегистрирован');
       return true;
     }
     return false;
