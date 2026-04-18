@@ -1,24 +1,23 @@
 // =============================================================
 // hdtub.js — HDtube Parser для AdultJS (Lampa)
 // =============================================================
-// Версия  : 1.2.0
+// Версия  : 1.3.0
 // Изменения:
-//   [1.2.0] Переписан под структуру p365 (эталон):
-//           - [FIX] Транспорт: window.AdultPlugin.networkRequest
-//                   Worker встроен в AdultPlugin — WORKER_URL не нужен
-//           - [FIX] qualities() → { qualities: {...} } строки URL
-//           - [FIX] extractQualities: 3 стратегии (kt_player / source / og:video)
-//           - [FIX] parsePlaylist: DOMParser .item (JSON: cardSelector)
-//           - [FIX] buildUrl: search=/?q=, cat=/?c=, page=&page=N
-//           - [FIX] routeView: NAME/cat/ как в p365
-//   [1.1.0] XHR прямой + Worker fallback (устарело)
+//   [1.3.0] КРИТИЧЕСКИЙ FIX:
+//           - [FIX] extractQualities: URL вида "function/0/https://..."
+//                   → срезаем префикс "function/0/" → получаем чистый https://
+//                   (скрин: hdtub qualities() нашёл 2 ["720p","480p"] но плеер
+//                   говорит "нет подходящего плеера" — именно из-за этого префикса)
+//           - [FIX] cleanUrl: добавлена обрезка "function/0/" и "function/[0-9]+/"
+//   [1.2.0] Переписан под структуру p365
+//   [1.1.0] XHR + Worker fallback
 //   [1.0.0] Базовый парсер
 // =============================================================
 
 (function () {
   'use strict';
 
-  var VERSION = '1.2.0';
+  var VERSION = '1.3.0';
   var NAME    = 'hdtub';
   var HOST    = 'https://www.hdtube.porn';
 
@@ -101,28 +100,39 @@
   ];
 
   // ----------------------------------------------------------
-  // ТРАНСПОРТ — идентично p365
+  // ТРАНСПОРТ
   // ----------------------------------------------------------
   function httpGet(url, success, error) {
     if (window.AdultPlugin && typeof window.AdultPlugin.networkRequest === 'function') {
       window.AdultPlugin.networkRequest(url, success, error);
     } else {
-      fetch(url)
-        .then(function (r) { return r.text(); })
-        .then(success)
-        .catch(error);
+      fetch(url).then(function (r) { return r.text(); }).then(success).catch(error);
     }
   }
 
   // ----------------------------------------------------------
   // ОЧИСТКА URL
-  // JSON: backslashEscaped=true, protocolRelative=true
+  // [1.3.0] ГЛАВНЫЙ FIX: срезаем "function/N/" прокси-префикс hdtube
+  //
+  // hdtube.porn оборачивает CDN-ссылки через свой endpoint:
+  //   https://www.hdtube.porn/function/0/https://www.hdtube.porn/get_file/...
+  //   ↓ после очистки:
+  //   https://www.hdtube.porn/get_file/6/.../68913_720p.mp4
   // ----------------------------------------------------------
   function cleanUrl(url) {
     if (!url) return '';
     var u = url.replace(/\\/g, '');
-    if (u.indexOf('//') === 0)                              u = 'https:' + u;
-    if (u.charAt(0) === '/' && u.charAt(1) !== '/')         u = HOST + u;
+
+    // [1.3.0] Убираем "function/N/" прокси-обёртку hdtube
+    // Паттерн: https://www.hdtube.porn/function/0/https://...
+    var funcMatch = u.match(/^https?:\/\/[^/]+\/function\/\d+\/(https?:\/\/.+)$/);
+    if (funcMatch) {
+      u = funcMatch[1];
+      console.log('[hdtub] cleanUrl: срезан function/N/ → ' + u.substring(0, 80));
+    }
+
+    if (u.indexOf('//') === 0)                      u = 'https:' + u;
+    if (u.charAt(0) === '/' && u.charAt(1) !== '/') u = HOST + u;
     return u;
   }
 
@@ -134,7 +144,7 @@
     var results = [];
     var doc     = new DOMParser().parseFromString(html, 'text/html');
     var items   = doc.querySelectorAll('.item');
-    console.log('[hdtub] parsePlaylist → .item найдено:', items.length);
+    console.log('[hdtub] parsePlaylist → .item:', items.length);
 
     for (var i = 0; i < items.length; i++) {
       var el     = items[i];
@@ -152,20 +162,13 @@
       var titleEl = el.querySelector('a[title]');
       var name    = (titleEl
         ? (titleEl.getAttribute('title') || titleEl.textContent)
-        : (linkEl.getAttribute('title') || linkEl.textContent)
+        : (linkEl.getAttribute('title')  || linkEl.textContent)
       ).replace(/\s+/g, ' ').trim() || 'Video';
 
       results.push({
-        name:             name,
-        video:            href,
-        picture:          pic,
-        img:              pic,
-        poster:           pic,
-        background_image: pic,
-        time:             '',
-        quality:          'HD',
-        json:             true,
-        source:           NAME,
+        name: name, video: href,
+        picture: pic, img: pic, poster: pic, background_image: pic,
+        time: '', quality: 'HD', json: true, source: NAME,
       });
     }
 
@@ -174,18 +177,25 @@
   }
 
   // ----------------------------------------------------------
-  // ИЗВЛЕЧЕНИЕ КАЧЕСТВ — 3 стратегии
+  // ИЗВЛЕЧЕНИЕ КАЧЕСТВ
   // JSON: kt_player, video_url=720p, video_alt_url=480p
+  // [1.3.0] cleanUrl() теперь срезает function/0/ → URL рабочий
   // ----------------------------------------------------------
   function extractQualities(html) {
     var q = {};
 
-    // Стратегия 1: kt_player
+    // Стратегия 1: kt_player (основная для hdtube)
     var m720 = html.match(/video_url\s*[:=]\s*['"]([^'"]+)['"]/);
-    if (m720) { q['720p'] = cleanUrl(m720[1]); console.log('[hdtub] 720p:', q['720p'].substring(0,80)); }
+    if (m720) {
+      q['720p'] = cleanUrl(m720[1]);
+      console.log('[hdtub] 720p:', q['720p'].substring(0, 100));
+    }
 
     var m480 = html.match(/video_alt_url\s*[:=]\s*['"]([^'"]+)['"]/);
-    if (m480) { q['480p'] = cleanUrl(m480[1]); console.log('[hdtub] 480p:', q['480p'].substring(0,80)); }
+    if (m480) {
+      q['480p'] = cleanUrl(m480[1]);
+      console.log('[hdtub] 480p:', q['480p'].substring(0, 100));
+    }
 
     // Стратегия 2: <source size>
     if (!Object.keys(q).length) {
@@ -213,10 +223,16 @@
       }
     }
 
-    // Fallback: первый .mp4
+    // Fallback: get_file URL
     if (!Object.keys(q).length) {
-      var mp4 = html.match(/['"]([^'"]+\.mp4[^'"]*)['"]/);
-      if (mp4) q['HD'] = cleanUrl(mp4[1]);
+      var gfRe = /(https?:\/\/[^"'\s]+\/get_file\/[^"'\s]+\.mp4[^"'\s]*)/g;
+      var gf;
+      while ((gf = gfRe.exec(html)) !== null) {
+        if (gf[1].indexOf('preview') !== -1) continue;
+        var gfQ = gf[1].match(/_(\d+)\.mp4/);
+        q[gfQ ? gfQ[1] + 'p' : 'HD'] = cleanUrl(gf[1]);
+        break;
+      }
     }
 
     return q;
@@ -224,12 +240,10 @@
 
   // ----------------------------------------------------------
   // URL BUILDER
-  // JSON: search=/?q=, category=/?c=, pagination=&page=N
   // ----------------------------------------------------------
   function buildUrl(type, value, page) {
     var url = HOST;
     page    = parseInt(page, 10) || 1;
-
     if (type === 'search') {
       url += '/?q=' + encodeURIComponent(value);
       if (page > 1) url += '&page=' + page;
@@ -247,9 +261,8 @@
       { title: '🔍 Поиск', search_on: true, playlist_url: NAME + '/search/' },
       { title: '🔥 Новое',  playlist_url: NAME + '/new' },
       {
-        title:        '📂 Категории',
-        playlist_url: 'submenu',
-        submenu:      CATEGORIES.map(function (c) {
+        title: '📂 Категории', playlist_url: 'submenu',
+        submenu: CATEGORIES.map(function (c) {
           return { title: c.title, playlist_url: NAME + '/cat/' + c.slug };
         }),
       },
@@ -257,17 +270,15 @@
   }
 
   // ----------------------------------------------------------
-  // РОУТИНГ — идентично p365
+  // РОУТИНГ
   // ----------------------------------------------------------
   function routeView(url, page, success, error) {
     var fetchUrl;
-    var searchMatch = url.match(/[?&]search=([^&]*)/);
-
-    if (searchMatch) {
-      fetchUrl = buildUrl('search', decodeURIComponent(searchMatch[1]), page);
+    var sm = url.match(/[?&]search=([^&]*)/);
+    if (sm) {
+      fetchUrl = buildUrl('search', decodeURIComponent(sm[1]), page);
     } else if (url.indexOf(NAME + '/cat/') === 0) {
-      var cat = url.replace(NAME + '/cat/', '').split('?')[0];
-      fetchUrl = buildUrl('cat', cat, page);
+      fetchUrl = buildUrl('cat', url.replace(NAME + '/cat/', '').split('?')[0], page);
     } else if (url.indexOf(NAME + '/search/') === 0) {
       var q = decodeURIComponent(url.replace(NAME + '/search/', '').split('?')[0]).trim();
       fetchUrl = buildUrl('search', q, page);
@@ -280,12 +291,7 @@
       console.log('[hdtub] html длина:', html.length);
       var results = parsePlaylist(html);
       if (!results.length) { error('Контент не найден'); return; }
-      success({
-        results:     results,
-        collection:  true,
-        total_pages: page + 1,
-        menu:        buildMenu(),
-      });
+      success({ results: results, collection: true, total_pages: page + 1, menu: buildMenu() });
     }, error);
   }
 
@@ -293,28 +299,14 @@
   // ПАРСЕР API
   // ----------------------------------------------------------
   var HdtubParser = {
-
-    main: function (params, success, error) {
-      routeView(NAME + '/new', 1, success, error);
+    main: function (p, s, e) { routeView(NAME + '/new', 1, s, e); },
+    view: function (p, s, e) { routeView(p.url || NAME, p.page || 1, s, e); },
+    search: function (p, s, e) {
+      var query = (p.query || '').trim();
+      httpGet(buildUrl('search', query, p.page || 1), function (html) {
+        s({ title: 'HDtube: ' + query, results: parsePlaylist(html), collection: true, total_pages: 2 });
+      }, e);
     },
-
-    view: function (params, success, error) {
-      routeView(params.url || NAME, params.page || 1, success, error);
-    },
-
-    search: function (params, success, error) {
-      var query = (params.query || '').trim();
-      httpGet(buildUrl('search', query, params.page || 1), function (html) {
-        var results = parsePlaylist(html);
-        success({
-          title:       'HDtube: ' + query,
-          results:     results,
-          collection:  true,
-          total_pages: results.length >= 20 ? 2 : 1,
-        });
-      }, error);
-    },
-
     qualities: function (videoPageUrl, success, error) {
       console.log('[hdtub] qualities() →', videoPageUrl);
       httpGet(videoPageUrl, function (html) {
@@ -329,7 +321,7 @@
           success({ qualities: found });
         } else {
           console.warn('[hdtub] video_url:', (html.match(/video_url/gi)  || []).length);
-          console.warn('[hdtub] <source>:',  (html.match(/<source/gi)    || []).length);
+          console.warn('[hdtub] get_file:',  (html.match(/get_file/gi)   || []).length);
           console.warn('[hdtub] .mp4:',      (html.match(/\.mp4/gi)      || []).length);
           error('Видео не найдено');
         }
@@ -338,7 +330,7 @@
   };
 
   // ----------------------------------------------------------
-  // РЕГИСТРАЦИЯ — идентично p365
+  // РЕГИСТРАЦИЯ
   // ----------------------------------------------------------
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
@@ -348,11 +340,8 @@
     }
     return false;
   }
-
   if (!tryRegister()) {
-    var poll = setInterval(function () {
-      if (tryRegister()) clearInterval(poll);
-    }, 200);
+    var poll = setInterval(function () { if (tryRegister()) clearInterval(poll); }, 200);
     setTimeout(function () { clearInterval(poll); }, 5000);
   }
 
