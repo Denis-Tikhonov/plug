@@ -1,25 +1,37 @@
 // =============================================================
 // hdtub.js — HDtube Parser для AdultJS (Lampa)
 // =============================================================
-// Версия  : 1.5.1
+// Версия  : 1.6.0
 // Изменения:
-//   [1.5.1] FIX: двойной слеш workers.dev//?url=
-//           WORKER_URL с trailing / → trimRight('/') перед /?url=
-//   [1.5.0] wrapWithWorker() — проксируем get_file через Worker
-//           (Worker добавляет Referer: https://www.hdtube.porn/)
-//   [1.4.0] cleanUrl срезал function/0/ → 403 (ОТМЕНЕНО)
-//   [1.3.0] function/0/ для абсолютных URL
-//   [1.2.0] Переписан под структуру p365
+//   [1.6.0] ФИНАЛЬНЫЙ FIX: kt_player URL decode algorithm
+//
+//   Проблема (Worker_Test_UI_Modification.json):
+//     get_file/6/HASH/...mp4 → 404 при прямом обращении и через Worker
+//     Причина: HASH зашифрован через license_code алгоритм kt_player
+//     function/0/ = маркер "URL требует расшифровки"
+//
+//   Алгоритм (подтверждён тестом в node.js):
+//     license '$478734915794302' → digits → пары → shifts[i] = pair % 9
+//     dirty hash (40 hex) → 8 чанков × 5 → сдвиг влево shifts[i] % 5
+//     clean hash → прямой URL без function/0/ → плеер воспроизводит
+//
+//   Тест:
+//     dirty: 1fdd91fdf2a7f9a53b342587ca59f84c0cedab611d
+//     clean: dd91ffdf21f9aa73b3457c2588a59fce4c0b61da1d
+//     shifts: [2,6,7,1,3,4,3,2]
+//
+//   [1.5.1] Worker proxy → 404 (hash не был расшифрован)
+//   [1.4.0] cleanUrl срезал function/0/ → 403
+//   [1.2.0] Базовая структура p365
 // =============================================================
 
 (function () {
   'use strict';
 
-  var VERSION    = '1.5.1';
-  var NAME       = 'hdtub';
-  var HOST       = 'https://www.hdtube.porn';
-  var TAG        = '[hdtub]';
-  var WORKER_URL = 'https://zonaproxy.777b737.workers.dev';
+  var VERSION = '1.6.0';
+  var NAME    = 'hdtub';
+  var HOST    = 'https://www.hdtube.porn';
+  var TAG     = '[hdtub]';
 
   var CATEGORIES = [
     { title: 'Amateur',            slug: 'amateur'            },
@@ -100,7 +112,7 @@
   ];
 
   // ----------------------------------------------------------
-  // ТРАНСПОРТ — для загрузки страниц
+  // ТРАНСПОРТ
   // ----------------------------------------------------------
   function httpGet(url, success, error) {
     if (window.AdultPlugin && typeof window.AdultPlugin.networkRequest === 'function') {
@@ -111,55 +123,7 @@
   }
 
   // ----------------------------------------------------------
-  // getWorkerBase() — базовый URL Worker без trailing /
-  // [1.5.1] FIX: убираем trailing /  чтобы не было workers.dev//?url=
-  // ----------------------------------------------------------
-  function getWorkerBase() {
-    var base = WORKER_URL;
-    if (window.AdultPlugin && window.AdultPlugin.workerUrl) {
-      base = window.AdultPlugin.workerUrl;
-    }
-    // [1.5.1] Убираем trailing / и ?url= если уже есть
-    base = base.replace(/[/?&]url=?$/, '').replace(/\/+$/, '');
-    return base;
-  }
-
-  // ----------------------------------------------------------
-  // wrapWithWorker(rawUrl)
-  //
-  // Извлекает чистый get_file URL из любого формата и оборачивает
-  // в Worker для добавления Referer: https://www.hdtube.porn/
-  //
-  // Входные форматы:
-  //   A) "function/0/https://host/get_file/..."  (относительный)
-  //   B) "https://host/function/0/https://..."   (абсолютный)
-  //   C) "https://host/get_file/..."             (уже чистый)
-  //
-  // [1.5.1] Выход: WORKER_BASE + "/?url=" + encodeURIComponent(cleanUrl)
-  //         (без двойного слеша)
-  // ----------------------------------------------------------
-  function wrapWithWorker(raw) {
-    if (!raw) return '';
-    var u = raw.replace(/\\/g, '').trim();
-
-    // Форма A: относительный "function/N/https://..."
-    var relM = u.match(/^\/??function\/\d+\/(https?:\/\/.+)$/);
-    if (relM) u = relM[1];
-
-    // Форма B: абсолютный "https://host/function/N/https://..."
-    var absM = u.match(/^https?:\/\/[^/]+\/function\/\d+\/(https?:\/\/.+)$/);
-    if (absM) u = absM[1];
-
-    if (!u || u.indexOf('http') !== 0) return '';
-
-    // [1.5.1] getWorkerBase() уже без trailing /
-    var wrapped = getWorkerBase() + '/?url=' + encodeURIComponent(u);
-    console.log(TAG, 'wrapWithWorker:', u.substring(0, 80), '→ Worker');
-    return wrapped;
-  }
-
-  // ----------------------------------------------------------
-  // cleanUrl — только для обычных (не видео) URL
+  // cleanUrl — для обычных (не видео) URL
   // ----------------------------------------------------------
   function cleanUrl(raw) {
     if (!raw) return '';
@@ -167,6 +131,86 @@
     if (u.indexOf('//') === 0)                      u = 'https:' + u;
     if (u.charAt(0) === '/' && u.charAt(1) !== '/') u = HOST + u;
     return u;
+  }
+
+  // ----------------------------------------------------------
+  // kt_player DECODE ALGORITHM
+  // ==========================================================
+  //
+  // Источник: flashvars из www.hdtube.porn + тест node.js
+  //
+  // license_code: '$478734915794302'
+  // → digits:  '478734915794302'
+  // → пары:     47, 87, 34, 91, 57, 94, 30, 2
+  // → % 9:      [2,  6,  7,  1,  3,  4,  3, 2]
+  //
+  // dirty hash: '1fdd91fdf2a7f9a53b342587ca59f84c0cedab611d' (42 символа)
+  // head (40):  '1fdd91fdf2a7f9a53b342587ca59f84c0cedab61'
+  // tail:       '1d'
+  // чанки:      ['1fdd9','1fdf2','a7f9a','53b34','2587c','a59f8','4c0ce','dab61']
+  // сдвиги:     [2,6,7,1,3,4,3,2]
+  // результат:  ['dd91f','fdf21','f9aa7','3b345','7c258','8a59f','ce4c0','b61da']
+  // clean:      'dd91ffdf21f9aa73b3457c2588a59fce4c0b61da1d'
+  // ----------------------------------------------------------
+
+  function ktGetShifts(licenseCode) {
+    var digits = licenseCode.replace(/[^0-9]/g, '');
+    var shifts = [];
+    for (var i = 0; i < digits.length; i += 2) {
+      shifts.push(parseInt(digits.substr(i, 2), 10) % 9);
+    }
+    return shifts;
+  }
+
+  function ktDecodeUrl(rawUrl, licenseCode) {
+    // Нормализуем входной URL
+    var url = rawUrl.replace(/\\/g, '').trim();
+
+    // Убираем относительный function/N/
+    var relM = url.match(/^\/??function\/\d+\/(https?:\/\/.+)$/);
+    if (relM) url = relM[1];
+
+    // Убираем абсолютный https://host/function/N/https://...
+    var absM = url.match(/^https?:\/\/[^/]+\/function\/\d+\/(https?:\/\/.+)$/);
+    if (absM) url = absM[1];
+
+    // Находим dirty hash
+    var hashMatch = url.match(/\/get_file\/\d+\/([0-9a-f]+)\//i);
+    if (!hashMatch) {
+      console.log(TAG, 'ktDecode: hash не найден, возвращаем url as-is');
+      return url;
+    }
+    var dirty = hashMatch[1];
+
+    var shifts    = ktGetShifts(licenseCode);
+    var chunkLen  = 5;
+    var numChunks = 8;
+
+    // Первые 40 hex символов → 8 чанков, остаток → хвост
+    var head = dirty.substring(0, numChunks * chunkLen);
+    var tail = dirty.substring(numChunks * chunkLen);
+
+    var chunks = [];
+    for (var i = 0; i < numChunks; i++) {
+      chunks.push(head.substr(i * chunkLen, chunkLen));
+    }
+
+    // Сдвиг влево: chunk = chunk[s:] + chunk[:s]
+    for (var i = 0; i < numChunks && i < shifts.length; i++) {
+      var s = shifts[i] % chunkLen;
+      if (s === 0) continue;
+      var c = chunks[i];
+      chunks[i] = c.substring(s) + c.substring(0, s);
+    }
+
+    var cleanHash = chunks.join('') + tail;
+    var decoded   = url.replace(dirty, cleanHash);
+
+    console.log(TAG, 'ktDecode dirty[0:20]:', dirty.substring(0, 20));
+    console.log(TAG, 'ktDecode clean[0:20]:', cleanHash.substring(0, 20));
+    console.log(TAG, 'ktDecode result:',      decoded.substring(0, 100));
+
+    return decoded;
   }
 
   // ----------------------------------------------------------
@@ -211,73 +255,73 @@
   // ----------------------------------------------------------
   // ИЗВЛЕЧЕНИЕ КАЧЕСТВ
   //
-  // JSON kt_player:
-  //   video_url     → основное (480p, без суффикса)
-  //   video_alt_url → высокое  (720p, суффикс _720p)
-  //
-  // Лейбл определяется по суффиксу имени файла в URL.
-  // Все видео-URL оборачиваются через Worker.
+  // Алгоритм:
+  // 1. Находим license_code в flashvars
+  // 2. Находим video_url и video_alt_url в flashvars
+  // 3. Расшифровываем каждый через ktDecodeUrl(url, license)
+  // 4. Получаем прямые https://host/get_file/... URL
   // ----------------------------------------------------------
   function extractQualities(html) {
-    var q   = {};
-    var raw = {};
+    var q = {};
 
-    // Собираем сырые значения
-    var m1 = html.match(/video_alt_url\s*[:=]\s*['"]([^'"]+)['"]/);
-    var m2 = html.match(/video_url\s*[:=]\s*['"]([^'"]+)['"]/);
-    if (m1) raw['video_alt_url'] = m1[1].trim();
-    if (m2) raw['video_url']     = m2[1].trim();
+    // license_code
+    var licM    = html.match(/license_code\s*[:=]\s*['"]([^'"]+)['"]/);
+    var license = licM ? licM[1] : '';
+    console.log(TAG, 'license_code:', license || '❌ НЕ НАЙДЕН');
 
-    console.log(TAG, 'raw video_url:',   (raw['video_url']     || '').substring(0, 80));
-    console.log(TAG, 'raw alt_url:',     (raw['video_alt_url'] || '').substring(0, 80));
+    // Поля flashvars
+    var fields = [
+      { re: /video_alt_url\s*[:=]\s*['"]([^'"]+)['"]/,  key: 'alt',  defaultLabel: '720p' },
+      { re: /video_url\s*[:=]\s*['"]([^'"]+)['"]/,      key: 'main', defaultLabel: '480p' },
+    ];
 
-    // Обрабатываем каждый URL
-    ['video_alt_url', 'video_url'].forEach(function (key) {
-      var rawUrl = raw[key];
-      if (!rawUrl) return;
+    fields.forEach(function (f) {
+      var m = html.match(f.re);
+      if (!m || !m[1]) return;
+      var rawUrl = m[1].trim();
 
-      // Определяем лейбл по суффиксу
-      var label;
+      // Определяем лейбл по суффиксу файла
+      var label = f.defaultLabel;
       if      (rawUrl.indexOf('_1080p') !== -1) label = '1080p';
       else if (rawUrl.indexOf('_720p')  !== -1) label = '720p';
       else if (rawUrl.indexOf('_480p')  !== -1) label = '480p';
       else if (rawUrl.indexOf('_360p')  !== -1) label = '360p';
       else if (rawUrl.indexOf('_240p')  !== -1) label = '240p';
-      else if (key === 'video_alt_url')          label = '720p';
-      else                                        label = '480p';
 
-      var proxied = wrapWithWorker(rawUrl);
-      if (proxied) {
-        q[label] = proxied;
-        console.log(TAG, label + ' (proxied):', proxied.substring(0, 100));
+      var decoded;
+      if (rawUrl.indexOf('function/') !== -1 && license) {
+        decoded = ktDecodeUrl(rawUrl, license);
+      } else if (rawUrl.indexOf('function/') !== -1) {
+        // license не найден — срезаем function/N/ как последний шанс
+        decoded = rawUrl.replace(/^\/??function\/\d+\//, '');
+        var absM = decoded.match(/^https?:\/\/[^/]+\/function\/\d+\/(https?:\/\/.+)$/);
+        if (absM) decoded = absM[1];
+        console.warn(TAG, 'license не найден! URL может быть нерабочим:', decoded.substring(0, 80));
+      } else {
+        decoded = rawUrl;
+      }
+
+      if (decoded && decoded.indexOf('http') === 0) {
+        q[label] = decoded;
+        console.log(TAG, label + ':', decoded.substring(0, 100));
       }
     });
 
     // Fallback: <source size>
     if (!Object.keys(q).length) {
+      console.warn(TAG, 'flashvars не дал результат → <source> fallback');
       var re1 = /<source[^>]+src="([^"]+)"[^>]+size="([^"]+)"/gi;
       var re2 = /<source[^>]+size="([^"]+)"[^>]+src="([^"]+)"/gi;
       var m;
       while ((m = re1.exec(html)) !== null) {
         if (m[2] !== 'preview' && m[1].indexOf('.mp4') !== -1)
-          q[m[2] + 'p'] = wrapWithWorker(m[1]) || cleanUrl(m[1]);
+          q[m[2] + 'p'] = cleanUrl(m[1]);
       }
       if (!Object.keys(q).length) {
         while ((m = re2.exec(html)) !== null) {
           if (m[1] !== 'preview' && m[2].indexOf('.mp4') !== -1)
-            q[m[1] + 'p'] = wrapWithWorker(m[2]) || cleanUrl(m[2]);
+            q[m[1] + 'p'] = cleanUrl(m[2]);
         }
-      }
-    }
-
-    // Fallback: get_file regex
-    if (!Object.keys(q).length) {
-      var gfRe = /((?:function\/\d+\/)?https?:\/\/[^"'\s]+\/get_file\/[^"'\s]+\.mp4[^"'\s]*)/g;
-      var gf;
-      while ((gf = gfRe.exec(html)) !== null) {
-        if (gf[1].indexOf('preview') !== -1) continue;
-        var gfLbl = (gf[1].match(/_(\d+p?)\.mp4/) || [])[1] || 'HD';
-        if (!q[gfLbl]) { q[gfLbl] = wrapWithWorker(gf[1]) || cleanUrl(gf[1]); break; }
       }
     }
 
@@ -360,9 +404,9 @@
         console.log(TAG, 'html длина:', html.length);
         if (!html || html.length < 500) { error('html < 500'); return; }
 
-        console.log(TAG, 'video_url cnt:',  (html.match(/video_url/gi)   || []).length);
-        console.log(TAG, 'get_file cnt:',   (html.match(/get_file/gi)    || []).length);
-        console.log(TAG, 'function/0 cnt:', (html.match(/function\/0/gi) || []).length);
+        console.log(TAG, 'license_code cnt:', (html.match(/license_code/gi) || []).length);
+        console.log(TAG, 'video_url cnt:',    (html.match(/video_url/gi)    || []).length);
+        console.log(TAG, 'function/0 cnt:',   (html.match(/function\/0/gi)  || []).length);
 
         var found = extractQualities(html);
         var keys  = Object.keys(found);
@@ -371,7 +415,8 @@
         if (keys.length > 0) {
           success({ qualities: found });
         } else {
-          console.warn(TAG, 'FAIL — все стратегии исчерпаны');
+          console.warn(TAG, 'FAIL: license=', (html.match(/license_code/gi)||[]).length,
+                            '.mp4=', (html.match(/\.mp4/gi)||[]).length);
           error('Видео не найдено');
         }
       }, error);
