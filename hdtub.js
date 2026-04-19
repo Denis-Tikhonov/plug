@@ -167,12 +167,12 @@
       var el = items[i];
       var linkEl = el.querySelector('a[href]');
       
-      if (!LinkEl) {
+      if (!linkEl) {
         console.log('[hdtub] Item', i, ': no link element');
         continue;
       }
 
-      var href = LinkEl.getAttribute('href') || '';
+      var href = linkEl.getAttribute('href') || '';
       console.log('[hdtub] Item', i, 'raw href:', href.substring(0, 100));
       
       if (!href) continue;
