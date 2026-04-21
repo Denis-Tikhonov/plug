@@ -1,47 +1,46 @@
 // =============================================================
 // hdtub.js — HDtube Parser для AdultJS (Lampa)
 // =============================================================
-// Версия  : 1.7.0
+// Версия  : 1.8.0
 // Изменения:
-//   [1.7.0] ФИНАЛЬНЫЙ FIX воспроизведения на основе анализа рабочей ссылки:
+//   [1.8.0] ФИНАЛЬНЫЙ FIX — используем Worker /resolve endpoint
 //
-//   Рабочая ссылка (из Network tab):
-//     https://nvms3.cdn.privatehost.com/3000/3913/3913_720p.mp4
-//       ?sign=19b966064825ca35fa458548d5c5d709&exp_time=...&tag=hdtube.porn
+//   Анализ всех логов (v1.3.7, v1.4.0, v1.5.x, v1.6.0, v1.7.0):
 //
-//   Вывод:
-//   - function/0/ это серверный REDIRECT RESOLVER на hdtube.porn
-//   - Сервер принимает запрос → возвращает 302 → signed CDN URL
-//   - Worker (redirect:'follow') проходит 302 → получает видеопоток
-//   - decode алгоритм kt_player (v1.6.0) был неверным путём
+//   ФАКТ 1: function/0/ → 404 при любом Referer через Worker
+//   ФАКТ 2: get_file с decoded hash → hops:0, type:text/html (не видео)
+//   ФАКТ 3: Рабочая ссылка = nvms*.cdn.privatehost.com/...?sign=...
+//   ФАКТ 4: Worker v1.7.0 имеет эндпоинт /resolve который следует
+//           redirect цепочке HEAD запросами и возвращает финальный URL
+//   ФАКТ 5: conf.txt REDIRECT.mode = "follow", kvsConfidence = 1
 //
-//   Новая логика getProxyUrl():
-//   1. video_url = 'function/0/https://host/get_file/...'
-//   2. Строим абсолютный URL: HOST + '/function/0/https://...'
-//      или берём как есть если уже абсолютный
-//   3. Оборачиваем в Worker: WORKER/?url=encodeURIComponent(absoluteUrl)
-//   4. Worker → 302 follow → nvms*.cdn.privatehost.com/...?sign=... → видео ✅
+//   ВЫВОД: IP-привязка подписи. Worker должен СНАЧАЛА резолвить
+//   function/0/ URL чтобы получить signed CDN URL, затем передать
+//   его плееру напрямую. Worker /resolve делает именно это.
 //
-//   W137 whitelist: добавить cdn.privatehost.com (см. W137.js v1.4.0)
+//   Новый поток qualities():
+//   1. Парсим video_url из flashvars → function/0/ URL
+//   2. Строим абсолютный function/0/ URL
+//   3. GET WORKER/resolve?url=encodeURIComponent(function0Url)
+//   4. Worker следует redirect цепочке → возвращает JSON с final URL
+//   5. final = nvms*.cdn.privatehost.com/...?sign=... → передаём плееру
+//   6. Плеер открывает CDN URL напрямую (без Worker)
 //
-//   Сравнение версий:
-//   v1.3.0  cleanUrl срезал function/0/ → get_file напрямую → 403
-//   v1.4.0  CHAD: decode kt_player → неверный путь, CDN signed URL не получить
-//   v1.5.x  Worker проксировал get_file (после decode) → 404 (hash нерасшифрован)
-//   v1.6.0  ktDecodeUrl → математически верно, но CDN ссылка другая (nvms CDN)
-//   v1.7.0  Worker проксирует function/0/ → redirect:follow → signed CDN URL ✅
+//   [1.7.0] Worker proxy function/0/ → 404 (IP-binding sign)
+//   [1.6.0] ktDecodeUrl → get_file → text/html
+//   [1.5.x] Worker proxy get_file → 404
+//   [1.4.0] cleanUrl срезал function/0/ → 403
 // =============================================================
 
 (function () {
   'use strict';
 
-  var VERSION    = '1.7.0';
+  var VERSION    = '1.8.0';
   var NAME       = 'hdtub';
   var HOST       = 'https://www.hdtube.porn';
   var TAG        = '[hdtub]';
 
-  // Worker URL — тот же что в W137.js (без trailing /)
-  // W137 v1.4.0 должен иметь cdn.privatehost.com в whitelist
+  // Worker URL с /resolve endpoint (W170+)
   var WORKER_URL = 'https://zonaproxy.777b737.workers.dev';
 
   var CATEGORIES = [
@@ -123,7 +122,7 @@
   ];
 
   // ----------------------------------------------------------
-  // ТРАНСПОРТ — для загрузки HTML страниц (не для видео)
+  // ТРАНСПОРТ — для загрузки HTML страниц
   // ----------------------------------------------------------
   function httpGet(url, success, error) {
     if (window.AdultPlugin && typeof window.AdultPlugin.networkRequest === 'function') {
@@ -137,6 +136,26 @@
   }
 
   // ----------------------------------------------------------
+  // httpGetJson — для /resolve endpoint (возвращает JSON)
+  // ----------------------------------------------------------
+  function httpGetJson(url, success, error) {
+    if (window.AdultPlugin && typeof window.AdultPlugin.networkRequest === 'function') {
+      window.AdultPlugin.networkRequest(url, function (text) {
+        try {
+          success(JSON.parse(text));
+        } catch (e) {
+          error('JSON parse error: ' + e.message);
+        }
+      }, error);
+    } else {
+      fetch(url)
+        .then(function (r) { return r.json(); })
+        .then(success)
+        .catch(error);
+    }
+  }
+
+  // ----------------------------------------------------------
   // getWorkerBase() — Worker URL без trailing /
   // ----------------------------------------------------------
   function getWorkerBase() {
@@ -144,54 +163,36 @@
     if (window.AdultPlugin && window.AdultPlugin.workerUrl) {
       base = window.AdultPlugin.workerUrl;
     }
-    // Убираем trailing / и ?url= если уже есть
     return base.replace(/[/?&]url=?$/, '').replace(/\/+$/, '');
   }
 
   // ----------------------------------------------------------
-  // getProxyUrl(rawVideoUrl)
+  // toAbsoluteFuncUrl(rawVideoUrl)
+  // Строим абсолютный function/0/ URL из flashvars значения
   //
-  // ИДЕЯ (из анализа рабочей ссылки + CHAD v1.4.0):
-  //   Не расшифровываем hash — передаём function/0/ URL в Worker.
-  //   Worker выполняет redirect:follow → hdtube.porn/function/0/...
-  //   → 302 → nvms*.cdn.privatehost.com/...?sign=... → видеопоток.
-  //
-  // Входные форматы video_url из flashvars:
-  //   A) относительный: 'function/0/https://host/get_file/...'
-  //   B) абсолютный:    'https://host/function/0/https://...'
-  //
-  // В обоих случаях строим абсолютный function/0/ URL и оборачиваем в Worker.
+  // Форма A: 'function/0/https://host/get_file/...'   → HOST/function/0/https://...
+  // Форма B: 'https://host/function/0/https://...'    → as-is
   // ----------------------------------------------------------
-  function getProxyUrl(rawVideoUrl) {
-    if (!rawVideoUrl) return '';
-    var u = rawVideoUrl.replace(/\\/g, '').trim();
+  function toAbsoluteFuncUrl(raw) {
+    if (!raw) return '';
+    var u = raw.replace(/\\/g, '').trim();
 
-    // Нормализуем до абсолютного function/0/ URL
-    var absoluteFunc;
-
-    // Форма A: относительный "function/0/https://..."
+    // Форма A: относительный
     if (u.match(/^function\/\d+\//)) {
-      absoluteFunc = HOST + '/' + u;
+      return HOST + '/' + u;
     }
-    // Форма B: уже абсолютный "https://host/function/0/..."
-    else if (u.match(/^https?:\/\/[^/]+\/function\/\d+\//)) {
-      absoluteFunc = u;
-    }
-    // Форма C: уже прямой URL (без function/) — без Worker
-    else if (u.indexOf('http') === 0) {
-      console.log(TAG, 'getProxyUrl: прямой URL, Worker не нужен');
+    // Форма B: уже абсолютный с function
+    if (u.match(/^https?:\/\/[^/]+\/function\/\d+\//)) {
       return u;
     }
-    // Форма D: protocol-relative или root-relative
-    else {
-      if (u.indexOf('//') === 0) u = 'https:' + u;
-      if (u.charAt(0) === '/')   u = HOST + u;
-      absoluteFunc = u;
+    // Форма C: уже прямой URL (без function/) — возвращаем как есть
+    if (u.indexOf('http') === 0) {
+      return u;
     }
-
-    var proxied = getWorkerBase() + '/?url=' + encodeURIComponent(absoluteFunc);
-    console.log(TAG, 'getProxyUrl:', absoluteFunc.substring(0, 80), '→ Worker');
-    return proxied;
+    // protocol-relative или root-relative
+    if (u.indexOf('//') === 0) return 'https:' + u;
+    if (u.charAt(0) === '/')   return HOST + u;
+    return u;
   }
 
   // ----------------------------------------------------------
@@ -206,8 +207,49 @@
   }
 
   // ----------------------------------------------------------
-  // ПАРСИНГ КАТАЛОГА
-  // Архитектура v1.3.0: DOMParser + '.item' selector (JSON подтверждён)
+  // resolveViaWorker(func0Url, labelHint, callback)
+  //
+  // Вызывает WORKER/resolve?url=func0Url
+  // Worker v1.7.0 следует redirect цепочке HEAD запросами
+  // и возвращает JSON: { final: "https://nvms*.cdn.privatehost.com/...?sign=..." }
+  //
+  // callback(null, finalUrl) при успехе
+  // callback(err, null)      при ошибке
+  // ----------------------------------------------------------
+  function resolveViaWorker(func0Url, labelHint, callback) {
+    var resolveUrl = getWorkerBase() + '/resolve?url=' + encodeURIComponent(func0Url);
+    console.log(TAG, 'resolve', labelHint, '→', func0Url.substring(0, 80));
+
+    httpGetJson(resolveUrl, function (json) {
+      console.log(TAG, 'resolve', labelHint, 'response:', JSON.stringify(json).substring(0, 200));
+
+      var finalUrl = json.final || json.url || '';
+
+      if (!finalUrl || finalUrl.indexOf('http') !== 0) {
+        console.warn(TAG, 'resolve', labelHint, ': нет final URL в ответе');
+        callback('no final URL', null);
+        return;
+      }
+
+      // Проверяем что это реально видео URL (CDN)
+      if (finalUrl.indexOf('cdn.privatehost.com') !== -1 ||
+          finalUrl.indexOf('.mp4') !== -1 ||
+          finalUrl.indexOf('.m3u8') !== -1) {
+        console.log(TAG, 'resolve', labelHint, 'final CDN:', finalUrl.substring(0, 100));
+        callback(null, finalUrl);
+      } else {
+        // Финальный URL — не CDN (всё ещё text/html от get_file)
+        console.warn(TAG, 'resolve', labelHint, ': final не CDN URL:', finalUrl.substring(0, 80));
+        callback('final is not CDN: ' + finalUrl.substring(0, 80), null);
+      }
+    }, function (err) {
+      console.warn(TAG, 'resolve', labelHint, 'error:', err);
+      callback(err, null);
+    });
+  }
+
+  // ----------------------------------------------------------
+  // ПАРСИНГ КАТАЛОГА — JSON cardSelector=".item"
   // ----------------------------------------------------------
   function parsePlaylist(html) {
     var results = [];
@@ -246,66 +288,39 @@
   }
 
   // ----------------------------------------------------------
-  // ИЗВЛЕЧЕНИЕ КАЧЕСТВ
-  //
-  // Архитектура: VIDEO_RULES из CHAD v1.4.0 (чистый список правил)
-  // + getProxyUrl() из новой идеи вместо cleanUrl/ktDecodeUrl
-  //
-  // VIDEO_RULES: приоритет — video_alt_url (720p) → video_url (480p)
-  // Лейбл уточняется по суффиксу имени файла в raw URL
+  // extractRawVideoUrls(html)
+  // Извлекаем сырые значения video_url и video_alt_url из flashvars
   // ----------------------------------------------------------
-  var VIDEO_RULES = [
-    { re: /video_alt_url\s*[:=]\s*['"]([^'"]+)['"]/,  defaultLabel: '720p' },
-    { re: /video_url\s*[:=]\s*['"]([^'"]+)['"]/,      defaultLabel: '480p' },
-  ];
+  function extractRawVideoUrls(html) {
+    var result = {};
 
-  function extractQualities(html) {
-    var q = {};
+    var fields = [
+      { re: /video_alt_url\s*[:=]\s*['"]([^'"]+)['"]/,  key: 'alt',  label: '720p' },
+      { re: /video_url\s*[:=]\s*['"]([^'"]+)['"]/,      key: 'main', label: '480p' },
+    ];
 
-    VIDEO_RULES.forEach(function (rule) {
-      var m = html.match(rule.re);
+    fields.forEach(function (f) {
+      var m = html.match(f.re);
       if (!m || !m[1]) return;
       var rawUrl = m[1].trim();
 
-      // Уточняем лейбл по суффиксу файла
-      var label = rule.defaultLabel;
+      // Уточняем лейбл по суффиксу
+      var label = f.label;
       if      (rawUrl.indexOf('_1080p') !== -1) label = '1080p';
       else if (rawUrl.indexOf('_720p')  !== -1) label = '720p';
       else if (rawUrl.indexOf('_480p')  !== -1) label = '480p';
       else if (rawUrl.indexOf('_360p')  !== -1) label = '360p';
       else if (rawUrl.indexOf('_240p')  !== -1) label = '240p';
 
-      console.log(TAG, 'raw ' + label + ':', rawUrl.substring(0, 80));
-
-      // [1.7.0] Ключевое изменение: getProxyUrl() вместо cleanUrl/ktDecodeUrl
-      var proxied = getProxyUrl(rawUrl);
-      if (proxied) q[label] = proxied;
+      result[f.key] = { raw: rawUrl, label: label };
+      console.log(TAG, 'raw ' + f.key + ' (' + label + '):', rawUrl.substring(0, 80));
     });
 
-    // Fallback: <source size> — если VIDEO_RULES ничего не дал
-    if (!Object.keys(q).length) {
-      console.warn(TAG, 'VIDEO_RULES fallback → <source>');
-      var re1 = /<source[^>]+src="([^"]+)"[^>]+size="([^"]+)"/gi;
-      var re2 = /<source[^>]+size="([^"]+)"[^>]+src="([^"]+)"/gi;
-      var m;
-      while ((m = re1.exec(html)) !== null) {
-        if (m[2] !== 'preview' && m[1].indexOf('.mp4') !== -1)
-          q[m[2] + 'p'] = getProxyUrl(m[1]) || cleanUrl(m[1]);
-      }
-      if (!Object.keys(q).length) {
-        while ((m = re2.exec(html)) !== null) {
-          if (m[1] !== 'preview' && m[2].indexOf('.mp4') !== -1)
-            q[m[1] + 'p'] = getProxyUrl(m[2]) || cleanUrl(m[2]);
-        }
-      }
-    }
-
-    return q;
+    return result;
   }
 
   // ----------------------------------------------------------
   // URL BUILDER
-  // JSON: search=/?q=, cat=/?c=, main=/?page=N
   // ----------------------------------------------------------
   function buildUrl(type, value, page) {
     var url = HOST;
@@ -336,7 +351,7 @@
   }
 
   // ----------------------------------------------------------
-  // РОУТИНГ — архитектура v1.3.0
+  // РОУТИНГ
   // ----------------------------------------------------------
   function routeView(url, page, success, error) {
     var fetchUrl;
@@ -363,30 +378,29 @@
   }
 
   // ----------------------------------------------------------
-  // ПАРСЕР API — интерфейс AdultPlugin (архитектура v1.3.0)
+  // ПАРСЕР API
   // ----------------------------------------------------------
   var HdtubParser = {
 
-    main: function (p, s, e) {
-      routeView(NAME + '/new', 1, s, e);
-    },
-
-    view: function (p, s, e) {
-      routeView(p.url || NAME, p.page || 1, s, e);
-    },
+    main: function (p, s, e) { routeView(NAME + '/new', 1, s, e); },
+    view: function (p, s, e) { routeView(p.url || NAME, p.page || 1, s, e); },
 
     search: function (p, s, e) {
       var q = (p.query || '').trim();
       httpGet(buildUrl('search', q, p.page || 1), function (html) {
-        s({
-          title: 'HDtube: ' + q,
-          results: parsePlaylist(html),
-          collection: true,
-          total_pages: 2,
-        });
+        s({ title: 'HDtube: ' + q, results: parsePlaylist(html), collection: true, total_pages: 2 });
       }, e);
     },
 
+    // ----------------------------------------------------------
+    // qualities() — главная функция
+    //
+    // Поток:
+    // 1. Загрузить HTML страницы видео
+    // 2. Извлечь video_url и video_alt_url
+    // 3. Для каждого: resolveViaWorker(function0Url) → CDN signed URL
+    // 4. Собрать { qualities: { '720p': cdnUrl, '480p': cdnUrl } }
+    // ----------------------------------------------------------
     qualities: function (videoPageUrl, success, error) {
       console.log(TAG, 'qualities() →', videoPageUrl);
 
@@ -397,27 +411,58 @@
         // Диагностика
         console.log(TAG, 'video_url cnt:',   (html.match(/video_url/gi)   || []).length);
         console.log(TAG, 'function/0 cnt:',  (html.match(/function\/0/gi) || []).length);
-        console.log(TAG, 'get_file cnt:',    (html.match(/get_file/gi)    || []).length);
 
-        var found = extractQualities(html);
-        var keys  = Object.keys(found);
-        console.log(TAG, 'qualities найдено:', keys.length, JSON.stringify(keys));
+        var rawUrls = extractRawVideoUrls(html);
+        var keys    = Object.keys(rawUrls);
 
-        if (keys.length > 0) {
-          success({ qualities: found });
-        } else {
-          console.warn(TAG, 'FAIL');
-          console.warn(TAG, 'video_url:',  (html.match(/video_url/gi)  || []).length);
-          console.warn(TAG, 'get_file:',   (html.match(/get_file/gi)   || []).length);
-          console.warn(TAG, '.mp4:',       (html.match(/\.mp4/gi)      || []).length);
-          error('Видео не найдено');
+        if (!keys.length) {
+          console.warn(TAG, 'flashvars не найдены');
+          console.warn(TAG, '.mp4:', (html.match(/\.mp4/gi) || []).length);
+          error('video_url не найден в HTML');
+          return;
         }
+
+        // Резолвим каждый URL через Worker /resolve
+        var resolved  = {};
+        var pending   = keys.length;
+        var hasResult = false;
+
+        function onResolved(label, finalUrl) {
+          if (finalUrl) {
+            resolved[label] = finalUrl;
+            hasResult = true;
+          }
+          pending--;
+          if (pending === 0) {
+            if (hasResult) {
+              console.log(TAG, 'qualities итог:', JSON.stringify(Object.keys(resolved)));
+              success({ qualities: resolved });
+            } else {
+              error('Не удалось получить CDN URL через /resolve');
+            }
+          }
+        }
+
+        keys.forEach(function (key) {
+          var item     = rawUrls[key];
+          var func0Url = toAbsoluteFuncUrl(item.raw);
+
+          if (!func0Url) {
+            onResolved(item.label, null);
+            return;
+          }
+
+          resolveViaWorker(func0Url, item.label, function (err, finalUrl) {
+            onResolved(item.label, finalUrl);
+          });
+        });
+
       }, error);
     },
   };
 
   // ----------------------------------------------------------
-  // РЕГИСТРАЦИЯ — архитектура v1.3.0 (AdultPlugin)
+  // РЕГИСТРАЦИЯ
   // ----------------------------------------------------------
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
@@ -427,11 +472,8 @@
     }
     return false;
   }
-
   if (!tryRegister()) {
-    var poll = setInterval(function () {
-      if (tryRegister()) clearInterval(poll);
-    }, 200);
+    var poll = setInterval(function () { if (tryRegister()) clearInterval(poll); }, 200);
     setTimeout(function () { clearInterval(poll); }, 5000);
   }
 
