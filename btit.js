@@ -115,54 +115,70 @@
   // ----------------------------------------------------------
   // extractQualities — ПОИСК ВИДЕО URL
   // ----------------------------------------------------------
+    // ----------------------------------------------------------
+  // extractQualities — ПОИСК ВИДЕО URL
+  // ----------------------------------------------------------
   function extractQualities(html, videoPageUrl, success, error) {
     var q = {};
     
-    // S1: Поиск remote_control.php в HTML
-    var rcMatches = html.match(/https?:\/\/media\d+\.bigtitslust\.com\/remote_control\.php\?[^"'\s<>]+/gi);
+    console.log(TAG, '=== extractQualities START ===');
     
-    if (rcMatches && rcMatches.length) {
-        var videoUrl = rcMatches[0].replace(/\\/g, '');
-        // Проксируем через Worker
-        var proxiedUrl = WORKER_URL + '/?url=' + encodeURIComponent(videoUrl);
+    // S1: Поиск get_file URL (он ведёт на remote_control через редирект)
+    var getFileMatches = html.match(/https?:\/\/[^"'\s<>]+get_file[^"'\s<>]+\.mp4[^"'\s<>]*/gi);
+    
+    if (getFileMatches && getFileMatches.length) {
+        var getFileUrl = getFileMatches[0].replace(/\\/g, '');
+        console.log(TAG, '✅ Найден get_file URL:', getFileUrl.substring(0, 100));
+        
+        // Проксируем get_file URL через Worker (Worker обработает редирект)
+        var proxiedUrl = WORKER_URL + '/?url=' + encodeURIComponent(getFileUrl);
         q['HD'] = proxiedUrl;
-        console.log(TAG, '✅ Найден remote_control, проксируем:', proxiedUrl.substring(0, 100));
+        console.log(TAG, '✅ Проксируем get_file:', proxiedUrl.substring(0, 100));
         success({ qualities: q });
         return;
     }
     
-    // S2: Поиск в flashvars
+    // S2: Поиск remote_control.php напрямую (если вдруг есть)
+    var rcMatches = html.match(/https?:\/\/media\d+\.bigtitslust\.com\/remote_control\.php\?[^"'\s<>]+/gi);
+    if (rcMatches && rcMatches.length) {
+        var videoUrl = rcMatches[0].replace(/\\/g, '');
+        var proxiedUrl = WORKER_URL + '/?url=' + encodeURIComponent(videoUrl);
+        q['HD'] = proxiedUrl;
+        console.log(TAG, '✅ Найден remote_control напрямую');
+        success({ qualities: q });
+        return;
+    }
+    
+    // S3: Поиск в flashvars
     var flashvarsMatch = html.match(/flashvars\s*[:=]\s*({[^;]+?})\s*[;}]/i);
     if (flashvarsMatch) {
         var rcMatch = flashvarsMatch[1].match(/remote_control\s*:\s*['"]([^'"]+)['"]/i);
-        if (rcMatch && rcMatch[1].includes('remote_control.php')) {
+        if (rcMatch && rcMatch[1]) {
             var videoUrl = rcMatch[1].replace(/\\/g, '');
             var proxiedUrl = WORKER_URL + '/?url=' + encodeURIComponent(videoUrl);
             q['HD'] = proxiedUrl;
-            console.log(TAG, '✅ flashvars.remote_control, проксируем');
+            console.log(TAG, '✅ flashvars.remote_control');
             success({ qualities: q });
             return;
         }
     }
     
-    // S3: Fallback - любой .mp4 НЕ из get_file
+    // S4: Fallback - любой .mp4
     var mp4Matches = html.match(/https?:\/\/[^"'\s<>\\]+\.mp4[^"'\s<>\\]*/gi);
-    if (mp4Matches) {
+    if (mp4Matches && mp4Matches.length) {
         for (var i = 0; i < mp4Matches.length; i++) {
             var mp4 = mp4Matches[i];
-            if (mp4.indexOf('get_file') === -1) {
-                var proxiedUrl = WORKER_URL + '/?url=' + encodeURIComponent(mp4);
-                q['HD'] = proxiedUrl;
-                console.log(TAG, '⚠️ Fallback .mp4, проксируем');
-                success({ qualities: q });
-                return;
-            }
+            var proxiedUrl = WORKER_URL + '/?url=' + encodeURIComponent(mp4);
+            q['HD'] = proxiedUrl;
+            console.log(TAG, '⚠️ Fallback .mp4');
+            success({ qualities: q });
+            return;
         }
     }
     
-    error('Видео не найдено (remote_control.php не найден)');
+    console.error(TAG, '❌ ВИДЕО НЕ НАЙДЕНО!');
+    error('Видео не найдено');
   }
-
   // ----------------------------------------------------------
   // URL BUILDER
   // ----------------------------------------------------------
