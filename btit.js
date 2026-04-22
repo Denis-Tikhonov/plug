@@ -224,7 +224,10 @@
   // ----------------------------------------------------------
   // ПАРСЕР API
   // ----------------------------------------------------------
-    var BtitParser = {
+      // ----------------------------------------------------------
+  // ПАРСЕР API
+  // ----------------------------------------------------------
+  var BtitParser = {
 
     main: function (p, s, e) { routeView(NAME + '/new', 1, s, e); },
     view: function (p, s, e) { routeView(p.url || NAME, p.page || 1, s, e); },
@@ -236,24 +239,28 @@
       }, e);
     },
 
-    // НЕ проксируем - ядро сделает это само
     qualities: function (videoPageUrl, success, error) {
       console.log(TAG, 'qualities() →', videoPageUrl);
 
       httpGet(videoPageUrl, function (html) {
         console.log(TAG, 'html длина:', html.length);
+        
+        console.log(TAG, 'HTML начало:', html.substring(0, 500));
+        
         if (!html || html.length < 500) { 
           error('html < 500'); 
           return; 
         }
 
         console.log(TAG, 'remote_control cnt:', (html.match(/remote_control/gi) || []).length);
+        console.log(TAG, 'get_file cnt:', (html.match(/get_file/gi) || []).length);
         console.log(TAG, '.mp4 cnt:', (html.match(/\.mp4/gi) || []).length);
+        console.log(TAG, 'flashvars cnt:', (html.match(/flashvars/gi) || []).length);
 
         extractQualities(html, videoPageUrl, success, error);
       }, error);
     },
-  };
+  };  // ← ВАЖНО: закрывающая скобка объекта!
 
   // ----------------------------------------------------------
   // РЕГИСТРАЦИЯ
