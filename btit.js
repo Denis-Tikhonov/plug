@@ -125,55 +125,23 @@
   // [1.2.1] Улучшенный поиск remote_control.php
   // ----------------------------------------------------------
   // ----------------------------------------------------------
-// extractQualities(html) - ПОЛНОСТЬЮ ЗАМЕНИТЬ ЭТУ ФУНКЦИЮ
-// ----------------------------------------------------------
-function extractQualities(html, videoPageUrl, success, error) {
-    var q = {};
-    
-    // S1: Поиск remote_control.php в HTML
-    var rcMatches = html.match(/https?:\/\/media\d+\.bigtitslust\.com\/remote_control\.php\?[^"'\s<>]+/gi);
-    
-    if (rcMatches && rcMatches.length) {
-        var videoUrl = rcMatches[0].replace(/\\/g, '');
-        // Проксируем через Worker (ВАЖНО!)
-        var proxiedUrl = WORKER_URL + '/?url=' + encodeURIComponent(videoUrl);
-        q['HD'] = proxiedUrl;
-        console.log(TAG, '✅ Найден remote_control, проксируем:', proxiedUrl.substring(0, 100));
-        success({ qualities: q });
-        return;
-    }
-    
-    // S2: Поиск в flashvars
-    var flashvarsMatch = html.match(/flashvars\s*[:=]\s*({[^;]+?})\s*[;}]/i);
-    if (flashvarsMatch) {
-        var rcMatch = flashvarsMatch[1].match(/remote_control\s*:\s*['"]([^'"]+)['"]/i);
-        if (rcMatch && rcMatch[1].includes('remote_control.php')) {
-            var videoUrl = rcMatch[1].replace(/\\/g, '');
-            var proxiedUrl = WORKER_URL + '/?url=' + encodeURIComponent(videoUrl);
-            q['HD'] = proxiedUrl;
-            console.log(TAG, '✅ flashvars.remote_control, проксируем');
-            success({ qualities: q });
+   qualities: function (videoPageUrl, success, error) {
+    console.log(TAG, 'qualities() →', videoPageUrl);
+
+    // Используем Worker для загрузки страницы (ОДИН РАЗ)
+    var proxyUrl = getWorkerBase() + '/?url=' + encodeURIComponent(videoPageUrl);
+    console.log(TAG, 'загружаем через прокси:', proxyUrl);
+
+    httpGet(proxyUrl, function (html) {
+        console.log(TAG, 'html длина:', html.length);
+        if (!html || html.length < 500) {
+            error('html < 500');
             return;
         }
-    }
-    
-    // S3: Fallback - любой .mp4 НЕ из get_file
-    var mp4Matches = html.match(/https?:\/\/[^"'\s<>\\]+\.mp4[^"'\s<>\\]*/gi);
-    if (mp4Matches) {
-        for (var i = 0; i < mp4Matches.length; i++) {
-            var mp4 = mp4Matches[i];
-            if (mp4.indexOf('get_file') === -1) {
-                var proxiedUrl = WORKER_URL + '/?url=' + encodeURIComponent(mp4);
-                q['HD'] = proxiedUrl;
-                console.log(TAG, '⚠️ Fallback .mp4, проксируем');
-                success({ qualities: q });
-                return;
-            }
-        }
-    }
-    
-    error('Видео не найдено (remote_control.php не найден)');
-}
+
+        extractQualities(html, videoPageUrl, success, error);
+     }, error);
+   },
 
   // ----------------------------------------------------------
   // URL BUILDER
