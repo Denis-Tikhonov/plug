@@ -1,264 +1,452 @@
-(function () {
-  'use strict';
+/**
+ * TRH Worker v1.4.1
+ * Полный файл
+ *
+ * Маршруты:
+ *  - GET /health
+ *  - GET /resolve?url=<video_or_get_file_url>&format=json|redirect
+ *      format=json     -> JSON с деталями
+ *      format=redirect -> 302 на финальный mp4
+ *
+ * Примеры:
+ *  /resolve?url=https://trahkino.me/video/432835/&format=json
+ *  /resolve?url=https://trahkino.me/get_file/.../432835_360p.mp4/?rnd=123&format=redirect
+ */
 
-  var NAME    = 'trahkino';
-  var VERSION = '2.1.0';
-  var TAG     = '[TRH v' + VERSION + ']';
-  var HOST    = 'https://trahkino.me';
-  var PROXY   = 'https://zonaproxy.777b737.workers.dev/?url=';
+var VERSION = "1.4.1";
+var MAX_REDIRECTS = 8;
+var REQUEST_TIMEOUT_MS = 20000;
 
-  /* ── утилиты ───────────────────────────────────────────────── */
+// Разрешённые хосты источника/редиректа
+var ALLOWED_HOSTS = [
+  "trahkino.me",
+  ".trahkino.me",
+  "tkvids.com",
+  ".tkvids.com"
+];
 
-  function encode(url) { return PROXY + encodeURIComponent(url); }
+addEventListener("fetch", function (event) {
+  event.respondWith(handleRequest(event.request));
+});
 
-  function req(url, ok, fail, opts) {
-    opts = opts || {};
-    var xhr = new XMLHttpRequest();
-    xhr.open(opts.method || 'GET', url, true);
-    xhr.responseType = opts.type || 'text';
-    xhr.timeout = opts.timeout || 15000;
-    xhr.onload = function () {
-      if (xhr.status >= 200 && xhr.status < 400) ok(xhr.response);
-      else fail('HTTP ' + xhr.status + ' → ' + url);
-    };
-    xhr.onerror   = function () { fail('network error: ' + url); };
-    xhr.ontimeout = function () { fail('timeout: ' + url); };
-    xhr.send();
-  }
+async function handleRequest(request) {
+  try {
+    var url = new URL(request.url);
 
-  /* ── парсинг карточек ──────────────────────────────────────── */
-
-  var CARD_SEL = [
-    '.item',
-    '.video-item',
-    '.thumb',
-    'article',
-    '.item-video'
-  ];
-
-  function parseCards(html) {
-    var doc = (new DOMParser()).parseFromString(html, 'text/html');
-    var items = [];
-
-    for (var s = 0; s < CARD_SEL.length; s++) {
-      var nodes = doc.querySelectorAll(CARD_SEL[s]);
-      if (!nodes.length) continue;
-
-      nodes.forEach(function (node) {
-        var a    = node.querySelector('a[href*="/video/"]') || node.closest('a') || node.querySelector('a');
-        var img  = node.querySelector('img');
-        var span = node.querySelector('.title, .item-title, h3, h2');
-        if (!a) return;
-
-        var href = a.getAttribute('href') || '';
-        if (!href.match(/\/video\/\d+/)) return;
-        var url = href.startsWith('http') ? href : HOST + href;
-
-        items.push({
-          url   : url,
-          title : (span ? span.textContent.trim() : (a.getAttribute('title') || a.textContent.trim())) || 'Video',
-          poster: img ? (img.getAttribute('data-src') || img.getAttribute('src') || '') : '',
-          type  : 'video'
-        });
-      });
-
-      if (items.length) break;
-    }
-    return items;
-  }
-
-  /* ── извлечение качеств ────────────────────────────────────── */
-
-  /**
-   * Со страницы видео получаем свежие get_file URLs из kt_player,
-   * затем следуем 302 → получаем финальный CDN URL (tkvids.com).
-   *
-   * kt_player в HTML выглядит так:
-   *   video_url: '/get_file/36/{hash}/{block}/{id}/{id}.mp4/'
-   *   video_url_2: '/get_file/36/{hash2}/{block}/{id}/{id}_360p.mp4/'
-   * или через license_code (base64).
-   */
-
-  // Regex для прямых video_url полей
-  var RE_VURL  = /video_url\s*[:=]\s*['"]([^'"]+get_file[^'"]+)['"]/gi;
-  // Regex для license_code (base64 → decode → get_file)
-  var RE_LC    = /license_code\s*[:=]\s*['"]([A-Za-z0-9+/=]{20,})['"]/gi;
-  // Regex для get_file внутри function/0/ обёртки
-  var RE_FN0   = /function\/0\/(https?:\/\/[^'"&\s]+get_file[^'"&\s]+)/gi;
-
-  function decodeB64Safe(str) {
-    try { return atob(str); } catch (e) { return ''; }
-  }
-
-  function extractGetFileUrls(html) {
-    var urls = [];
-    var seen = {};
-    var m;
-
-    // 1. прямые video_url
-    RE_VURL.lastIndex = 0;
-    while ((m = RE_VURL.exec(html)) !== null) {
-      var u = m[1].trim();
-      if (!u.startsWith('http')) u = HOST + u;
-      if (!seen[u]) { seen[u] = 1; urls.push(u); }
-    }
-
-    // 2. function/0/ обёртка
-    RE_FN0.lastIndex = 0;
-    while ((m = RE_FN0.exec(html)) !== null) {
-      var u2 = m[1].trim();
-      if (!seen[u2]) { seen[u2] = 1; urls.push(u2); }
-    }
-
-    // 3. license_code → base64 decode → ищем get_file
-    RE_LC.lastIndex = 0;
-    while ((m = RE_LC.exec(html)) !== null) {
-      var decoded = decodeB64Safe(m[1]);
-      if (!decoded) continue;
-      var inner = decoded.match(/\/get_file\/[^\s'"]+/g);
-      if (!inner) continue;
-      inner.forEach(function (path) {
-        var u3 = HOST + path;
-        if (!seen[u3]) { seen[u3] = 1; urls.push(u3); }
+    if (url.pathname === "/health") {
+      return jsonResponse(200, {
+        ok: true,
+        version: VERSION,
+        ts: new Date().toISOString()
       });
     }
 
-    return urls;
+    if (url.pathname === "/resolve") {
+      return await handleResolve(request);
+    }
+
+    return jsonResponse(404, {
+      ok: false,
+      error: "Not found",
+      version: VERSION
+    });
+  } catch (err) {
+    return jsonResponse(500, {
+      ok: false,
+      error: "Unhandled error",
+      details: safeError(err),
+      version: VERSION
+    });
+  }
+}
+
+async function handleResolve(request) {
+  var reqUrl = new URL(request.url);
+  var input = (reqUrl.searchParams.get("url") || "").trim();
+  var format = (reqUrl.searchParams.get("format") || "json").toLowerCase();
+
+  if (!input) {
+    return jsonResponse(400, {
+      ok: false,
+      error: "Missing query param: url",
+      version: VERSION
+    });
   }
 
-  /**
-   * Определяем качество из URL по суффиксу файла
-   */
-  function qualityFromUrl(url) {
-    var m = url.match(/_(\d{3,4})p\.mp4/);
-    if (m) return m[1] + 'p';
-    if (url.match(/\.mp4/) && !url.match(/_\d+p/)) return '240p'; // базовый
-    return 'auto';
+  var parsed;
+  try {
+    parsed = new URL(input);
+  } catch (e) {
+    return jsonResponse(400, {
+      ok: false,
+      error: "Invalid url",
+      version: VERSION
+    });
   }
 
-  /**
-   * Для каждого get_file URL делаем HEAD-запрос через прокси,
-   * чтобы проследить 302 и получить Location (CDN URL).
-   * Прокси zonaproxy должен делать redirect follow и
-   * возвращать X-Final-Url или просто финальный URL.
-   *
-   * Если прокси не раскрывает финальный URL через заголовок,
-   * используем get_file напрямую как source — он сам выдаст видео
-   * через 302 браузеру (Lampa умеет следовать редиректам при воспроизведении).
-   */
-  function resolveGetFile(getFileUrl, cb) {
-    // Пробуем получить финальный CDN через прокси с follow
-    var proxyUrl = encode(getFileUrl);
+  if (!isAllowedHost(parsed.hostname)) {
+    return jsonResponse(403, {
+      ok: false,
+      error: "Host is not allowed",
+      host: parsed.hostname,
+      version: VERSION
+    });
+  }
 
-    var xhr = new XMLHttpRequest();
-    xhr.open('HEAD', proxyUrl, true);
-    xhr.timeout = 10000;
-    xhr.onload = function () {
-      // Смотрим заголовки на предмет финального URL
-      var finalUrl =
-        xhr.getResponseHeader('x-final-url') ||
-        xhr.getResponseHeader('x-resolved-url') ||
-        xhr.getResponseHeader('location') ||
-        null;
+  var result;
+  if (isVideoPageUrl(parsed)) {
+    result = await resolveFromVideoPage(input);
+  } else if (isGetFileUrl(parsed)) {
+    result = await resolveFromGetFile(input, null);
+  } else {
+    return jsonResponse(400, {
+      ok: false,
+      error: "Unsupported URL. Expected /video/{id}/ or /get_file/...",
+      version: VERSION
+    });
+  }
 
-      if (finalUrl && finalUrl.indexOf('tkvids.com') !== -1) {
-        cb(finalUrl);
-      } else if (xhr.status === 206 || xhr.status === 200) {
-        // Прокси уже стримит — значит он разрезолвил, отдаём proxyUrl
-        cb(proxyUrl);
-      } else {
-        // Отдаём get_file напрямую — Lampa/плеер сам пройдёт 302
-        cb(getFileUrl);
+  if (!result.ok) {
+    return jsonResponse(result.statusCode || 502, {
+      ok: false,
+      version: VERSION,
+      error: result.error || "Resolve failed",
+      trace: result.trace || []
+    });
+  }
+
+  if (format === "redirect") {
+    return Response.redirect(result.finalUrl, 302);
+  }
+
+  return jsonResponse(200, {
+    ok: true,
+    version: VERSION,
+    input: input,
+    sourceType: result.sourceType,
+    videoPageUrl: result.videoPageUrl || null,
+    getFileUrl: result.getFileUrl || null,
+    normalizedGetFileUrl: result.normalizedGetFileUrl || null,
+    finalUrl: result.finalUrl,
+    finalHost: safeHost(result.finalUrl),
+    status: result.finalStatus,
+    contentType: result.contentType || null,
+    trace: result.trace || []
+  });
+}
+
+/**
+ * Главный сценарий: video page -> get_file -> final mp4
+ * При 410: рефреш страницы и повторная сборка get_file
+ */
+async function resolveFromVideoPage(videoPageUrl) {
+  var trace = [];
+  var pass = 0;
+  var lastError = null;
+
+  while (pass < 2) {
+    pass += 1;
+    trace.push("pass#" + pass + ": fetch video page");
+
+    var page = await fetchVideoPage(videoPageUrl);
+    if (!page.ok) {
+      return fail(502, "Cannot load video page", trace, page.error);
+    }
+
+    var getFileUrl = extractGetFileUrl(page.html, videoPageUrl);
+    if (!getFileUrl) {
+      return fail(502, "get_file URL not found on page", trace);
+    }
+
+    var resolved = await resolveFromGetFile(getFileUrl, videoPageUrl);
+    trace = trace.concat(resolved.trace || []);
+
+    if (resolved.ok) {
+      resolved.sourceType = "video_page";
+      resolved.videoPageUrl = videoPageUrl;
+      resolved.getFileUrl = getFileUrl;
+      return resolved;
+    }
+
+    // Важный фикс 1.4.1: при 410 делаем рефреш токена через повторный парсинг страницы
+    if (resolved.errorCode === "TOKEN_EXPIRED_410" && pass < 2) {
+      trace.push("410 detected -> refresh page token and retry");
+      continue;
+    }
+
+    lastError = resolved.error || "Resolve from get_file failed";
+    break;
+  }
+
+  return fail(502, lastError || "Resolve failed", trace);
+}
+
+/**
+ * Сценарий: get_file -> redirects -> final mp4
+ * ВАЖНО: только GET, без HEAD
+ */
+async function resolveFromGetFile(getFileUrl, sourceReferer) {
+  var trace = [];
+  var normalized = normalizeGetFileUrl(getFileUrl);
+  trace.push("get_file(original): " + getFileUrl);
+  trace.push("get_file(normalized): " + normalized);
+
+  var current = normalized;
+  var i = 0;
+
+  while (i < MAX_REDIRECTS) {
+    i += 1;
+
+    var u;
+    try {
+      u = new URL(current);
+    } catch (e) {
+      return fail(502, "Bad redirect URL", trace, safeError(e));
+    }
+
+    if (!isAllowedHost(u.hostname)) {
+      return fail(403, "Redirect to not allowed host: " + u.hostname, trace);
+    }
+
+    var hdrs = buildDomainHeaders(current, sourceReferer);
+    // Критично: GET (не HEAD)
+    var resp = await fetchWithTimeout(current, {
+      method: "GET",
+      redirect: "manual",
+      headers: hdrs
+    }, REQUEST_TIMEOUT_MS);
+
+    trace.push("hop#" + i + " " + current + " -> status " + resp.status);
+
+    // 3xx редирект
+    if (isRedirectStatus(resp.status)) {
+      var loc = resp.headers.get("location");
+      if (!loc) {
+        return fail(502, "Redirect without Location header", trace);
       }
-    };
-    xhr.onerror = xhr.ontimeout = function () { cb(getFileUrl); };
-    xhr.send();
-  }
-
-  function extractQualities(videoPageUrl, success, error) {
-    console.log(TAG, 'qualities for', videoPageUrl);
-
-    req(encode(videoPageUrl), function (html) {
-      var getFileUrls = extractGetFileUrls(html);
-      console.log(TAG, 'found get_file URLs:', getFileUrls.length, getFileUrls);
-
-      if (!getFileUrls.length) {
-        return error(TAG + ' не найдены video_url на странице ' + videoPageUrl);
-      }
-
-      // Резолвим все URL параллельно
-      var results = [];
-      var done    = 0;
-
-      getFileUrls.forEach(function (gfUrl, idx) {
-        resolveGetFile(gfUrl, function (finalUrl) {
-          var quality = qualityFromUrl(gfUrl);
-          results[idx] = { quality: quality, url: finalUrl };
-          done++;
-          if (done === getFileUrls.length) {
-            // Убираем дубли по url
-            var seen  = {};
-            var quals = [];
-            results.forEach(function (r) {
-              if (r && !seen[r.url]) {
-                seen[r.url] = 1;
-                quals.push(r);
-              }
-            });
-            // Сортируем по убыванию качества
-            quals.sort(function (a, b) {
-              return (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0);
-            });
-            console.log(TAG, 'resolved qualities:', quals);
-            success(quals);
-          }
-        });
-      });
-    }, error);
-  }
-
-  /* ── главная и поиск ───────────────────────────────────────── */
-
-  function buildUrl(type, query, page) {
-    page = page || 1;
-    if (type === 'main')   return encode(HOST + '/latest-updates/');
-    if (type === 'search') return encode(HOST + '/?s=' + encodeURIComponent(query) + '&from_videos=' + ((page - 1) * 24));
-    return encode(HOST + '/latest-updates/');
-  }
-
-  /* ── регистрация ───────────────────────────────────────────── */
-
-  var TrhParser = {
-    home: function (params, success, error) {
-      req(buildUrl('main'), function (html) {
-        success({ title: 'TrahKino', results: parseCards(html), collection: true });
-      }, error);
-    },
-
-    search: function (params, success, error) {
-      var query = (params.query || '').trim();
-      if (!query) return error('Пустой запрос');
-      req(buildUrl('search', query, 1), function (html) {
-        success({ title: 'TrahKino: ' + query, results: parseCards(html), collection: true, total_pages: 3 });
-      }, error);
-    },
-
-    qualities: function (videoPageUrl, success, error) {
-      extractQualities(videoPageUrl, success, error);
+      current = absolutizeUrl(current, loc);
+      // нормализация на каждом шаге
+      current = normalizeGetFileUrl(current);
+      continue;
     }
+
+    // 410 = протухший токен
+    if (resp.status === 410) {
+      return {
+        ok: false,
+        statusCode: 410,
+        errorCode: "TOKEN_EXPIRED_410",
+        error: "Token expired (410) on get_file",
+        trace: trace
+      };
+    }
+
+    // Успешный ответ с видео
+    var ctype = (resp.headers.get("content-type") || "").toLowerCase();
+    if ((resp.status === 200 || resp.status === 206) && ctype.indexOf("video/mp4") !== -1) {
+      return {
+        ok: true,
+        sourceType: "get_file",
+        getFileUrl: getFileUrl,
+        normalizedGetFileUrl: normalized,
+        finalUrl: current,
+        finalStatus: resp.status,
+        contentType: ctype,
+        trace: trace
+      };
+    }
+
+    // Иногда CDN отдает 200/206 без content-type, но URL уже mp4
+    if ((resp.status === 200 || resp.status === 206) && /\.mp4(\?|$)/i.test(current)) {
+      return {
+        ok: true,
+        sourceType: "get_file",
+        getFileUrl: getFileUrl,
+        normalizedGetFileUrl: normalized,
+        finalUrl: current,
+        finalStatus: resp.status,
+        contentType: ctype || null,
+        trace: trace
+      };
+    }
+
+    // Иные ответы — ошибка
+    return fail(502, "Unexpected response status/content-type", trace, {
+      status: resp.status,
+      contentType: ctype
+    });
+  }
+
+  return fail(508, "Too many redirects", trace);
+}
+
+async function fetchVideoPage(videoPageUrl) {
+  try {
+    var headers = buildDomainHeaders(videoPageUrl, null);
+    headers.set("accept", "text/html,application/xhtml+xml");
+
+    var resp = await fetchWithTimeout(videoPageUrl, {
+      method: "GET",
+      redirect: "follow",
+      headers: headers
+    }, REQUEST_TIMEOUT_MS);
+
+    if (resp.status < 200 || resp.status >= 300) {
+      return { ok: false, error: "Video page HTTP " + resp.status };
+    }
+
+    var html = await resp.text();
+    return { ok: true, html: html };
+  } catch (e) {
+    return { ok: false, error: safeError(e) };
+  }
+}
+
+function extractGetFileUrl(html, baseUrl) {
+  // 1) прямой URL
+  var m = html.match(/https?:\/\/[^"'\\s<>]+\/get_file\/[^"'\\s<>]+/i);
+  if (m && m[0]) {
+    return absolutizeUrl(baseUrl, m[0]);
+  }
+
+  // 2) относительный путь
+  var m2 = html.match(/["'](\/get_file\/[^"']+)["']/i);
+  if (m2 && m2[1]) {
+    return absolutizeUrl(baseUrl, m2[1]);
+  }
+
+  return null;
+}
+
+/**
+ * Фикс 1.4.1:
+ *   ..._360p.mp4/   -> ..._360p.mp4
+ *   ...movie.mp4/?a -> ...movie.mp4?a
+ */
+function normalizeGetFileUrl(raw) {
+  if (!raw) return raw;
+
+  var out = raw.trim();
+
+  // убираем лишний слеш сразу после .mp4
+  out = out.replace(/(\.mp4)\/(\?|$)/i, "$1$2");
+
+  // иногда бывает двойной слеш перед query
+  out = out.replace(/\?+/, "?");
+
+  return out;
+}
+
+function buildDomainHeaders(targetUrl, sourceReferer) {
+  var u = new URL(targetUrl);
+  var origin = u.protocol + "//" + u.host + "/";
+  var headers = new Headers();
+
+  headers.set("user-agent", "Mozilla/5.0 (compatible; TRHWorker/" + VERSION + ")");
+  headers.set("accept", "*/*");
+  headers.set("accept-language", "ru,en;q=0.9");
+  headers.set("cache-control", "no-cache");
+  headers.set("pragma", "no-cache");
+  headers.set("range", "bytes=0-0");
+
+  // Реферер по домену назначения (важно для CDN)
+  if (sourceReferer) {
+    try {
+      var sr = new URL(sourceReferer);
+      headers.set("referer", sr.protocol + "//" + sr.host + "/");
+      headers.set("origin", sr.protocol + "//" + sr.host);
+    } catch (e) {
+      headers.set("referer", origin);
+      headers.set("origin", u.protocol + "//" + u.host);
+    }
+  } else {
+    headers.set("referer", origin);
+    headers.set("origin", u.protocol + "//" + u.host);
+  }
+
+  return headers;
+}
+
+function isVideoPageUrl(u) {
+  return /\/video\/\d+\/?$/i.test(u.pathname);
+}
+
+function isGetFileUrl(u) {
+  return /\/get_file\//i.test(u.pathname);
+}
+
+function isRedirectStatus(code) {
+  return code === 301 || code === 302 || code === 303 || code === 307 || code === 308;
+}
+
+function isAllowedHost(host) {
+  host = (host || "").toLowerCase();
+
+  for (var i = 0; i < ALLOWED_HOSTS.length; i++) {
+    var rule = ALLOWED_HOSTS[i];
+    if (rule.charAt(0) === ".") {
+      var suffix = rule.slice(1);
+      if (host === suffix || host.endsWith("." + suffix)) return true;
+    } else {
+      if (host === rule) return true;
+    }
+  }
+
+  return false;
+}
+
+function absolutizeUrl(base, maybeRelative) {
+  try {
+    return new URL(maybeRelative).toString();
+  } catch (e) {
+    return new URL(maybeRelative, base).toString();
+  }
+}
+
+function fetchWithTimeout(url, init, timeoutMs) {
+  var controller = new AbortController();
+  var timer = setTimeout(function () {
+    controller.abort("timeout");
+  }, timeoutMs || REQUEST_TIMEOUT_MS);
+
+  var reqInit = init || {};
+  reqInit.signal = controller.signal;
+
+  return fetch(url, reqInit).finally(function () {
+    clearTimeout(timer);
+  });
+}
+
+function safeHost(url) {
+  try {
+    return new URL(url).host;
+  } catch (e) {
+    return null;
+  }
+}
+
+function fail(statusCode, error, trace, details) {
+  return {
+    ok: false,
+    statusCode: statusCode || 502,
+    error: error || "Error",
+    details: details || null,
+    trace: trace || []
   };
+}
 
-  function register() {
-    if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
-      window.AdultPlugin.registerParser(NAME, TrhParser);
-      console.log(TAG, 'v' + VERSION + ' зарегистрирован');
-      return true;
+function safeError(err) {
+  if (!err) return "unknown";
+  if (typeof err === "string") return err;
+  return err.message || String(err);
+}
+
+function jsonResponse(status, obj) {
+  return new Response(JSON.stringify(obj, null, 2), {
+    status: status,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store"
     }
-    return false;
-  }
-
-  if (!register()) {
-    var iv = setInterval(function () { if (register()) clearInterval(iv); }, 350);
-    setTimeout(function () { clearInterval(iv); }, 10000);
-  }
-})();
+  });
+}
