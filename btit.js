@@ -1,19 +1,13 @@
 // =============================================================
 // btit.js — Парсер BigTitsLust для AdultJS (Lampa)
 // =============================================================
-// Версия  : 1.2.1
-// Изменения:
-//   [1.2.1] Улучшен поиск remote_control.php:
-//     - Поиск в flashvars (flashvars.remote_control, flashvars.video_url)
-//     - Поиск в любых JS переменных и JSON
-//     - Прямой поиск URL с remote_control.php в HTML
-//     - fallback на .mp4 минуя get_file
+// Версия  : 1.2.2
 // =============================================================
 
 (function () {
   'use strict';
 
-  var VERSION = '1.2.1';
+  var VERSION = '1.2.2';
   var NAME    = 'btit';
   var HOST    = 'https://www.bigtitslust.com';
   var TAG     = '[' + NAME + ']';
@@ -67,7 +61,7 @@
   }
 
   // ----------------------------------------------------------
-  // cleanUrl — для постеров и страниц (НЕ для видео)
+  // cleanUrl
   // ----------------------------------------------------------
   function cleanUrl(u) {
     if (!u) return '';
@@ -79,7 +73,6 @@
 
   // ----------------------------------------------------------
   // ПАРСИНГ КАТАЛОГА
-  // JSON: cardSelector=".item"
   // ----------------------------------------------------------
   function parsePlaylist(html) {
     var results = [];
@@ -120,28 +113,55 @@
   }
 
   // ----------------------------------------------------------
-  // extractQualities(html)
-  //
-  // [1.2.1] Улучшенный поиск remote_control.php
+  // extractQualities — ПОИСК ВИДЕО URL
   // ----------------------------------------------------------
-  // ----------------------------------------------------------
-   qualities: function (videoPageUrl, success, error) {
-    console.log(TAG, 'qualities() →', videoPageUrl);
-
-    // Используем Worker для загрузки страницы (ОДИН РАЗ)
-    var proxyUrl = getWorkerBase() + '/?url=' + encodeURIComponent(videoPageUrl);
-    console.log(TAG, 'загружаем через прокси:', proxyUrl);
-
-    httpGet(proxyUrl, function (html) {
-        console.log(TAG, 'html длина:', html.length);
-        if (!html || html.length < 500) {
-            error('html < 500');
+  function extractQualities(html, videoPageUrl, success, error) {
+    var q = {};
+    
+    // S1: Поиск remote_control.php в HTML
+    var rcMatches = html.match(/https?:\/\/media\d+\.bigtitslust\.com\/remote_control\.php\?[^"'\s<>]+/gi);
+    
+    if (rcMatches && rcMatches.length) {
+        var videoUrl = rcMatches[0].replace(/\\/g, '');
+        // Проксируем через Worker
+        var proxiedUrl = WORKER_URL + '/?url=' + encodeURIComponent(videoUrl);
+        q['HD'] = proxiedUrl;
+        console.log(TAG, '✅ Найден remote_control, проксируем:', proxiedUrl.substring(0, 100));
+        success({ qualities: q });
+        return;
+    }
+    
+    // S2: Поиск в flashvars
+    var flashvarsMatch = html.match(/flashvars\s*[:=]\s*({[^;]+?})\s*[;}]/i);
+    if (flashvarsMatch) {
+        var rcMatch = flashvarsMatch[1].match(/remote_control\s*:\s*['"]([^'"]+)['"]/i);
+        if (rcMatch && rcMatch[1].includes('remote_control.php')) {
+            var videoUrl = rcMatch[1].replace(/\\/g, '');
+            var proxiedUrl = WORKER_URL + '/?url=' + encodeURIComponent(videoUrl);
+            q['HD'] = proxiedUrl;
+            console.log(TAG, '✅ flashvars.remote_control, проксируем');
+            success({ qualities: q });
             return;
         }
-
-        extractQualities(html, videoPageUrl, success, error);
-     }, error);
-   },
+    }
+    
+    // S3: Fallback - любой .mp4 НЕ из get_file
+    var mp4Matches = html.match(/https?:\/\/[^"'\s<>\\]+\.mp4[^"'\s<>\\]*/gi);
+    if (mp4Matches) {
+        for (var i = 0; i < mp4Matches.length; i++) {
+            var mp4 = mp4Matches[i];
+            if (mp4.indexOf('get_file') === -1) {
+                var proxiedUrl = WORKER_URL + '/?url=' + encodeURIComponent(mp4);
+                q['HD'] = proxiedUrl;
+                console.log(TAG, '⚠️ Fallback .mp4, проксируем');
+                success({ qualities: q });
+                return;
+            }
+        }
+    }
+    
+    error('Видео не найдено (remote_control.php не найден)');
+  }
 
   // ----------------------------------------------------------
   // URL BUILDER
@@ -219,7 +239,6 @@
     qualities: function (videoPageUrl, success, error) {
       console.log(TAG, 'qualities() →', videoPageUrl);
 
-      // Используем Worker прокси для загрузки страницы
       var proxyUrl = getWorkerBase() + '/?url=' + encodeURIComponent(videoPageUrl);
       console.log(TAG, 'загружаем через прокси:', proxyUrl);
 
@@ -230,15 +249,10 @@
           return; 
         }
 
-        // Диагностика для отладки
         console.log(TAG, 'remote_control cnt:', (html.match(/remote_control/gi) || []).length);
-        console.log(TAG, 'video_url cnt:',      (html.match(/video_url/gi)      || []).length);
-        console.log(TAG, 'get_file cnt:',       (html.match(/get_file/gi)       || []).length);
-        console.log(TAG, '.mp4 cnt:',           (html.match(/\.mp4/gi)          || []).length);
-        console.log(TAG, 'flashvars cnt:',      (html.match(/flashvars/gi)      || []).length);
+        console.log(TAG, '.mp4 cnt:', (html.match(/\.mp4/gi) || []).length);
 
         extractQualities(html, videoPageUrl, success, error);
-
       }, error);
     },
   };
@@ -254,6 +268,7 @@
     }
     return false;
   }
+  
   if (!tryRegister()) {
     var poll = setInterval(function () { if (tryRegister()) clearInterval(poll); }, 200);
     setTimeout(function () { clearInterval(poll); }, 5000);
