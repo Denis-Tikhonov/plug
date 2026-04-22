@@ -80,17 +80,54 @@
 
   function extractQualities(html, videoPageUrl, success, error) {
     var q = {};
-    var rcMatches = html.match(/https?:\/\/media\d+\.bigtitslust\.com\/remote_control\.php\?[^"'\s<>]+/gi);
-    if (rcMatches && rcMatches.length) {
-      var videoUrl = rcMatches[0].replace(/\\/g, '');
-      var proxiedUrl = WORKER_URL + '/?url=' + encodeURIComponent(videoUrl);
-      q['HD'] = proxiedUrl;
-      console.log(TAG, '✅ Найден remote_control, проксируем:', proxiedUrl.substring(0, 100));
-      success({ qualities: q });
-      return;
+    
+    // 1. Поиск video_url в flashvars
+    var flashvarsMatch = html.match(/flashvars\s*[:=]\s*({[^;]+?})\s*[;}]/i);
+    if (flashvarsMatch) {
+        try {
+            var flashvarsStr = flashvarsMatch[1];
+            // Ищем video_url
+            var vuMatch = flashvarsStr.match(/video_url\s*:\s*['"]([^'"]+)['"]/i);
+            if (vuMatch && vuMatch[1]) {
+                var videoUrl = vuMatch[1].replace(/\\/g, '');
+                // Если это get_file URL - трансформируем в remote_control
+                if (videoUrl.indexOf('/get_file/') !== -1) {
+                    // Извлекаем ID видео из URL
+                    var idMatch = videoUrl.match(/\/get_file\/\d+\/[a-f0-9]+\/(\d+)\/\d+\/\d+\.mp4/);
+                    if (idMatch) {
+                        var videoId = idMatch[1];
+                        // Формируем remote_control URL (нужны актуальные параметры)
+                        // Временное решение - используем прокси с этим URL
+                        var proxiedUrl = WORKER_URL + '/?url=' + encodeURIComponent(videoUrl);
+                        q['HD'] = proxiedUrl;
+                        console.log(TAG, '✅ video_url из flashvars, проксируем:', proxiedUrl.substring(0, 100));
+                        success({ qualities: q });
+                        return;
+                    }
+                }
+            }
+        } catch(e) {
+            console.warn(TAG, 'flashvars parse error:', e);
+        }
     }
+    
+    // 2. Fallback: ищем любую ссылку на .mp4
+    var mp4Matches = html.match(/https?:\/\/[^"'\s<>\\]+\.mp4[^"'\s<>\\]*/gi);
+    if (mp4Matches) {
+        for (var i = 0; i < mp4Matches.length; i++) {
+            var mp4 = mp4Matches[i];
+            if (mp4.indexOf('get_file') !== -1) {
+                var proxiedUrl = WORKER_URL + '/?url=' + encodeURIComponent(mp4);
+                q['HD'] = proxiedUrl;
+                console.log(TAG, '⚠️ Fallback get_file, проксируем');
+                success({ qualities: q });
+                return;
+            }
+        }
+    }
+    
     error('Видео не найдено');
-  }
+}
 
   function buildUrl(type, value, page) {
     var url = HOST;
