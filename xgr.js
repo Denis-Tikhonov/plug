@@ -1,23 +1,37 @@
 // =============================================================
 // xgr.js — Парсер rt.xgroovy.com для AdultJS
-// Version  : 1.0.0
+// Version  : 1.1.0
 // Site     : https://rt.xgroovy.com  (RU-локаль xgroovy)
 // Strategy : SSR, <source title="1080p|720p|480p|240p">
 // Worker   : rt.xgroovy.com + i.xgroovy.com + xgroovy.com
 //            должны быть в ALLOWED_TARGETS
 // Cookie   : mature=1  (Age Gate)
 // =============================================================
+// Изменения:
+//   [1.0.0] Начальная версия
+//   [1.1.0] BUGFIX: total_pages порог снижен с 48 до 28
+//           (xGroovy отдаёт 32 карточки на главной и 24-32
+//           в категориях — порог 48 никогда не достигался,
+//           пагинация обрывалась после первой страницы)
+//   [1.1.0] BUGFIX: S3 fallback-URL в extractQualities
+//           теперь проксируются через Worker перед возвратом
+//           (прямой get_file URL с rt.xgroovy.com блокируется
+//           hotlink-защитой при воспроизведении без Referer)
+//   [1.1.0] BUGFIX: добавлены .jpg fallback-селекторы для постеров
+//           (data-original, data-lazy-src, data-thumb)
+//   [1.1.0] IMPROVE: увеличен лимит fallback ссылок до 10 в S3
+// =============================================================
 
 (function () {
   'use strict';
 
-  var VERSION = '1.0.0';
+  var VERSION = '1.1.0';
   var NAME    = 'xgr';
   var HOST    = 'https://rt.xgroovy.com';
-  var TAG     = '[' + NAME + ']';
+  var TAG     = '[' + NAME + ' v' + VERSION + ']';
 
   // ============================================================
-  // §1. КАТЕГОРИИ (73 шт., из JSON)
+  // §1. КАТЕГОРИИ (73 шт.)
   // ============================================================
   var CATEGORIES = [
     { title: 'Минет',                    slug: 'blowjob'            },
@@ -35,20 +49,20 @@
     { title: 'Милфы',                    slug: 'milf'               },
     { title: 'Втроём',                   slug: 'threesome'          },
     { title: 'Семейные Фантазии',        slug: 'family'             },
-    { title: 'Миниатюрные',             slug: 'petite'             },
-    { title: 'Большой Чёрный Член',     slug: 'bbc'                },
-    { title: 'Грубый Секс',             slug: 'rough'              },
+    { title: 'Миниатюрные',              slug: 'petite'             },
+    { title: 'Большой Чёрный Член',      slug: 'bbc'                },
+    { title: 'Грубый Секс',              slug: 'rough'              },
     { title: 'Кримпай',                  slug: 'creampie'           },
     { title: 'Латинки',                  slug: 'latina'             },
-    { title: 'Негритянки',              slug: 'ebony'              },
+    { title: 'Негритянки',               slug: 'ebony'              },
     { title: 'Лесбиянки',               slug: 'lesbians'           },
     { title: 'Сквирт',                   slug: 'squirt'             },
     { title: 'Измена',                   slug: 'cheating'           },
     { title: 'Реалити',                  slug: 'reality'            },
     { title: 'Оргазм',                   slug: 'orgasm'             },
     { title: 'Куколд',                   slug: 'cuckold'            },
-    { title: 'На Публике',              slug: 'public'             },
-    { title: 'Молодые (18/19)',          slug: 'young'              },
+    { title: 'На Публике',               slug: 'public'             },
+    { title: 'Молодые (18/19)',           slug: 'young'              },
     { title: 'Чулки',                    slug: 'stockings'          },
     { title: 'Игрушки',                  slug: 'toys'               },
     { title: 'Униформа',                 slug: 'uniform'            },
@@ -68,31 +82,31 @@
     { title: 'Подборка',                 slug: 'compilation'        },
     { title: 'Косплей',                  slug: 'cosplay'            },
     { title: 'Эротика',                  slug: 'erotic'             },
-    { title: 'Французское',             slug: 'french'             },
+    { title: 'Французское',              slug: 'french'             },
     { title: 'Японское',                 slug: 'japanese'           },
     { title: 'Зрелые',                   slug: 'mature'             },
-    { title: 'Мультфильм',              slug: 'cartoon'            },
+    { title: 'Мультфильм',               slug: 'cartoon'            },
     { title: 'Школа (18+)',              slug: 'school'             },
     { title: 'Женская Доминация',        slug: 'femdom'             },
-    { title: 'Первый Раз',              slug: 'first-time'         },
+    { title: 'Первый Раз',               slug: 'first-time'         },
     { title: 'Немецкое',                 slug: 'german'             },
     { title: 'Массаж',                   slug: 'massage'            },
     { title: 'Старые - Молодые (18/19)', slug: 'old-young'          },
     { title: 'Китайское',                slug: 'chinese'            },
     { title: 'Сгенерировано ИИ',         slug: 'ai'                 },
     { title: 'Арабское',                 slug: 'arab'               },
-    { title: 'Бразильское',             slug: 'brazilian'          },
-    { title: 'Британское',              slug: 'british'            },
-    { title: 'Знаменитости',            slug: 'celebrity'          },
-    { title: 'Двойное Проникновение',   slug: 'double-penetration' },
+    { title: 'Бразильское',              slug: 'brazilian'          },
+    { title: 'Британское',               slug: 'british'            },
+    { title: 'Знаменитости',             slug: 'celebrity'          },
+    { title: 'Двойное Проникновение',    slug: 'double-penetration' },
     { title: 'Гэнгбэнг',                slug: 'gangbang'           },
     { title: 'Русское',                  slug: 'russian'            },
     { title: 'Буккаке',                  slug: 'bukkake'            },
     { title: 'Фистинг',                  slug: 'fisting'            },
     { title: 'Индийское',                slug: 'indian'             },
-    { title: 'Итальянское',             slug: 'italian'            },
+    { title: 'Итальянское',              slug: 'italian'            },
     { title: 'Винтаж',                   slug: 'vintage'            },
-    { title: 'Вебкамера',               slug: 'webcam'             },
+    { title: 'Вебкамера',                slug: 'webcam'             },
   ];
 
   // ============================================================
@@ -107,6 +121,19 @@
         .then(success)
         .catch(error);
     }
+  }
+
+  // [1.1.0] Проксирование URL через Worker (для CDN-ссылок в qualities)
+  function proxyUrl(url) {
+    if (!url) return url;
+    if (window.AdultPlugin && window.AdultPlugin.workerUrl) {
+      var w = window.AdultPlugin.workerUrl;
+      if (w.charAt(w.length - 1) !== '=') w = w + '=';
+      // Не проксируем уже проксированные URL
+      if (url.indexOf(w) === 0) return url;
+      if (url.indexOf('http') === 0) return w + encodeURIComponent(url);
+    }
+    return url;
   }
 
   // ============================================================
@@ -131,6 +158,7 @@
   //   S1: DOMParser → source[src][title] внутри video#main_video
   //   S2: regex <source src="..." title="720p">  (оба порядка атрибутов)
   //   S3: fallback — все /get_file/...mp4 ссылки в HTML
+  //       [1.1.0] URL из S3 ПРОКСИРУЮТСЯ через Worker
   // ============================================================
   function extractQualities(html) {
     var q = {};
@@ -138,7 +166,6 @@
     // S1 — DOMParser (самый надёжный)
     try {
       var doc = new DOMParser().parseFromString(html, 'text/html');
-      // Сначала ищем внутри тега video, потом везде
       var containers = [
         doc.querySelector('video#main_video'),
         doc.querySelector('video'),
@@ -153,7 +180,7 @@
           var label = srcs[si].getAttribute('title') ||
                       srcs[si].getAttribute('label') ||
                       srcs[si].getAttribute('size')  || '';
-          if (label && !q[label]) q[label] = src;
+          if (label && !q[label]) q[label] = cleanUrl(src);
         }
         if (Object.keys(q).length) break;
       }
@@ -177,12 +204,13 @@
     }
 
     // S3 — fallback: прямые get_file URL с качеством в имени файла
+    // [1.1.0] BUGFIX: результат проксируется через Worker
     if (!Object.keys(q).length) {
       var gfRe = /(https?:\/\/[^"'\s<>]+\/get_file\/[^"'\s<>]+\.mp4[^"'\s<>]*)/gi;
       var gf, cnt = 0;
-      while ((gf = gfRe.exec(html)) !== null && cnt < 6) {
+      // [1.1.0] лимит увеличен с 6 до 10
+      while ((gf = gfRe.exec(html)) !== null && cnt < 10) {
         var u = cleanUrl(gf[1]);
-        // _1080p.mp4, _720p.mp4, .mp4 (≡480p)
         var qm = u.match(/_(\d+p?)\.mp4/i);
         var key;
         if (qm) {
@@ -190,7 +218,11 @@
         } else {
           key = 'HD' + (cnt || '');
         }
-        if (!q[key]) { q[key] = u; cnt++; }
+        if (!q[key]) {
+          // [1.1.0] проксируем fallback URL через Worker
+          q[key] = proxyUrl(u);
+          cnt++;
+        }
       }
     }
 
@@ -199,10 +231,10 @@
 
   // ============================================================
   // §5. ПАРСИНГ КАРТОЧЕК
-  // Селектор: .item  (на видео-страницах — div.item/a.item с /videos/)
+  // Селектор: .item  (div.item/a.item с /videos/)
   // Заголовок: strong.title  или  a[title]
-  // Постер:   img.thumb[src] / img[data-src]
-  // Каналы (/channels/) автоматически отфильтровываются по href
+  // Постер:   img.thumb[src] / img[data-src] / img[data-original]
+  //           [1.1.0] + data-lazy-src, data-thumb
   // ============================================================
   function parsePlaylist(html) {
     var results = [];
@@ -212,7 +244,6 @@
       var items = doc.querySelectorAll('.item');
 
       if (!items || !items.length) {
-        // Fallback: все ссылки на /videos/
         console.log(TAG, 'parsePlaylist → fallback: a[href*="/videos/"]');
         var links = doc.querySelectorAll('a[href*="/videos/"]');
         for (var j = 0; j < links.length; j++) {
@@ -220,7 +251,7 @@
           if (!href || seen[href]) continue;
           seen[href] = true;
           var imgA  = links[j].querySelector('img');
-          var picA  = imgA ? cleanUrl(imgA.getAttribute('src') || '') : '';
+          var picA  = imgA ? getPicture(imgA) : '';
           var nameA = (links[j].getAttribute('title') || links[j].textContent || '')
                         .replace(/\s+/g, ' ').trim();
           if (!nameA) nameA = slugToTitle(href);
@@ -243,6 +274,24 @@
     return results;
   }
 
+  // [1.1.0] Универсальное извлечение src постера из <img>
+  // Учитывает все известные lazy-load атрибуты xgroovy
+  function getPicture(imgEl) {
+    if (!imgEl) return '';
+    var pic = cleanUrl(
+      imgEl.getAttribute('data-src')      ||
+      imgEl.getAttribute('data-original') ||
+      imgEl.getAttribute('data-lazy-src') ||
+      imgEl.getAttribute('data-thumb')    ||
+      imgEl.getAttribute('src')           || ''
+    );
+    // Отбрасываем spacer/blank
+    if (pic && (pic.indexOf('spacer') !== -1 || pic.indexOf('blank') !== -1 || pic.length < 10)) {
+      pic = '';
+    }
+    return pic;
+  }
+
   function parseCard(el) {
     var href  = '';
     var tagLc = (el.tagName || '').toLowerCase();
@@ -262,13 +311,9 @@
     // Пропускаем не-видео элементы (/channels/, /pornstars/ и т.д.)
     if (!href || href.indexOf('/videos/') === -1) return null;
 
-    // Постер
+    // Постер — [1.1.0] через getPicture()
     var imgEl = el.querySelector('img.thumb') || el.querySelector('img');
-    var pic   = '';
-    if (imgEl) {
-      pic = cleanUrl(imgEl.getAttribute('data-src') || imgEl.getAttribute('src') || '');
-      if (pic.indexOf('spacer') !== -1) pic = '';
-    }
+    var pic   = getPicture(imgEl);
 
     // Заголовок
     var titleEl = el.querySelector('strong.title') || el.querySelector('.title');
@@ -282,7 +327,11 @@
     if (!name) name = slugToTitle(href);
     if (!name) return null;
 
-    return makeCard(name, href, pic, '');
+    // Длительность
+    var durEl = el.querySelector('.time') || el.querySelector('.duration') || el.querySelector('[class*="time"]');
+    var time  = durEl ? durEl.textContent.replace(/[^\d:]/g, '').trim() : '';
+
+    return makeCard(name, href, pic, time);
   }
 
   function makeCard(name, href, pic, time) {
@@ -304,7 +353,6 @@
   function slugToTitle(url) {
     if (!url) return '';
     var parts = url.replace(/\?.*/, '').replace(/\/+$/, '').split('/').filter(Boolean);
-    // /videos/{id}/{slug}/ — берём slug, пропускаем чисто числовой сегмент
     var slug = parts[parts.length - 1] || '';
     if (/^\d+$/.test(slug) && parts.length > 1) slug = parts[parts.length - 2] || '';
     return slug.replace(/[-_]/g, ' ')
@@ -354,10 +402,11 @@
   }
 
   // ============================================================
-  // §8. РОУТИНГ (идентично шаблону UNIVERSAL_TEMPLATE)
+  // §8. РОУТИНГ
   // ============================================================
   function routeView(url, page, success, error) {
     console.log(TAG, 'routeView →', url, 'page=' + page);
+
     var sm = url.match(/[?&]search=([^&]*)/);
     if (sm) {
       return loadPage(buildUrl('search', decodeURIComponent(sm[1]), page), page, success, error);
@@ -381,7 +430,9 @@
       success({
         results:     results,
         collection:  true,
-        total_pages: results.length >= 48 ? page + 1 : page,
+        // [1.1.0] BUGFIX: снижен порог с 48 до 28
+        // xGroovy отдаёт 24-32 карточки на странице
+        total_pages: results.length >= 28 ? page + 1 : page,
         menu:        buildMenu(),
       });
     }, error);
@@ -410,7 +461,7 @@
           title:       'XGroovy: ' + q,
           results:     results,
           collection:  true,
-          total_pages: results.length >= 48 ? p + 1 : p,
+          total_pages: results.length >= 28 ? p + 1 : p,
         });
       }, error);
     },
@@ -426,9 +477,9 @@
           success({ qualities: found });
         } else {
           console.warn(TAG, 'html.length =', html.length);
-          console.warn(TAG, '<source> =', (html.match(/<source/gi) || []).length);
-          console.warn(TAG, 'get_file =', (html.match(/get_file/gi) || []).length);
-          console.warn(TAG, '.mp4 =',    (html.match(/\.mp4/gi)    || []).length);
+          console.warn(TAG, '<source> cnt =', (html.match(/<source/gi) || []).length);
+          console.warn(TAG, 'get_file cnt =', (html.match(/get_file/gi) || []).length);
+          console.warn(TAG, '.mp4 cnt =',     (html.match(/\.mp4/gi) || []).length);
           error('Видео не найдено — проверьте Worker-лог');
         }
       }, error);
@@ -441,7 +492,7 @@
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, XgrParser);
-      console.log(TAG, 'v' + VERSION + ' зарегистрирован');
+      console.log(TAG, 'зарегистрирован');
       return true;
     }
     return false;
