@@ -1,69 +1,22 @@
 // =============================================================
-// eporner.js — Парсер EPorner для AdultJS (Lampa)
-// Version  : 1.2.0
-// Based on : eprn_110 + исправления
-//
-// [1.2.0] ИСПРАВЛЕНО:
-//   A) Резервный regex в qualities() — двойное экранирование в строке
-//      было:    var re = /"src":\s*"(https?:\\\/\\\/[^"]+-(\d+p)\.mp4)"/g
-//               искал буквально 'https:\/\/' — ничего не находил
-//      стало:   /"src"\s*:\s*"(https?:\/\/[^"]+-(\d+p)\.mp4)"/g
-//
-//   B) Парсинг API ответа EPorner /xhr/video/{vid}?hash=...
-//      Реальный формат ответа: { sources: { "mp4": { "360": "url", "720": "url" } } }
-//      или:                    { sources: { "mp4": [ {res:"720", src:"url"} ] } }
-//      было: data.sources.mp4.forEach() — падало если mp4 объект, не массив
-//      стало: обрабатываем оба формата + добавлен лог ответа API
-//
-//   C) Добавлена диагностика в qualities() как в phub_210/p365_140
-//
-//   D) Добавлен параметр supportedFormats=dash,mp4 в API URL
-//      (без него API может вернуть только dash-ссылки)
-//
-// Структура URL EPorner:
-//   Главная   : https://www.eporner.com/
-//   Страница N: https://www.eporner.com/{N}/
-//   Категория : https://www.eporner.com/cat/{slug}/{page}/
-//   Поиск     : https://www.eporner.com/?q={query}&page={N}
-//   API видео : https://www.eporner.com/xhr/video/{vid}?hash={base36}&domain=eporner.com&supportedFormats=dash,mp4
-//
-// Worker ALLOWED_TARGETS:
-//   eporner.com     — сайт + API
-//   cdn.eporner.com — CDN (если есть)
+// epor.js — Eporner Parser для AdultJS (Lampa)
+// =============================================================
+// Версия  : 2.0.0
+// Хост    : https://www.eporner.com
+// Схема   : search=/?q=  category=/?c=  page=&page=N
 // =============================================================
 
 (function () {
   'use strict';
 
-  var NAME = 'epor';
-  var HOST = 'https://www.eporner.com';
+  var VERSION = '2.0.0';
+  var NAME    = 'epor';
+  var HOST    = 'https://www.eporner.com';
 
-  var CATS = [
-    { title: 'Зрелые',        slug: 'mature'       },
-    { title: 'МИЛФ',          slug: 'milf'         },
-    { title: 'Любительское',  slug: 'amateur'      },
-    { title: 'Анальное',      slug: 'anal'         },
-    { title: 'Лесбиянки',     slug: 'lesbian'      },
-    { title: 'Оральный секс', slug: 'blowjob'      },
-    { title: 'Большие сиськи',slug: 'big-tits'     },
-    { title: 'Межрасовое',    slug: 'interracial'  },
-    { title: 'Групповое',     slug: 'threesome'    },
-    { title: 'Азиатки',       slug: 'asian'        },
-    { title: 'Латинки',       slug: 'latina'       },
-    { title: 'Хардкор',       slug: 'hardcore'     },
-    { title: 'Русское',       slug: 'russian'      },
-    { title: 'HD Порно',      slug: 'hd'           },
-  ];
-
-  var SORTS = [
-    { title: 'Новинки',       val: ''              },
-    { title: 'Топ просмотра', val: 'most-viewed'   },
-    { title: 'Топ рейтинга',  val: 'top-rated'     },
-    { title: 'Длинные',       val: 'longest'       },
-  ];
+  var CATEGORIES = [];
 
   // ----------------------------------------------------------
-  // Сетевой запрос
+  // ТРАНСПОРТ
   // ----------------------------------------------------------
   function httpGet(url, success, error) {
     if (window.AdultPlugin && typeof window.AdultPlugin.networkRequest === 'function') {
@@ -76,351 +29,444 @@
     }
   }
 
-  function rx(str, regex, group) {
-    if (!str) return null;
-    var g = (group === undefined) ? 1 : group;
-    var m = str.match(regex);
-    return (m && m[g]) ? m[g].trim() : null;
-  }
-
   // ----------------------------------------------------------
-  // Построение URL
+  // CLEAN URL (UNIVERSAL_TEMPLATE §4)
   // ----------------------------------------------------------
-  function buildUrl(query, sort, cat, page) {
-    var url = HOST + '/';
-    page = parseInt(page, 10) || 1;
-
-    if (query) {
-      url += '?q=' + encodeURIComponent(query);
-      if (page > 1) url += '&page=' + page;
-    } else if (cat) {
-      url += 'cat/' + cat + '/';
-      if (page > 1) url += page + '/';
-    } else if (sort) {
-      url += sort + '/';
-      if (page > 1) url += page + '/';
-    } else {
-      if (page > 1) url += page + '/';
-    }
-
-    return url;
-  }
-
-  function buildMenu() {
-    return [
-      { title: 'Поиск', search_on: true, playlist_url: NAME + '/search/' },
-      {
-        title:        'Сортировка',
-        playlist_url: 'submenu',
-        submenu:      SORTS.map(function (s) {
-          return { title: s.title, playlist_url: NAME + '/sort/' + s.val };
-        }),
-      },
-      {
-        title:        'Категории',
-        playlist_url: 'submenu',
-        submenu:      CATS.map(function (c) {
-          return { title: c.title, playlist_url: NAME + '/cat/' + c.slug };
-        }),
-      },
-    ];
-  }
-
-  // ----------------------------------------------------------
-  // Парсинг карточек
-  // ----------------------------------------------------------
-  function parseCards(html) {
-    if (!html) return [];
-
-    var doc   = new DOMParser().parseFromString(html, 'text/html');
-    var items = doc.querySelectorAll('div.mb, div.mb.hdy');
-
-    console.log('[EPOR] parseCards → div.mb найдено:', items.length);
-
-    var results = [];
-
-    for (var i = 0; i < items.length; i++) {
-      var el = items[i];
-
-      var linkEl = el.querySelector('p.mbtit a');
-      if (!linkEl) continue;
-
-      var href = linkEl.getAttribute('href') || '';
-      if (!href) continue;
-      if (href.indexOf('http') !== 0) href = HOST + href;
-
-      var name = (linkEl.getAttribute('title') || linkEl.textContent || '').trim();
-      if (!name || name.length < 3) continue;
-
-      var img = el.querySelector('img');
-      var pic = img ? (img.getAttribute('data-src') || img.getAttribute('src') || '') : '';
-      if (pic && pic.indexOf('//') === 0) pic = 'https:' + pic;
-
-      // Превью: data-id + паттерн URL
-      var dataId  = el.getAttribute('data-id') || '';
-      var preview = (pic && dataId)
-        ? pic.replace(/\/[^/]+$/, '') + '/' + dataId + '-preview.webm'
-        : null;
-
-      var durEl   = el.querySelector('span.mbtim');
-      var time    = durEl ? durEl.textContent.trim() : '';
-
-      var hdBadge = el.querySelector('div.mvhdico');
-      var quality = hdBadge ? 'HD' : '';
-
-      results.push({
-        name:    name,
-        video:   href,
-        picture: pic,
-        img:     pic,
-        poster:  pic,
-        preview: preview,
-        time:    time,
-        quality: quality,
-        json:    true,
-        source:  NAME,
-      });
-    }
-
-    console.log('[EPOR] parseCards → карточек:', results.length);
-    return results;
-  }
-
-  // ----------------------------------------------------------
-  // Base36 конвертер для хеша (без изменений из v1.1.0)
-  // ----------------------------------------------------------
-  function base36(hexStr) {
-    var n    = parseInt(hexStr, 16);
-    var chars  = '0123456789abcdefghijklmnopqrstuvwxyz';
-    var result = '';
-    while (n > 0) {
-      result = chars[n % 36] + result;
-      n      = Math.floor(n / 36);
-    }
-    return result || '0';
-  }
-
-  function convertHash(hash) {
-    if (!hash || hash.length < 32) return '';
-    return base36(hash.substring(0, 8))  +
-           base36(hash.substring(8, 16)) +
-           base36(hash.substring(16, 24)) +
-           base36(hash.substring(24, 32));
-  }
-
-  // ----------------------------------------------------------
-  // [1.2.0] Парсинг ответа API EPorner
-  //
-  // Реальный формат ответа (два возможных варианта):
-  //
-  // Вариант A (объект с ключами-качествами):
-  //   { "sources": { "mp4": { "720": "https://...", "480": "https://..." } } }
-  //
-  // Вариант B (массив объектов):
-  //   { "sources": { "mp4": [ { "res": "720", "src": "https://..." } ] } }
-  //
-  // Версия 1.1.0 обрабатывала только вариант B через .forEach()
-  // и падала на варианте A с "TypeError: forEach is not a function"
-  // ----------------------------------------------------------
-  function parseApiResponse(jsonStr) {
-    var q = {};
-
+  function cleanUrl(raw) {
+    if (!raw) return '';
     try {
-      var data = JSON.parse(jsonStr);
+      var u = raw;
+      u = u.replace(/\\\//g, '/');
+      u = u.replace(/\\/g, '');
+      if (u.indexOf('%') !== -1) { try { u = decodeURIComponent(u); } catch (e) {} }
+      if (u.indexOf('/') === -1 && u.length > 20 && /^[a-zA-Z0-9+/]+=*$/.test(u)) {
+        try { var d = atob(u); if (d.indexOf('http') === 0) u = d; } catch (e) {}
+      }
+      if (u.indexOf('//') === 0) u = 'https:' + u;
+      if (u.charAt(0) === '/' && u.charAt(1) !== '/') u = HOST + u;
+      if (u.length > 0 && u.indexOf('http') !== 0 && u.charAt(0) !== '/') u = HOST + '/' + u;
+      return u;
+    } catch (e) { return raw; }
+  }
 
-      if (data && data.sources && data.sources.mp4) {
-        var mp4 = data.sources.mp4;
+  function cleanMp4Url(url) {
+    return url
+      .replace(/[?&]rnd=\d+/g, '').replace(/[?&]br=\d+/g, '')
+      .replace(/[?&]_=\d+/g, '').replace(/[?&]+$/g, '').replace(/\/+$/, '') + '/';
+  }
 
-        if (Array.isArray(mp4)) {
-          // Вариант B: массив
-          for (var i = 0; i < mp4.length; i++) {
-            var label = (mp4[i].res || 'SD') + 'p';
-            var src   = mp4[i].src || mp4[i].url || '';
-            if (src) q[label] = src.replace(/\\/g, '');
+  // ----------------------------------------------------------
+  // EXTRACT QUALITIES (UNIVERSAL_TEMPLATE §5 + eporner specific)
+  // ----------------------------------------------------------
+  function extractQualities(html) {
+    var q = {};
+    var have = function () { return Object.keys(q).length > 0; };
+    var add = function (label, url) {
+      var u = cleanUrl(url);
+      if (!u || u.indexOf('{') !== -1 || u.indexOf('spacer') !== -1) return;
+      if (!q[label]) q[label] = u;
+    };
+    var m;
+
+    // S0. eporner specific — video_model JSON
+    m = html.match(/var\s+video_model\s*=\s*({[\s\S]*?});/);
+    if (m) {
+      try {
+        var data = JSON.parse(m[1]);
+        if (data.sources) {
+          for (var k in data.sources) {
+            if (data.sources[k] && data.sources[k].url) add(k, data.sources[k].url);
           }
-        } else if (typeof mp4 === 'object') {
-          // Вариант A: объект { "720": "url", "480": "url" }
-          for (var quality in mp4) {
-            if (!mp4.hasOwnProperty(quality)) continue;
-            var url = mp4[quality];
-            if (typeof url === 'string' && url.indexOf('http') === 0) {
-              q[quality + 'p'] = url.replace(/\\/g, '');
+        }
+        if (data.src)  add('Default', data.src);
+        if (data.url)  add('Default', data.url);
+        if (data.file) add('Default', data.file);
+      } catch (e) { console.warn('[epor] video_model parse error:', e.message); }
+    }
+
+    // S1. VIDEO_RULES regex
+    var VIDEO_RULES = [
+      { label: '720p', re: /video_alt_url\s*[:=]\s*['"`]([^'"`]+)['"`]/ },
+      { label: '480p', re: /video_url\s*[:=]\s*['"`]([^'"`]+)['"`]/ },
+      { label: '720p', re: /html5player\.setVideoUrlHigh\(['"`]([^'"`]+)['"`]\)/ },
+      { label: '480p', re: /html5player\.setVideoUrlLow\(['"`]([^'"`]+)['"`]\)/ },
+      { label: 'HLS',  re: /html5player\.setVideoHlsUrl\(['"`]([^'"`]+)['"`]\)/ },
+      { label: 'HD',   re: /file\s*:\s*['"`]([^'"`]+\.mp4[^'"`]*)['"`]/ },
+      { label: 'HLS',  re: /file\s*:\s*['"`]([^'"`]+\.m3u8[^'"`]*)['"`]/ },
+    ];
+    VIDEO_RULES.forEach(function (rule) {
+      if (have()) return;
+      m = html.match(rule.re);
+      if (m && m[1]) add(rule.label, m[1]);
+    });
+
+    // S2. <source src size>
+    if (!have()) {
+      var re2a = /<source[^>]+src="([^"]+)"[^>]+size="([^"]+)"/gi;
+      var re2b = /<source[^>]+size="([^"]+)"[^>]+src="([^"]+)"/gi;
+      while ((m = re2a.exec(html)) !== null) {
+        if (m[2] !== 'preview' && m[1].indexOf('.mp4') !== -1) add(m[2] + 'p', m[1]);
+      }
+      if (!have()) {
+        while ((m = re2b.exec(html)) !== null) {
+          if (m[1] !== 'preview' && m[2].indexOf('.mp4') !== -1) add(m[1] + 'p', m[2]);
+        }
+      }
+    }
+
+    // S3. <source src label>
+    if (!have()) {
+      var re3a = /<source[^>]+src="([^"]+)"[^>]+label="([^"]+)"/gi;
+      var re3b = /<source[^>]+label="([^"]+)"[^>]+src="([^"]+)"/gi;
+      while ((m = re3a.exec(html)) !== null) {
+        if (m[1].indexOf('.mp4') !== -1) add(m[2], m[1]);
+      }
+      if (!have()) {
+        while ((m = re3b.exec(html)) !== null) {
+          if (m[2].indexOf('.mp4') !== -1) add(m[1], m[2]);
+        }
+      }
+    }
+
+    // S4. <source title> (DOM)
+    if (!have()) {
+      try {
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        var sources = doc.querySelectorAll('video source[src]');
+        for (var si = 0; si < sources.length; si++) {
+          var src = sources[si].getAttribute('src') || '';
+          var slbl = sources[si].getAttribute('title') || sources[si].getAttribute('label') || sources[si].getAttribute('size') || 'auto';
+          if (!src || src.indexOf('blob:') === 0) continue;
+          add(slbl.toLowerCase() === 'auto' ? 'auto' : slbl, src);
+        }
+      } catch (e) {}
+    }
+
+    // S5. dataEncodings JSON
+    if (!have()) {
+      try {
+        var idx = html.indexOf('dataEncodings');
+        if (idx !== -1) {
+          var arrStart = html.indexOf('[', idx);
+          if (arrStart !== -1) {
+            var depth = 0, arrEnd = -1;
+            for (var ci = arrStart; ci < html.length; ci++) {
+              if (html[ci] === '[') depth++;
+              else if (html[ci] === ']') { depth--; if (depth === 0) { arrEnd = ci; break; } }
+            }
+            if (arrEnd !== -1) {
+              var dataEnc = JSON.parse(html.substring(arrStart, arrEnd + 1));
+              dataEnc.forEach(function (enc) {
+                if (!enc.filename) return;
+                var dkey = (String(enc.quality).toLowerCase() === 'auto') ? 'auto' : (enc.quality + 'p');
+                add(dkey, enc.filename.replace(/\\\//g, '/'));
+              });
             }
           }
         }
-      }
-    } catch (e) {
-      console.warn('[EPOR] JSON.parse API error:', e.message);
+      } catch (e) {}
     }
+
+    // S6. og:video meta
+    if (!have()) {
+      var ogMatches = html.match(/<meta[^>]+property="og:video"[^>]+content="([^"]+\.mp4[^"]*)"/gi)
+                   || html.match(/<meta[^>]+content="([^"]+\.mp4[^"]*)"[^>]+property="og:video"/gi);
+      if (ogMatches) {
+        ogMatches.forEach(function (tag) {
+          var cm = tag.match(/content="([^"]+\.mp4[^"]*)"/i);
+          if (!cm) return;
+          var ogUrl = cleanUrl(cm[1]);
+          if (ogUrl.indexOf('/embed/') !== -1) return;
+          var qm = ogUrl.match(/_(\d+)\.mp4/);
+          add(qm ? qm[1] + 'p' : 'HD', ogUrl);
+        });
+      }
+    }
+
+    // S7. html5player.setVideoUrl*
+    if (!have()) {
+      var mH = html.match(/html5player\.setVideoUrlHigh\(['"`]([^'"`]+)['"`]\)/);
+      var mL = html.match(/html5player\.setVideoUrlLow\(['"`]([^'"`]+)['"`]\)/);
+      if (mH) add('720p', mH[1]);
+      if (mL) add('480p', mL[1]);
+    }
+
+    // S8. HLS m3u8
+    if (!have()) {
+      var mHls77 = html.match(/"(https?:\/\/hls[^"]+\.m3u8[^"]*)"/);
+      if (mHls77) add('HLS', mHls77[1]);
+      var mHlsYj = html.match(/((?:https?:)?\/\/abre-videos\.[^"'\s]+\.m3u8[^"'\s]*)/);
+      if (mHlsYj) add('HLS', mHlsYj[1]);
+      if (!have()) {
+        var mHlsAny = html.match(/['"]?(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*?)['"]?/);
+        if (mHlsAny) add('HLS', mHlsAny[1]);
+      }
+    }
+
+    // S9. get_file URL
+    if (!have()) {
+      var getFileRe = /(https?:\/\/[^"'\s]+\/get_file\/[^"'\s]+\.mp4[^"'\s]*)/g;
+      var gf, gfCount = 0;
+      while ((gf = getFileRe.exec(html)) !== null && gfCount < 5) {
+        if (gf[1].indexOf('preview') !== -1) continue;
+        var gfQ = gf[1].match(/_(\d+)\.mp4/);
+        add(gfQ ? gfQ[1] + 'p' : ('auto' + gfCount), gf[1]);
+        gfCount++;
+      }
+    }
+
+    // S10. Любой прямой mp4
+    if (!have()) {
+      var allMp4 = html.match(/https?:\/\/[^"'\s<>]+\.mp4[^"'\s<>]*/gi);
+      if (allMp4) {
+        allMp4.forEach(function (u, i) {
+          if (u.indexOf('{') !== -1) return;
+          var qm2 = u.match(/_(\d+)\.mp4/);
+          add(qm2 ? qm2[1] + 'p' : ('HD' + (i || '')), u);
+        });
+      }
+    }
+
+    // Нормализация
+    Object.keys(q).forEach(function (k) {
+      if (q[k].indexOf('.mp4') !== -1 && q[k].indexOf('?') !== -1) q[k] = cleanMp4Url(q[k]);
+    });
 
     return q;
   }
 
   // ----------------------------------------------------------
-  // Роутинг
+  // ПАРСИНГ КАРТОЧЕК (UNIVERSAL_TEMPLATE §6)
+  // ----------------------------------------------------------
+  var CARD_SELECTORS = [
+    '.mb', '.video-block', '.video-item', 'div.thumb_main',
+    '.thumb', '.item', 'article.video', '.video-thumb', '.video'
+  ];
+
+  function parsePlaylist(html) {
+    var results = [];
+    var doc = new DOMParser().parseFromString(html, 'text/html');
+    var items;
+
+    for (var s = 0; s < CARD_SELECTORS.length; s++) {
+      items = doc.querySelectorAll(CARD_SELECTORS[s]);
+      if (items && items.length > 0) {
+        console.log('[epor] selector "' + CARD_SELECTORS[s] + '":', items.length);
+        break;
+      }
+    }
+
+    if (!items || items.length === 0) {
+      var links = doc.querySelectorAll('a[href*="/video/"], a[href*="/hd-porn/"]');
+      console.log('[epor] fallback links:', links.length);
+      for (var j = 0; j < links.length; j++) {
+        var aEl = links[j];
+        var href = cleanUrl(aEl.getAttribute('href') || '');
+        if (!href) continue;
+        var imgA = aEl.querySelector('img');
+        var picA = imgA ? cleanUrl(imgA.getAttribute('data-original') || imgA.getAttribute('data-src') || imgA.getAttribute('src') || '') : '';
+        var nameA = (aEl.getAttribute('title') || aEl.textContent || '').replace(/\s+/g, ' ').trim() || slugToTitle(href);
+        results.push(makeCard(nameA, href, picA, ''));
+      }
+      return results;
+    }
+
+    for (var i = 0; i < items.length; i++) {
+      var card = parseCard(items[i]);
+      if (card) results.push(card);
+    }
+    console.log('[epor] карточек:', results.length);
+    return results;
+  }
+
+  function parseCard(el) {
+    var linkEl = el.querySelector('a[href*="/video/"]') ||
+                 el.querySelector('a[href*="/hd-porn/"]') ||
+                 el.querySelector('a[href]');
+    if (!linkEl) return null;
+    var href = cleanUrl(linkEl.getAttribute('href') || '');
+    if (!href) return null;
+
+    var imgEl = el.querySelector('img');
+    var pic = '';
+    if (imgEl) {
+      pic = cleanUrl(
+        imgEl.getAttribute('data-original') ||
+        imgEl.getAttribute('data-src') ||
+        imgEl.getAttribute('src') || ''
+      );
+      if (pic.indexOf('spacer') !== -1) pic = '';
+    }
+
+    var titleEl = el.querySelector('.title, .vdt, .video-title, a[title]');
+    var name = '';
+    if (titleEl) name = (titleEl.getAttribute('title') || titleEl.textContent || '').trim();
+    if (!name) name = (linkEl.getAttribute('title') || '').trim();
+    if (!name) name = slugToTitle(href);
+    name = name.replace(/[\t\n\r]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+    if (!name) return null;
+
+    var durEl = el.querySelector('.duration, .time, .length, span.time');
+    var time = durEl ? durEl.textContent.replace(/[^\d:]/g, '').trim() : '';
+
+    var vidEl = el.querySelector('video[data-preview]') || el.querySelector('a[data-clip]');
+    var preview = vidEl ? cleanUrl(vidEl.getAttribute('data-preview') || vidEl.getAttribute('data-clip') || '') : null;
+
+    return makeCard(name, href, pic, time, preview);
+  }
+
+  function makeCard(name, href, pic, time, preview) {
+    return {
+      name: name, video: href,
+      picture: pic, img: pic, poster: pic, background_image: pic,
+      preview: preview || null, time: time || '', quality: 'HD',
+      json: true, source: NAME,
+    };
+  }
+
+  function slugToTitle(url) {
+    if (!url) return '';
+    var parts = url.replace(/\?.*/, '').split('/').filter(Boolean);
+    var last = parts[parts.length - 1] || '';
+    return last.replace(/[-_]/g, ' ').replace(/\b\w/g, function (l) { return l.toUpperCase(); }).trim();
+  }
+
+  // ----------------------------------------------------------
+  // URL BUILDER
+  // ----------------------------------------------------------
+  function buildUrl(type, value, page) {
+    page = parseInt(page, 10) || 1;
+    var url = HOST;
+    if (type === 'search') {
+      url += '/?q=' + encodeURIComponent(value);
+      if (page > 1) url += '&page=' + page;
+    } else if (type === 'cat') {
+      url += '/?c=' + encodeURIComponent(value);
+      if (page > 1) url += '&page=' + page;
+    } else if (type === 'sort') {
+      url += '/?sort=' + encodeURIComponent(value);
+      if (page > 1) url += '&page=' + page;
+    } else {
+      if (page > 1) url += '/?page=' + page;
+    }
+    return url;
+  }
+
+  // ----------------------------------------------------------
+  // МЕНЮ
+  // ----------------------------------------------------------
+  function buildMenu() {
+    return [
+      { title: '🔍 Поиск', search_on: true, playlist_url: NAME + '/search/' },
+      { title: '🔥 Главная', playlist_url: NAME + '/main' },
+    ];
+  }
+
+  // ----------------------------------------------------------
+  // РОУТИНГ
   // ----------------------------------------------------------
   function routeView(url, page, success, error) {
-    var sort  = null;
-    var cat   = null;
-    var query = null;
+    console.log('[epor] routeView →', url, 'page=', page);
+    var fetchUrl;
 
     var searchMatch = url.match(/[?&]search=([^&]*)/);
     if (searchMatch) {
-      query = decodeURIComponent(searchMatch[1]);
-    } else if (url.indexOf(NAME + '/cat/') === 0) {
-      cat  = url.replace(NAME + '/cat/', '').split('?')[0];
-    } else if (url.indexOf(NAME + '/sort/') === 0) {
-      sort = url.replace(NAME + '/sort/', '').split('?')[0];
+      fetchUrl = buildUrl('search', decodeURIComponent(searchMatch[1]), page);
+      return loadPage(fetchUrl, page, success, error);
     }
 
-    var fetchUrl = buildUrl(query, sort, cat, page);
-    console.log('[EPOR] routeView →', fetchUrl);
+    if (url.indexOf(NAME + '/cat/') === 0) {
+      var cat = url.replace(NAME + '/cat/', '').split('?')[0];
+      fetchUrl = buildUrl('cat', cat, page);
+      return loadPage(fetchUrl, page, success, error);
+    }
 
+    if (url.indexOf(NAME + '/sort/') === 0) {
+      var sort = url.replace(NAME + '/sort/', '').split('?')[0];
+      fetchUrl = buildUrl('sort', sort, page);
+      return loadPage(fetchUrl, page, success, error);
+    }
+
+    if (url.indexOf(NAME + '/search/') === 0) {
+      var rawQ = decodeURIComponent(url.replace(NAME + '/search/', '').split('?')[0]).trim();
+      if (rawQ) {
+        fetchUrl = buildUrl('search', rawQ, page);
+        return loadPage(fetchUrl, page, success, error);
+      }
+    }
+
+    loadPage(buildUrl('main', null, page), page, success, error);
+  }
+
+  function loadPage(fetchUrl, page, success, error) {
+    console.log('[epor] loadPage →', fetchUrl);
     httpGet(fetchUrl, function (html) {
-      console.log('[EPOR] html длина:', html.length);
-      var cards = parseCards(html);
+      console.log('[epor] html длина:', html.length);
+      var results = parsePlaylist(html);
+      if (!results.length) { error('Контент не найден'); return; }
       success({
-        results:     cards,
-        collection:  true,
-        total_pages: cards.length > 0 ? page + 1 : page,
-        menu:        buildMenu(),
+        results: results, collection: true,
+        total_pages: results.length >= 20 ? page + 1 : page,
+        menu: buildMenu(),
       });
     }, error);
   }
 
   // ----------------------------------------------------------
-  // Публичный интерфейс
+  // API
   // ----------------------------------------------------------
-  var EpornerParser = {
-
+  var EporParser = {
     main: function (params, success, error) {
-      routeView(NAME, 1, success, error);
+      routeView(NAME + '/main', 1, success, error);
     },
-
     view: function (params, success, error) {
       routeView(params.url || NAME, params.page || 1, success, error);
     },
-
     search: function (params, success, error) {
-      var query    = (params.query || '').trim();
-      var fetchUrl = buildUrl(query, null, null, params.page || 1);
-      httpGet(fetchUrl, function (html) {
-        var cards = parseCards(html);
+      var query = (params.query || '').trim();
+      var page = parseInt(params.page, 10) || 1;
+      if (!query) { success({ title: '', results: [], collection: true, total_pages: 1 }); return; }
+      httpGet(buildUrl('search', query, page), function (html) {
+        var results = parsePlaylist(html);
         success({
-          title:       'EP: ' + query,
-          results:     cards,
-          collection:  true,
-          total_pages: cards.length > 0 ? (params.page || 1) + 1 : 1,
+          title: 'Eporner: ' + query, results: results,
+          collection: true, total_pages: results.length >= 20 ? page + 1 : page,
         });
       }, error);
     },
-
-    // [1.2.0] qualities() — исправлены regex и парсинг API ответа
     qualities: function (videoPageUrl, success, error) {
-      console.log('[EPOR] qualities() → страница:', videoPageUrl);
-
+      console.log('[epor] qualities() →', videoPageUrl);
       httpGet(videoPageUrl, function (html) {
-        console.log('[EPOR] qualities() → html длина:', html.length);
-
-        if (!html || html.length < 500) {
-          error('Страница видео недоступна');
-          return;
+        console.log('[epor] qualities html длина:', html.length);
+        if (!html || html.length < 500) { error('Страница недоступна'); return; }
+        var found = extractQualities(html);
+        var keys = Object.keys(found);
+        console.log('[epor] qualities найдено:', keys.length, JSON.stringify(keys));
+        if (keys.length > 0) success({ qualities: found });
+        else {
+          console.warn('[epor] <source>:', (html.match(/<source/gi) || []).length);
+          console.warn('[epor] .mp4:', (html.match(/\.mp4/gi) || []).length);
+          console.warn('[epor] video_model:', (html.match(/video_model/gi) || []).length);
+          error('Видео не найдено');
         }
-
-        var vid  = rx(html, /vid\s*=\s*'([^']+)'/);
-        var hash = rx(html, /hash\s*=\s*'([^']+)'/);
-
-        console.log('[EPOR] vid:', vid, '| hash:', hash ? hash.substring(0, 8) + '...' : null);
-
-        if (!vid || !hash) {
-          console.warn('[EPOR] vid/hash не найдены');
-          console.warn('[EPOR]   vid:',  (html.match(/vid\s*=/gi)  || []).length);
-          console.warn('[EPOR]   hash:', (html.match(/hash\s*=/gi) || []).length);
-          error('EPorner: vid/hash не найдены на странице');
-          return;
-        }
-
-        var convertedHash = convertHash(hash);
-        // [1.2.0] добавлен supportedFormats=dash,mp4 для получения mp4 ссылок
-        var apiUrl = HOST + '/xhr/video/' + vid +
-          '?hash='    + convertedHash +
-          '&domain=eporner.com' +
-          '&fallback=false' +
-          '&embed=false' +
-          '&supportedFormats=dash,mp4' +
-          '&_=' + Date.now();
-
-        console.log('[EPOR] API URL:', apiUrl.substring(0, 100));
-
-        httpGet(apiUrl, function (jsonStr) {
-          console.log('[EPOR] API ответ длина:', jsonStr.length);
-
-          // Основной путь: парсим JSON ответ API
-          var q = parseApiResponse(jsonStr);
-
-          // [1.2.0] Резервный regex — ИСПРАВЛЕНО двойное экранирование
-          // было: /"src":\s*"(https?:\\\/\\\/[^"]+-(\d+p)\.mp4)"/g
-          // стало: правильный regex литерал
-          if (!Object.keys(q).length) {
-            console.log('[EPOR] JSON parse дал 0, пробуем regex...');
-            var re = /"src"\s*:\s*"(https?:\/\/[^"]+-(\d+p)\.mp4)"/g;
-            var m;
-            while ((m = re.exec(jsonStr)) !== null) {
-              var link = m[1].replace(/\\/g, '');
-              if (!q[m[2]]) q[m[2]] = link;
-            }
-          }
-
-          // Второй резервный: любые mp4 URL в ответе API
-          if (!Object.keys(q).length) {
-            console.log('[EPOR] regex тоже 0, ищем любые mp4...');
-            var anyMp4Re = /"(https?:\/\/[^"]+\.mp4[^"]*)"/g;
-            var am;
-            var amIdx = 0;
-            while ((am = anyMp4Re.exec(jsonStr)) !== null && amIdx < 5) {
-              var mpUrl  = am[1].replace(/\\/g, '');
-              var mpQ    = mpUrl.match(/[_-](\d{3,4})[pP]/) || mpUrl.match(/\/(\d{3,4})[pP]/);
-              var mpLabel = mpQ ? mpQ[1] + 'p' : ('MP4' + amIdx);
-              if (!q[mpLabel]) { q[mpLabel] = mpUrl; amIdx++; }
-            }
-          }
-
-          var keys = Object.keys(q);
-          console.log('[EPOR] qualities → найдено:', keys.length, JSON.stringify(keys));
-
-          if (keys.length > 0) {
-            success({ qualities: q });
-          } else {
-            // Диагностика
-            console.warn('[EPOR] ничего не найдено');
-            console.warn('[EPOR]   sources:', (jsonStr.match(/"sources"/gi) || []).length);
-            console.warn('[EPOR]   mp4:',    (jsonStr.match(/"mp4"/gi)     || []).length);
-            console.warn('[EPOR]   .mp4:',   (jsonStr.match(/\.mp4/gi)     || []).length);
-            console.warn('[EPOR]   error:',  jsonStr.substring(0, 200));
-            error('EPorner: видео не найдено');
-          }
-        }, error);
       }, error);
     },
   };
 
   // ----------------------------------------------------------
-  // Регистрация
+  // РЕГИСТРАЦИЯ
   // ----------------------------------------------------------
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
-      window.AdultPlugin.registerParser(NAME, EpornerParser);
-      console.log('[EPOR] v1.2.0 зарегистрирован');
+      window.AdultPlugin.registerParser(NAME, EporParser);
+      console.log('[epor] v' + VERSION + ' зарегистрирован');
       return true;
     }
     return false;
   }
-
   if (!tryRegister()) {
-    var timer = setInterval(function () {
-      if (tryRegister()) clearInterval(timer);
-    }, 200);
-    setTimeout(function () { clearInterval(timer); }, 10000);
+    var poll = setInterval(function () { if (tryRegister()) clearInterval(poll); }, 200);
+    setTimeout(function () { clearInterval(poll); }, 5000);
   }
 
 })();
