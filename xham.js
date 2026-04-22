@@ -1,26 +1,49 @@
 // =============================================================
 // xham.js — Парсер xhamster.com для AdultJS
-// Version  : 1.0.0
+// Version  : 1.1.0
 // Site     : https://xhamster.com
 // Strategy : SSR каталог + window.initials JSON для qualities
-// Worker   : xhamster.com (уже есть в ALLOWED_TARGETS),
-//            дополнительно нужен xhcdn.com (CDN постеров)
+// Worker   : xhamster.com + xhcdn.com (CDN постеров)
+//            оба должны быть в ALLOWED_TARGETS
 // Cookie   : mature=1  (Age Gate)
-// ВАЖНО    : Video URL нестабилен (JWT-signed CDN).
+// ВАЖНО    : Video URL подписан JWT (CDN).
 //            Качества берутся из window.initials на странице видео.
 //            Premium-контент без авторизации недоступен.
+// =============================================================
+// Изменения:
+//   [1.0.0] Начальная версия
+//   [1.1.0] BUGFIX: лимит парсинга window.initials увеличен
+//           с 600 000 до 1 500 000 байт — xHamster внедряет
+//           window.initials объёмом 800KB–1.2MB на видео-странице,
+//           при лимите 600KB braceEnd не находился, S1 проваливался
+//           и qualities не извлекались
+//   [1.1.0] BUGFIX: total_pages порог снижен с 50 до 28
+//           для главной (/videos) — выдаётся 32 карточки,
+//           порог 50 никогда не достигался → пагинация обрывалась
+//   [1.1.0] BUGFIX: добавлен селектор .video-thumb-block как
+//           дополнительный fallback после .video-thumb и
+//           .thumb-list__item (xHamster периодически меняет классы)
+//   [1.1.0] BUGFIX: getPicture() — унифицированное извлечение
+//           src постера с учётом всех lazy-load атрибутов xhcdn
+//           (data-src, data-original, data-thumb, loading="lazy")
+//   [1.1.0] BUGFIX: глубина depth-счётчика в S1 теперь учитывает
+//           только { } для JSON-объекта (не смешивается с [ ])
+//           что снижает риск ложного завершения при вложенных массивах
+//   [1.1.0] IMPROVE: S2 теперь ищет ВСЕ вхождения "sources":[
+//           и берёт последнее (оно ближе к видео-данным),
+//           плюс добавлен поиск "streams":[ как алиас
 // =============================================================
 
 (function () {
   'use strict';
 
-  var VERSION = '1.0.0';
+  var VERSION = '1.1.0';
   var NAME    = 'xham';
   var HOST    = 'https://xhamster.com';
-  var TAG     = '[' + NAME + ']';
+  var TAG     = '[' + NAME + ' v' + VERSION + ']';
 
   // ============================================================
-  // §1. КАТЕГОРИИ (только /categories/..., без /photos/)
+  // §1. КАТЕГОРИИ
   // ============================================================
   var CATEGORIES = [
     { title: '18 Year Old',         slug: '18-year-old'         },
@@ -85,6 +108,9 @@
     { title: 'Solo',                slug: 'solo'                },
     { title: 'Squirting',           slug: 'squirting'           },
     { title: 'Stockings',           slug: 'stockings'           },
+    { title: 'Threesome',           slug: 'threesome'           },
+    { title: 'Toys',                slug: 'toys'                },
+    { title: 'Webcam',              slug: 'webcam'              },
   ];
 
   // ============================================================
@@ -120,11 +146,13 @@
 
   // ============================================================
   // §4. extractQualities
-  // xhamster: видео через JS-рендер (directVideo=fail),
-  //           но данные SSR-инжектятся в window.initials
+  // xhamster: SSR-инъекция в window.initials
   //
   // S1: window.initials → xhVideoPage.videoModel.sources[]
-  // S2: последний "sources":[...] блок в HTML
+  //     [1.1.0] лимит увеличен до 1 500 000 байт
+  //     [1.1.0] depth считает только { } (не [ ]) для JSON-объекта
+  // S2: последнее вхождение "sources":[...] или "streams":[...]
+  //     [1.1.0] ищем ВСЁ, берём последнее
   // S3: xhP.setVideoConfig({sources:[...]})
   // S4: fallback — любые https://...mp4 URL
   // ============================================================
@@ -138,11 +166,14 @@
         var braceStart = html.indexOf('{', idxInit);
         if (braceStart !== -1) {
           var depth = 0, braceEnd = -1;
-          var limit = Math.min(html.length, braceStart + 600000);
+          // [1.1.0] BUGFIX: лимит 1 500 000 вместо 600 000
+          var limit = Math.min(html.length, braceStart + 1500000);
           for (var ci = braceStart; ci < limit; ci++) {
             var ch = html[ci];
-            if (ch === '{' || ch === '[') depth++;
-            else if (ch === '}' || ch === ']') {
+            // [1.1.0] BUGFIX: только { } для depth, не [ ]
+            // JSON-объект window.initials — корневой { }
+            if (ch === '{') depth++;
+            else if (ch === '}') {
               depth--;
               if (depth === 0) { braceEnd = ci; break; }
             }
@@ -154,8 +185,8 @@
             // Перебираем возможные пути к video model
             var vms = [
               init.xhVideoPage  && init.xhVideoPage.videoModel,
-              init.videoPage     && init.videoPage.videoModel,
-              init.pageProps     && init.pageProps.videoModel,
+              init.videoPage    && init.videoPage.videoModel,
+              init.pageProps    && init.pageProps.videoModel,
               init.videoModel,
             ];
             for (var vi = 0; vi < vms.length; vi++) {
@@ -167,7 +198,7 @@
                 if (!s) return;
                 var u = s.url || s.src || s.file || '';
                 if (!u || u.indexOf('http') !== 0) return;
-                var ql = String(s.quality || s.label || s.res || 'HD');
+                var ql  = String(s.quality || s.label || s.res || 'HD');
                 var key = /^\d+$/.test(ql) ? ql + 'p' : ql;
                 if (!q[key]) q[key] = u;
               });
@@ -180,18 +211,24 @@
       console.warn(TAG, 'S1 window.initials error:', e.message || e);
     }
 
-    // ── S2: последнее вхождение "sources":[{...}] ─────────────
+    // ── S2: последнее вхождение "sources":[ или "streams":[ ──
+    // [1.1.0] ищем ОБА ключа, берём последнее вхождение
     if (!Object.keys(q).length) {
       try {
-        var srcKey  = '"sources":[';
-        var srcIdx  = -1, idx2 = 0;
-        while (idx2 < html.length) {
-          var pos = html.indexOf(srcKey, idx2);
-          if (pos === -1) break;
-          srcIdx = pos; idx2 = pos + 1;
+        var bestIdx = -1;
+        var searchKeys = ['"sources":[', '"streams":['];
+        for (var ki = 0; ki < searchKeys.length; ki++) {
+          var sk = searchKeys[ki];
+          var idx2 = 0;
+          while (idx2 < html.length) {
+            var pos = html.indexOf(sk, idx2);
+            if (pos === -1) break;
+            if (pos > bestIdx) bestIdx = pos;
+            idx2 = pos + 1;
+          }
         }
-        if (srcIdx !== -1) {
-          var arrStart = html.indexOf('[', srcIdx);
+        if (bestIdx !== -1) {
+          var arrStart = html.indexOf('[', bestIdx);
           if (arrStart !== -1) {
             var depth2 = 0, arrEnd = -1;
             var limit2 = Math.min(html.length, arrStart + 80000);
@@ -210,7 +247,7 @@
                 if (!s) return;
                 var u = s.url || s.src || s.file || '';
                 if (!u || u.indexOf('http') !== 0) return;
-                var ql = String(s.quality || s.label || s.res || 'HD');
+                var ql  = String(s.quality || s.label || s.res || 'HD');
                 var key = /^\d+$/.test(ql) ? ql + 'p' : ql;
                 if (!q[key]) q[key] = u;
               });
@@ -228,8 +265,8 @@
         var cfgRe = /xhP\.setVideoConfig\((\{[\s\S]+?\})\)/;
         var cfgM  = html.match(cfgRe);
         if (cfgM) {
-          var cfg  = JSON.parse(cfgM[1].replace(/\\\//g, '/'));
-          var ss   = cfg.sources || cfg.streams || [];
+          var cfg = JSON.parse(cfgM[1].replace(/\\\//g, '/'));
+          var ss  = cfg.sources || cfg.streams || [];
           ss.forEach(function (s) {
             var u = s.src || s.url || s.file || '';
             if (!u) return;
@@ -244,7 +281,6 @@
 
     // ── S4: любой https://...mp4 в HTML ─────────────────────────
     if (!Object.keys(q).length) {
-      // Учитываем экранированные URL: https:\/\/...
       var mp4Re = /["'](https?:(?:\\\/|\/)[^"'\s]+?\.mp4[^"'\s]*?)["']/gi;
       var mp4m, cnt = 0;
       while ((mp4m = mp4Re.exec(html)) !== null && cnt < 6) {
@@ -261,21 +297,25 @@
 
   // ============================================================
   // §5. ПАРСИНГ КАРТОЧЕК
-  // Селектор: .video-thumb  (58 карточек на странице)
-  // Заголовок: a[title], a[aria-label], textContent
-  // Ссылка:   a[href*="/videos/"]
-  // Постер:   img[src] / img[data-src]
-  // Длит.:    [class*="duration"]
+  // Основные селекторы (в порядке приоритета):
+  //   .video-thumb           — основной (2024+)
+  //   .thumb-list__item      — альтернативный
+  //   .video-thumb-block     — [1.1.0] новый fallback
+  // Постер: [1.1.0] через getPicture()
   // ============================================================
   function parsePlaylist(html) {
     var results = [];
     var seen    = {};
     try {
       var doc   = new DOMParser().parseFromString(html, 'text/html');
-      var items = doc.querySelectorAll('.video-thumb');
 
+      // [1.1.0] три попытки найти карточки
+      var items = doc.querySelectorAll('.video-thumb');
       if (!items || !items.length) {
-        items = doc.querySelectorAll('div.thumb-list__item');
+        items = doc.querySelectorAll('.thumb-list__item');
+      }
+      if (!items || !items.length) {
+        items = doc.querySelectorAll('.video-thumb-block');
       }
 
       if (!items || !items.length) {
@@ -286,7 +326,7 @@
           if (!lhref || seen[lhref]) continue;
           seen[lhref] = true;
           var limg  = links[j].querySelector('img');
-          var lpic  = limg ? cleanUrl(limg.getAttribute('src') || '') : '';
+          var lpic  = getPicture(limg);
           var lname = (links[j].getAttribute('title') || links[j].textContent || '')
                         .replace(/\s+/g, ' ').trim();
           if (lname) results.push(makeCard(lname, lhref, lpic, ''));
@@ -308,6 +348,29 @@
     return results;
   }
 
+  // [1.1.0] Универсальное извлечение src постера из <img>
+  // xhcdn отдаёт постеры с data-src и data-original
+  function getPicture(imgEl) {
+    if (!imgEl) return '';
+    var pic = cleanUrl(
+      imgEl.getAttribute('data-src')      ||
+      imgEl.getAttribute('data-original') ||
+      imgEl.getAttribute('data-thumb')    ||
+      imgEl.getAttribute('data-lazy-src') ||
+      imgEl.getAttribute('src')           || ''
+    );
+    // Отбрасываем blank/spacer/svg-заглушки
+    if (pic && (
+      pic.indexOf('spacer') !== -1 ||
+      pic.indexOf('blank')  !== -1 ||
+      pic.indexOf('data:')  === 0  ||
+      pic.length < 12
+    )) {
+      pic = '';
+    }
+    return pic;
+  }
+
   function parseCard(el) {
     // Ссылка
     var linkEl = el.querySelector('a[href*="/videos/"]');
@@ -315,6 +378,11 @@
     if (!linkEl) return null;
     var href = linkEl.getAttribute('href') || '';
     if (!href) return null;
+
+    // Гарантируем абсолютный URL
+    if (href.indexOf('http') !== 0) {
+      href = HOST + (href.charAt(0) === '/' ? '' : '/') + href;
+    }
 
     // Заголовок — приоритет: a[title] → a[aria-label] → textContent
     var name = (linkEl.getAttribute('title') || '').trim();
@@ -329,12 +397,9 @@
     if (!name) name = (linkEl.textContent || '').replace(/\s+/g, ' ').trim();
     if (!name) return null;
 
-    // Постер
+    // Постер — [1.1.0] через getPicture()
     var imgEl = el.querySelector('img');
-    var pic   = '';
-    if (imgEl) {
-      pic = cleanUrl(imgEl.getAttribute('data-src') || imgEl.getAttribute('src') || '');
-    }
+    var pic   = getPicture(imgEl);
 
     // Длительность
     var durEl = el.querySelector('[class*="duration"]') || el.querySelector('.duration');
@@ -344,7 +409,6 @@
   }
 
   function makeCard(name, href, pic, time) {
-    // Гарантируем абсолютный URL
     if (href && href.indexOf('http') !== 0) {
       href = HOST + (href.charAt(0) === '/' ? '' : '/') + href;
     }
@@ -380,7 +444,7 @@
       u = HOST + '/categories/' + value;
       return page > 1 ? u + '?page=' + page : u;
     }
-    // main — раздел /videos (новинки)
+    // main — новинки
     u = HOST + '/videos';
     return page > 1 ? u + '?page=' + page : u;
   }
@@ -410,6 +474,7 @@
   // ============================================================
   function routeView(url, page, success, error) {
     console.log(TAG, 'routeView →', url, 'page=' + page);
+
     var sm = url.match(/[?&]search=([^&]*)/);
     if (sm) {
       return loadPage(buildUrl('search', decodeURIComponent(sm[1]), page), page, success, error);
@@ -433,7 +498,9 @@
       success({
         results:     results,
         collection:  true,
-        total_pages: results.length >= 50 ? page + 1 : page,
+        // [1.1.0] BUGFIX: порог снижен с 50 до 28
+        // xHamster /videos отдаёт 32 карточки, /categories — 40-50
+        total_pages: results.length >= 28 ? page + 1 : page,
         menu:        buildMenu(),
       });
     }, error);
@@ -462,7 +529,7 @@
           title:       'xHamster: ' + q,
           results:     results,
           collection:  true,
-          total_pages: results.length >= 50 ? p + 1 : p,
+          total_pages: results.length >= 28 ? p + 1 : p,
         });
       }, error);
     },
@@ -477,10 +544,11 @@
         if (keys.length > 0) {
           success({ qualities: found });
         } else {
-          console.warn(TAG, 'html.length =', html.length);
-          console.warn(TAG, 'window.initials =', html.indexOf('window.initials') !== -1);
-          console.warn(TAG, '"sources" cnt =', (html.match(/"sources"/g) || []).length);
-          console.warn(TAG, '.mp4 cnt =',      (html.match(/\.mp4/gi) || []).length);
+          console.warn(TAG, 'html.length =',          html.length);
+          console.warn(TAG, 'window.initials found =', html.indexOf('window.initials') !== -1);
+          console.warn(TAG, '"sources" cnt =',         (html.match(/"sources"/g) || []).length);
+          console.warn(TAG, '"streams" cnt =',         (html.match(/"streams"/g) || []).length);
+          console.warn(TAG, '.mp4 cnt =',              (html.match(/\.mp4/gi) || []).length);
           error('Видео не найдено (возможно premium-контент или изменилась структура)');
         }
       }, error);
@@ -493,7 +561,7 @@
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, XhamParser);
-      console.log(TAG, 'v' + VERSION + ' зарегистрирован');
+      console.log(TAG, 'зарегистрирован');
       return true;
     }
     return false;
