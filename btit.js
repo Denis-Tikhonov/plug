@@ -124,140 +124,56 @@
   //
   // [1.2.1] Улучшенный поиск remote_control.php
   // ----------------------------------------------------------
-  function extractQualities(html, videoPageUrl, success, error) {
+  // ----------------------------------------------------------
+// extractQualities(html) - ПОЛНОСТЬЮ ЗАМЕНИТЬ ЭТУ ФУНКЦИЮ
+// ----------------------------------------------------------
+function extractQualities(html, videoPageUrl, success, error) {
     var q = {};
-
-    // ----------------------------------------------------------
-    // S1. Поиск remote_control.php любым способом
-    // ----------------------------------------------------------
     
-    // 1A. Поиск в flashvars (наиболее частый случай)
-    // flashvars = { remote_control: 'url', video_url: 'url', ... }
-    var flashvarsMatch = html.match(/flashvars\s*[:=]\s*({[^;]+?})\s*[;}]/i);
-    if (flashvarsMatch) {
-      try {
-        // Пытаемся распарсить как JSON (может быть невалидный, используем regex)
-        var flashvarsStr = flashvarsMatch[1];
-        
-        // Ищем remote_control
-        var rcInFlash = flashvarsStr.match(/remote_control\s*:\s*['"]([^'"]+)['"]/i);
-        if (rcInFlash && rcInFlash[1].indexOf('remote_control.php') !== -1) {
-          q['HD'] = cleanUrl(rcInFlash[1]);
-          console.log(TAG, 'S1A flashvars.remote_control:', q['HD'].substring(0, 100));
-        }
-        
-        // Ищем video_url
-        if (!Object.keys(q).length) {
-          var vuInFlash = flashvarsStr.match(/video_url\s*:\s*['"]([^'"]+)['"]/i);
-          if (vuInFlash && vuInFlash[1].indexOf('remote_control.php') !== -1) {
-            q['HD'] = cleanUrl(vuInFlash[1]);
-            console.log(TAG, 'S1A flashvars.video_url:', q['HD'].substring(0, 100));
-          }
-        }
-      } catch(e) {
-        console.warn(TAG, 'flashvars parse error:', e);
-      }
-    }
-
-    // 1B. Поиск в любых JS переменных (playerObj, playerConfig, и т.д.)
-    if (!Object.keys(q).length) {
-      var jsVarMatch = html.match(/(?:videoUrl|videoURL|video_url|fileUrl|file_url|src|source)\s*[:=]\s*['"]([^'"]*remote_control\.php[^'"]*)['"]/gi);
-      if (jsVarMatch) {
-        for (var i = 0; i < jsVarMatch.length; i++) {
-          var match = jsVarMatch[i].match(/['"]([^'"]*remote_control\.php[^'"]*)['"]/);
-          if (match && match[1]) {
-            q['HD'] = cleanUrl(match[1]);
-            console.log(TAG, 'S1B JS var:', q['HD'].substring(0, 100));
-            break;
-          }
-        }
-      }
-    }
-
-    // 1C. Прямой поиск URL с remote_control.php в HTML
-    if (!Object.keys(q).length) {
-      var rcAny = html.match(/https?:\/\/[a-z0-9]+\.bigtitslust\.com\/remote_control\.php\?[^"'\s<>]+/gi);
-      if (rcAny && rcAny.length) {
-        // Берем первый найденный
-        q['HD'] = rcAny[0].replace(/\\/g, '');
-        console.log(TAG, 'S1C direct remote_control:', q['HD'].substring(0, 100));
-      }
-    }
-
-    // 1D. Поиск media*.bigtitslust.com/remote_control.php с экранированием
-    if (!Object.keys(q).length) {
-      var rcEscaped = html.match(/media\d+\.bigtitslust\.com\\\/remote_control\.php\\\?[^"'\s\\]+/gi);
-      if (rcEscaped && rcEscaped.length) {
-        q['HD'] = 'https://' + rcEscaped[0].replace(/\\\//g, '/').replace(/\\/g, '');
-        console.log(TAG, 'S1D escaped remote_control:', q['HD'].substring(0, 100));
-      }
-    }
-
-    // Если remote_control найден — сразу возвращаем
-    if (Object.keys(q).length) {
-      console.log(TAG, '✅ Найден remote_control:', Object.keys(q));
-      success({ qualities: q });
-      return;
-    }
-
-    // ----------------------------------------------------------
-    // S2. Fallback: любой .mp4 НЕ из get_file (get_file всегда 410)
-    // ----------------------------------------------------------
-    console.log(TAG, '⚠️ remote_control не найден, ищем .mp4...');
+    // S1: Поиск remote_control.php в HTML
+    var rcMatches = html.match(/https?:\/\/media\d+\.bigtitslust\.com\/remote_control\.php\?[^"'\s<>]+/gi);
     
-    var allMp4 = html.match(/https?:\/\/[^"'\s<>\\]+\.mp4[^"'\s<>\\]*/gi);
-    if (allMp4) {
-      var found = false;
-      for (var j = 0; j < allMp4.length; j++) {
-        var u = allMp4[j];
-        // Пропускаем get_file — он всегда 410
-        if (u.indexOf('get_file') !== -1) {
-          console.log(TAG, 'S2 пропускаем get_file:', u.substring(0, 80));
-          continue;
-        }
-        var qm = u.match(/[_-](\d+)p?\.mp4/i);
-        var lbl = qm ? qm[1] + 'p' : 'HD';
-        if (!q[lbl]) {
-          q[lbl] = u;
-          found = true;
-          console.log(TAG, 'S2 найден .mp4:', u.substring(0, 100));
-        }
-      }
-      if (found) {
+    if (rcMatches && rcMatches.length) {
+        var videoUrl = rcMatches[0].replace(/\\/g, '');
+        // Проксируем через Worker (ВАЖНО!)
+        var proxiedUrl = WORKER_URL + '/?url=' + encodeURIComponent(videoUrl);
+        q['HD'] = proxiedUrl;
+        console.log(TAG, '✅ Найден remote_control, проксируем:', proxiedUrl.substring(0, 100));
         success({ qualities: q });
         return;
-      }
     }
-
-    // ----------------------------------------------------------
-    // S3. Последняя попытка — через /resolve Worker (только если есть video_url)
-    // ----------------------------------------------------------
-    var videoUrlMatch = html.match(/video_url\s*[:=]\s*['"]([^'"]+)['"]/i);
-    if (videoUrlMatch && videoUrlMatch[1]) {
-      var rawUrl = cleanUrl(videoUrlMatch[1]);
-      if (rawUrl && rawUrl.indexOf('http') === 0) {
-        var resolveUrl = getWorkerBase() + '/resolve?url=' + encodeURIComponent(rawUrl);
-        console.log(TAG, 'S3 пробуем resolve:', rawUrl.substring(0, 80));
-        
-        httpGetJson(resolveUrl, function (json) {
-          var finalUrl = json.final || json.url || '';
-          if (finalUrl && finalUrl.indexOf('http') === 0 && finalUrl.indexOf('.mp4') !== -1) {
-            q['HD'] = finalUrl;
-            console.log(TAG, 'S3 resolve успешно:', finalUrl.substring(0, 100));
+    
+    // S2: Поиск в flashvars
+    var flashvarsMatch = html.match(/flashvars\s*[:=]\s*({[^;]+?})\s*[;}]/i);
+    if (flashvarsMatch) {
+        var rcMatch = flashvarsMatch[1].match(/remote_control\s*:\s*['"]([^'"]+)['"]/i);
+        if (rcMatch && rcMatch[1].includes('remote_control.php')) {
+            var videoUrl = rcMatch[1].replace(/\\/g, '');
+            var proxiedUrl = WORKER_URL + '/?url=' + encodeURIComponent(videoUrl);
+            q['HD'] = proxiedUrl;
+            console.log(TAG, '✅ flashvars.remote_control, проксируем');
             success({ qualities: q });
-          } else {
-            error('resolve не дал mp4 URL');
-          }
-        }, function (err) {
-          console.error(TAG, 'S3 resolve error:', err);
-          error('Видео не найдено (все стратегии)');
-        });
-        return;
-      }
+            return;
+        }
     }
-
-    error('Видео не найдено (все стратегии)');
-  }
+    
+    // S3: Fallback - любой .mp4 НЕ из get_file
+    var mp4Matches = html.match(/https?:\/\/[^"'\s<>\\]+\.mp4[^"'\s<>\\]*/gi);
+    if (mp4Matches) {
+        for (var i = 0; i < mp4Matches.length; i++) {
+            var mp4 = mp4Matches[i];
+            if (mp4.indexOf('get_file') === -1) {
+                var proxiedUrl = WORKER_URL + '/?url=' + encodeURIComponent(mp4);
+                q['HD'] = proxiedUrl;
+                console.log(TAG, '⚠️ Fallback .mp4, проксируем');
+                success({ qualities: q });
+                return;
+            }
+        }
+    }
+    
+    error('Видео не найдено (remote_control.php не найден)');
+}
 
   // ----------------------------------------------------------
   // URL BUILDER
