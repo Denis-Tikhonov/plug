@@ -1,6 +1,6 @@
 // =============================================================
 // anld.js — Парсер www.analdin.com для AdultJS
-// Version  : 1.0.0
+// Version  : 1.1.0
 // Site     : https://www.analdin.com
 // Engine   : KVS + flowplayer (PLAYER: "flowplayer")
 // Strategy : SSR каталог /videos/, flowplayer / kt_player qualities
@@ -17,6 +17,8 @@
 //             PLAYER: flowplayer → ищем playlist / clip.url
 // =============================================================
 // Изменения:
+//   Version  : 1.0.1
+//   [1.0.1] BUGFIX: главная /videos/ → 404, исправлено на /
 //   [1.0.0] Начальная версия
 //           Карточки: .item + fallback a[href*="/videos/"]
 //           Qualities: S1 flowplayer playlist/clip.url
@@ -400,8 +402,9 @@
       base = HOST + '/channels/' + value + '/';
       return page > 1 ? base + '?page=' + page : base;
     }
-    base = HOST + '/videos/';
-    return page > 1 ? base + '?page=' + page : base;
+    // СТАЛО: [1.0.1] /videos/ вернул 404 — используем корень сайта
+     base = HOST + '/';
+     return page > 1 ? base + '?page=' + page : base;
   }
 
   function buildMenu() {
