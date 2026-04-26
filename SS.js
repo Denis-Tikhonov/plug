@@ -494,12 +494,24 @@
               element.video,
               function (data) {
                 Lampa.Loading.stop();
-                var qualities = data.qualities || data;
-                var video = {
-                  title:   element.name,
-                  url:     Utils.qualityDefault(qualities) || element.video,
-                  quality: qualities,
-                };
+                // СТАЛО [1.6.0]:
+		var qualities = data.qualities || data;
+		// Проксируем все URL качеств через Worker (get_file → 302 → ahcdn.com)
+		var workerUrl = (window.AdultPlugin && window.AdultPlugin.workerUrl) ? window.AdultPlugin.workerUrl : '';
+		if (workerUrl) {
+		  if (workerUrl.charAt(workerUrl.length - 1) !== '=') workerUrl = workerUrl + '=';
+		  for (var qKey in qualities) {
+		    var qUrl = qualities[qKey];
+		    if (qUrl && qUrl.indexOf('http') === 0 && qUrl.indexOf(workerUrl) !== 0) {
+		      qualities[qKey] = workerUrl + encodeURIComponent(qUrl);
+		    }
+		  }
+		}
+		var video = {
+		  title:   element.name,
+		  url:     Utils.qualityDefault(qualities) || element.video,
+		  quality: qualities,
+		};
                 Lampa.Player.play(video);
                 Lampa.Player.playlist([video]);
                 Lampa.Player.callback(function () { Lampa.Controller.toggle(ctrl); });
@@ -715,12 +727,9 @@
             'ukr.bongacams.com':    'bcms',
             'xds.com':              'xds',
             'ru.anysex.com':      'ansx',
-            'ru.mylust.com':      'mlst',
-            'www.xtits.xxx':      'xtit',
-            'www.analdin.com':    'anld',
-            'inporn.com':         'iprn',
-            'www.winporn.club':   'vprn',
-            'www.viptube.com':    'vtub',
+'ru.mylust.com':      'mlst',
+'www.xtits.xxx':      'xtit',
+'www.analdin.com':    'anld',
           };
           parserName = domainMap[hostname] || stripped.split('/')[0];
         } catch(e) {
@@ -796,12 +805,9 @@
                 'ukr.bongacams.com':    'bcms',
                 'xds.com':              'xds',
                 'ru.anysex.com':      'ansx',
-                'ru.mylust.com':      'mlst',
-                'www.xtits.xxx':      'xtit',
-                'www.analdin.com':    'anld',
-                'inporn.com':         'iprn',
-                'www.winporn.club':   'vprn',
-                'www.viptube.com':    'vtub',
+'ru.mylust.com':      'mlst',
+'www.xtits.xxx':      'xtit',
+'www.analdin.com':    'anld',
               };
               _pn = _dm[_hn] || _ps.split('/')[0];
             } catch(e2) { _pn = 'briz'; }
