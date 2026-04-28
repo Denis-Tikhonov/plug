@@ -358,7 +358,7 @@
     page = parseInt(page, 10) || 1;
     if (type === 'search') { var u = HOST + '/search/video?q=' + encodeURIComponent(value); return page > 1 ? u + '&page=' + page : u; }
     if (type === 'cat')    { var u = HOST + '/categories/' + value; return page > 1 ? u + '?page=' + page : u; }
-    var u = HOST + '/videos'; return page > 1 ? u + '?page=' + page : u;
+    var u = HOST + '/videos/'; return page > 1 ? u + '?page=' + page : u;
   }
 
   function buildMenu() {
