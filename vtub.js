@@ -20,6 +20,7 @@
 //                      S3 mp4-brute (vptpcs.com CDN)
 //           Пагинация: /videos/{N}  — числовой путь VipTube
 //           Quality badge: карточки имеют .quality ("4K","1080p"...)
+//   [1.0.2] Начальный адрес с видео
 // =============================================================
 
 (function () {
@@ -352,7 +353,7 @@
       return page > 1 ? base + '?page=' + page : base;
     }
     // main — числовая пагинация /video/ → /videos/{N}
-    if (page <= 1) return HOST + '/video/';
+    if (page <= 1) return HOST + '/videos/';
     return HOST + '/videos/' + page;
   }
 
