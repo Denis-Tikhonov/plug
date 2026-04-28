@@ -13,6 +13,7 @@
 //            CDN постеров и видео: g1.wppsn.com … g9.wppsn.com
 // =============================================================
 // Изменения:
+//   Version  : 1.0.2
 //   [1.0.0] Начальная версия
 //           Каталог: .item (KVS) + fallback a[href*="/video/"]
 //           Qualities: S1 video_url / kt_player
@@ -25,7 +26,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.0.0';
+  var VERSION = '1.0.2';
   var NAME    = 'vprn';
   var HOST    = 'https://www.winporn.club';
   var TAG     = '[' + NAME + ' v' + VERSION + ']';
@@ -346,9 +347,10 @@
       return page > 1 ? base + '&page=' + page : base;
     }
     // main — most-popular (содержит реальные видео в отличие от /categories)
-    base = HOST + '/most-popular/';
+    // Проверяем несколько вариантов: корень → /videos/ → /most-popular/
+    base = HOST + '/';
     return page > 1 ? base + '?page=' + page : base;
-  }
+    }
 
   // ============================================================
   // §7. МЕНЮ
