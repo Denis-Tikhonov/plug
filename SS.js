@@ -113,6 +113,10 @@
     'inporn.com':           'iprn',
     'winporn.club':         'vprn',
     'viptube.com':          'vtub',
+    'zbporn.com':           'zbrn',
+    'sexzoo.net':           'szpn',
+    'video-scat.com':       'scpr',
+    'ru.faphouse.com':      'fph',
   };
 
   // [1.6.0] Единая функция разрешения имени парсера по URL.
