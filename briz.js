@@ -1,11 +1,12 @@
 // =============================================================
 // briz.js — Парсер PornoBriz для AdultJS / AdultPlugin (Lampa)
-// Version  : 3.1.0 (Refactored to YouJizz/XDS Architecture)
+// Version  : 3.1.1 (Refactored to YouJizz/XDS Architecture)
 // Changed  :
 //   [3.1.0] Внедрена система «умного роутинга» (routeView)
 //           Исправлен поиск через фильтр (search_on: true)
 //           Добавлены обязательные поля постеров: img, poster, background_image
 //           Сохранена рабочая логика извлечения видео (qualities)
+//   [3.1.1] явную обработкf /main в функцию routeView, чтобы избежать неявного fallback на главную страницу
 // =============================================================
 
 (function () {
@@ -161,30 +162,40 @@
   // ----------------------------------------------------------
   // РОУТЕР (УМНЫЙ РОУТИНГ)
   // ----------------------------------------------------------
-  function routeView(url, page, success, error) {
-    var queryMatch = url.match(/[?&]search=([^&]*)/);
-    if (queryMatch) {
-        var query = decodeURIComponent(queryMatch[1]);
-        fetchPage(buildBrizUrl(null, page, query), page, success, error);
-        return;
-    }
-
-    if (url.indexOf(NAME + '/cat/') === 0) {
-        var cat = url.replace(NAME + '/cat/', '').split('?')[0];
-        fetchPage(buildBrizUrl(cat, page), page, success, error);
-        return;
-    }
-
-    if (url.indexOf(NAME + '/search/') === 0) {
-        var rawQ = url.replace(NAME + '/search/', '').split('?')[0];
-        if (rawQ) {
-            fetchPage(buildBrizUrl(null, page, decodeURIComponent(rawQ)), page, success, error);
-            return;
-        }
-    }
-
-    fetchPage(HOST + (page > 1 ? '/?page=' + page : ''), page, success, error);
+function routeView(url, page, success, error) {
+  // 1. Фильтр-поиск
+  var queryMatch = url.match(/[?&]search=([^&]*)/);
+  if (queryMatch) {
+    var query = decodeURIComponent(queryMatch[1]);
+    fetchPage(buildBrizUrl(null, page, query), page, success, error);
+    return;
   }
+  
+  // 2. Явная обработка "Новинки" (main)
+  if (url === NAME + '/main' || url === NAME + '/main/') {
+    fetchPage(HOST + '/', page, success, error); // или HOST + '/latest/', если есть такой путь
+    return;
+  }
+
+  // 3. Категории
+  if (url.indexOf(NAME + '/cat/') === 0) {
+    var cat = url.replace(NAME + '/cat/', '').split('?')[0];
+    fetchPage(buildBrizUrl(cat, page), page, success, error);
+    return;
+  }
+  
+  // 4. Поиск через подменю
+  if (url.indexOf(NAME + '/search/') === 0) {
+    var rawQ = url.replace(NAME + '/search/', '').split('?')[0];
+    if (rawQ) {
+      fetchPage(buildBrizUrl(null, page, decodeURIComponent(rawQ)), page, success, error);
+      return;
+    }
+  }
+  
+  // 5. Fallback (главная с пагинацией)
+  fetchPage(HOST + (page > 1 ? '/?page=' + page : ''), page, success, error);
+}
 
   function fetchPage(fetchUrl, page, success, error) {
     httpGet(fetchUrl, function (html) {
