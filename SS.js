@@ -1,6 +1,6 @@
 // =============================================================
 // AdultJS.js — Lampa Adult Plugin
-// Version  : 1.6.0
+// Version  : 1.7.2
 // Changed  :
 //   [1.0.0] Полный рефакторинг с ab2024.ru → GitHub Pages
 //   [1.0.0] Убраны: RCH, история, лицензионные проверки
@@ -32,6 +32,14 @@
 //           TV не мог пройти редирект без заголовков → видео не играло.
 //   [1.6.0] BUGFIX: все три ветки Utils.play() теперь проксируют
 //           video URL через Worker (основная, error-fallback, no-parser)
+//   [1.7.0] ОПТИМИЗАЦИЯ: Адаптивные таймауты с учётом истории доменов.
+//           Механизм повторных попыток при таймаутах перед fallback.
+//           Персистентное кэширование menu.json в Lampa.Storage.
+//           Параллельная загрузка источников для главной страницы.
+//           LRU-кеш парсеров с автоматической выгрузкой неактивных.
+//   [1.7.1] ОПТИМИЗАЦИЯ: исправление ....
+//   [1.7.2] BUGFIX: resolveParserName — экранирование точки в regex (/.js$/i → /\.js$/i).
+//           BUGFIX: debounce в Sisi для устранения мерцания UI при параллельной загрузке.
 // GitHub   : https://denis-tikhonov.github.io/plug/
 // Worker   :
 // =============================================================
@@ -43,10 +51,28 @@
   'use strict';
 
   // ----------------------------------------------------------
-  // КОНСТАНТЫ
+  // КОНСТАНТЫ И КОНФИГУРАЦИЯ
   // ----------------------------------------------------------
   var PLUGIN_ID      = 'adult_lampac';
-  var PLUGIN_VERSION = '1.6.0';
+  var PLUGIN_VERSION = '1.7.2';
+
+  // Константы таймаутов
+  var TIMEOUT_CONFIG = {
+    NATIVE_BASE:      12000,    // Базовый таймаут native (12 сек)
+    NATIVE_MIN:       8000,     // Минимальный таймаут
+    NATIVE_MAX:       25000,    // Максимальный таймаут для медленных CDN
+    REQUENT_TIMEOUT:  12000,    // Таймаут Reguest
+    FETCH_TIMEOUT:    15000,    // Таймаут fetch
+    RETRY_DELAY:      1500,     // Задержка перед retry (мс)
+    MAX_RETRIES:      2,        // Максимум повторов при таймауте
+    DOMAIN_HISTORY_TTL: 3600000,// TTL истории домена (1 час)
+  };
+
+  // Конфигурация LRU-кеша парсеров
+  var PARSER_CACHE_CONFIG = {
+    MAX_PARSERS: 10,            // Максимум загруженных парсеров
+    CLEANUP_THRESHOLD: 12,      // Порог очистки
+  };
 
   // ----------------------------------------------------------
   // ПОЛИФИЛЛЫ
@@ -79,13 +105,14 @@
     'sisi_preview',
     'sisi_unic_id',
     'lampac_unic_id',
+    'adult_menu_cache',         // [1.7.0] Кэш меню
+    'adult_domain_history',     // [1.7.0] История таймаутов по доменам
   ];
 
   // ----------------------------------------------------------
   // [1.6.0] DOMAIN_MAP — единая карта домен → имя парсера.
   //         Новые источники добавлять ТОЛЬКО ЗДЕСЬ
   //         (+ в ALLOWED_TARGETS Worker).
-  //         [1.6.0] BUGFIX: 'xhamster.com' → 'xham' (было 'hxham')
   // ----------------------------------------------------------
   var DOMAIN_MAP = {
     'pornobriz.com':        'briz',
@@ -130,7 +157,119 @@
         return 'briz';
       }
     }
-    return stripped.split('?')[0].split('/')[0];
+  // ФИКС: убираем query-параметры и расширение .js
+  return stripped.split('?')[0].split('/')[0].replace(/\.js$/i, '');
+
+  }
+
+  // ----------------------------------------------------------
+  // [1.7.0] УПРАВЛЕНИЕ ТАЙМАУТАМИ И ИСТОРИЕЙ ДОМЕНОВ
+  // ----------------------------------------------------------
+
+  /**
+   * Получить hostname из URL
+   */
+  function extractHostname(url) {
+    try {
+      return new URL(url).hostname.replace('www.', '');
+    } catch (e) {
+      return '';
+    }
+  }
+
+  /**
+   * Загрузить историю домена из storage
+   */
+  function loadDomainHistory() {
+    var raw = Lampa.Storage.get('adult_domain_history', '{}');
+    try {
+      return JSON.parse(raw);
+    } catch (e) {
+      return {};
+    }
+  }
+
+  /**
+   * Сохранить историю домена в storage
+   */
+  function saveDomainHistory(history) {
+    // Очистка устаревших записей
+    var now = Date.now();
+    var ttl = TIMEOUT_CONFIG.DOMAIN_HISTORY_TTL;
+    for (var host in history) {
+      if (history[host].lastUpdate && (now - history[host].lastUpdate) > ttl) {
+        delete history[host];
+      }
+    }
+    Lampa.Storage.set('adult_domain_history', JSON.stringify(history));
+  }
+
+  /**
+   * Рассчитать адаптивный таймаут на основе истории домена
+   */
+  function getAdaptiveTimeout(url) {
+    var hostname = extractHostname(url);
+    if (!hostname) return TIMEOUT_CONFIG.NATIVE_BASE;
+
+    var history = loadDomainHistory();
+    var domainData = history[hostname];
+
+    if (!domainData || !domainData.avgLatency) {
+      return TIMEOUT_CONFIG.NATIVE_BASE;
+    }
+
+    // Рассчитываем таймаут как: средняя latency + 3 сигмы + буфер
+    var latency = domainData.avgLatency || TIMEOUT_CONFIG.NATIVE_BASE;
+    var variance = domainData.variance || 2000;
+    var suggestedTimeout = latency + (3 * Math.sqrt(variance)) + 2000;
+
+    // Ограничиваем диапазон
+    return Math.max(
+      TIMEOUT_CONFIG.NATIVE_MIN,
+      Math.min(TIMEOUT_CONFIG.NATIVE_MAX, Math.round(suggestedTimeout))
+    );
+  }
+
+  /**
+   * Обновить статистику домена после успешного запроса
+   */
+  function updateDomainStats(url, successTime) {
+    var hostname = extractHostname(url);
+    if (!hostname) return;
+
+    var history = loadDomainHistory();
+    if (!history[hostname]) {
+      history[hostname] = { samples: [], avgLatency: 0, variance: 0, lastUpdate: 0 };
+    }
+
+    var data = history[hostname];
+    var sample = Math.min(successTime, 30000); // Ограничиваем выбросы
+
+    data.samples.push(sample);
+    if (data.samples.length > 20) {
+      data.samples.shift(); // Ограничиваем окно
+    }
+
+    // Пересчёт среднего и дисперсии
+    var sum = 0;
+    for (var i = 0; i < data.samples.length; i++) {
+      sum += data.samples[i];
+    }
+    var newAvg = sum / data.samples.length;
+
+    var varSum = 0;
+    for (var j = 0; j < data.samples.length; j++) {
+      var diff = data.samples[j] - newAvg;
+      varSum += diff * diff;
+    }
+    var newVariance = data.samples.length > 1 ? varSum / data.samples.length : 0;
+
+    data.avgLatency = Math.round(newAvg);
+    data.variance = Math.round(newVariance);
+    data.lastUpdate = Date.now();
+
+    saveDomainHistory(history);
+    console.log('[AdultJS] Domain stats updated: ' + hostname + ' avg=' + data.avgLatency + 'ms var=' + data.variance);
   }
 
   // ----------------------------------------------------------
@@ -204,10 +343,16 @@
   function resetPlugin() {
     menuCache = null;
 
+    // [1.7.0] Очистка LRU-кеша парсеров
     Object.keys(Parsers).forEach(function (name) { delete Parsers[name]; });
+    parserAccessOrder = [];
     document.querySelectorAll('script[data-adult-parser]').forEach(function (s) {
       s.parentNode.removeChild(s);
     });
+
+    // [1.7.0] Очистка кэша меню и истории доменов
+    Lampa.Storage.set('adult_menu_cache', null);
+    Lampa.Storage.set('adult_domain_history', null);
 
     STORAGE_KEYS.forEach(function (key) { Lampa.Storage.set(key, null); });
 
@@ -217,31 +362,101 @@
   }
 
   // ----------------------------------------------------------
-  // ЗАГРУЗЧИК ПАРСЕРОВ
+  // [1.7.0] LRU-КЭШ ПАРСЕРОВ
   // ----------------------------------------------------------
   var Parsers = {};
+  var parserAccessOrder = []; // Массив имён парсеров в порядке доступа (старые впереди)
 
+  function touchParser(name) {
+    var idx = parserAccessOrder.indexOf(name);
+    if (idx !== -1) {
+      parserAccessOrder.splice(idx, 1);
+    }
+    parserAccessOrder.push(name);
+
+    // Очистка старых парсеров при превышении лимита
+    while (parserAccessOrder.length > PARSER_CACHE_CONFIG.MAX_PARSERS) {
+      var oldName = parserAccessOrder.shift();
+      if (Parsers[oldName]) {
+        console.log('[AdultJS] LRU: unloading parser ' + oldName);
+        delete Parsers[oldName];
+        // Удаляем script-элемент
+        var scripts = document.querySelectorAll('script[data-adult-parser="' + oldName + '"]');
+        scripts.forEach(function (s) { s.parentNode.removeChild(s); });
+      }
+    }
+  }
+
+  // ----------------------------------------------------------
+  // ЗАГРУЗЧИК ПАРСЕРОВ
+  // ----------------------------------------------------------
   function loadParser(name, callback) {
-    if (Parsers[name]) { callback(Parsers[name]); return; }
+    // Проверяем кэш
+    if (Parsers[name]) {
+      touchParser(name);
+      callback(Parsers[name]);
+      return;
+    }
 
     var url    = GITHUB_BASE + name + '.js?v=' + Date.now();
     var script = document.createElement('script');
     script.src = url;
     script.setAttribute('data-adult-parser', name);
     script.onload = function () {
+      // Убираем из DOM после загрузки для освобождения памяти
+      setTimeout(function () {
+        if (script.parentNode) script.parentNode.removeChild(script);
+      }, 100);
+
+      touchParser(name);
       if (Parsers[name]) callback(Parsers[name]);
       else console.warn('[AdultJS] Parser not registered after load:', name);
     };
     script.onerror = function () {
       console.error('[AdultJS] Failed to load parser:', url);
+      if (script.parentNode) script.parentNode.removeChild(script);
     };
     document.head.appendChild(script);
   }
 
   // ----------------------------------------------------------
-  // ЦЕНТРАЛИЗОВАННЫЙ СЕТЕВОЙ ЗАПРОС
+  // [1.7.0] ПЕРСИСТЕНТНОЕ КЭШИРОВАНИЕ МЕНЮ
   // ----------------------------------------------------------
-  var NATIVE_TIMEOUT_MS = 9000;
+  var menuCache = null;
+
+  function loadMenuCache(callback) {
+    var cached = Lampa.Storage.get('adult_menu_cache', null);
+    if (cached) {
+      try {
+        var parsed = typeof cached === 'string' ? JSON.parse(cached) : cached;
+        if (parsed && parsed.channels && parsed.timestamp) {
+          var age = Date.now() - parsed.timestamp;
+          var maxAge = 3600000; // 1 час
+          if (age < maxAge) {
+            console.log('[AdultJS] Menu loaded from cache (' + Math.round(age / 1000) + 's old)');
+            menuCache = parsed.channels; // <-- ДОБАВЛЕНО: синхронизация глобальной переменной
+            callback(parsed.channels);
+            return true;
+          }
+        }
+      } catch (e) {
+        console.warn('[AdultJS] Cache parse error:', e.message);
+      }
+    }
+    return false;
+  }
+
+  function saveMenuCache(channels) {
+    Lampa.Storage.set('adult_menu_cache', JSON.stringify({
+      channels: channels,
+      timestamp: Date.now(),
+    }));
+    console.log('[AdultJS] Menu cached');
+  }
+
+  // ----------------------------------------------------------
+  // ЦЕНТРАЛИЗОВАННЫЙ СЕТЕВОЙ ЗАПРОС С ОПТИМИЗАЦИЯМИ
+  // ----------------------------------------------------------
 
   function _ts() {
     var d = new Date();
@@ -265,18 +480,24 @@
     return url;
   }
 
-  function _networkNative(url, success, error) {
-    if (typeof Lampa === 'undefined' ||
+  /**
+   * [1.7.0] Нативный запрос с адаптивными таймаутами и retry
+   */
+  function _networkNativeWithRetry(url, success, error, attemptNumber) {
+    attemptNumber = attemptNumber || 1;
+    var adaptiveTimeout = getAdaptiveTimeout(url);
+    var timeout = Math.min(adaptiveTimeout, TIMEOUT_CONFIG.NATIVE_MAX);
+
+    if (!window.AdultPlugin ||
+        typeof Lampa === 'undefined' ||
         !Lampa.Network ||
         typeof Lampa.Network.native !== 'function') {
-      console.warn('[AdultJS][' + _ts() + '] native недоступен — пропуск');
       error('native_unavailable');
       return;
     }
 
     var workerUrl = getWorkerUrl();
     if (!workerUrl) {
-      console.warn('[AdultJS][' + _ts() + '] WORKER_DEFAULT пуст — пропуск');
       error('worker_not_configured');
       return;
     }
@@ -285,14 +506,27 @@
     var t0   = Date.now();
     var done = false;
 
-    console.log('[AdultJS][' + _ts() + '] native START → ' + fullPath.substring(0, 120));
+    console.log('[AdultJS][' + _ts() + '] native START (attempt ' + attemptNumber + ') → ' +
+                fullPath.substring(0, 120) + ' [timeout: ' + timeout + 'ms]');
 
     var timerId = setTimeout(function () {
       if (done) return;
       done = true;
-      console.warn('[AdultJS][' + _ts() + '] native TIMEOUT ' + NATIVE_TIMEOUT_MS + 'мс → переход к Reguest');
+
+      // [1.7.0] Retry логика для таймаутов
+      if (attemptNumber < TIMEOUT_CONFIG.MAX_RETRIES) {
+        console.warn('[AdultJS][' + _ts() + '] native TIMEOUT ' + timeout + 'мс (attempt ' +
+                     attemptNumber + ') → retry in ' + TIMEOUT_CONFIG.RETRY_DELAY + 'ms');
+        setTimeout(function () {
+          _networkNativeWithRetry(url, success, error, attemptNumber + 1);
+        }, TIMEOUT_CONFIG.RETRY_DELAY);
+        return;
+      }
+
+      console.warn('[AdultJS][' + _ts() + '] native TIMEOUT ' + timeout + 'мс after ' +
+                   attemptNumber + ' attempts → переход к Reguest');
       error('native_timeout');
-    }, NATIVE_TIMEOUT_MS);
+    }, timeout);
 
     try {
       Lampa.Network.native(
@@ -304,6 +538,9 @@
 
           var elapsed = Date.now() - t0;
           var text = (typeof result === 'string') ? result : JSON.stringify(result);
+
+          // [1.7.0] Обновляем статистику домена при успехе
+          updateDomainStats(url, elapsed);
 
           if (text && text.indexOf('"status":403') !== -1) {
             console.warn('[AdultJS][' + _ts() + '] native OK но Worker 403 в теле (' + elapsed + 'мс)');
@@ -377,7 +614,7 @@
           error(e || 'reguest_error');
         },
         false,
-        { dataType: 'text', timeout: 10000 }
+        { dataType: 'text', timeout: TIMEOUT_CONFIG.REQUENT_TIMEOUT }
       );
     } catch (ex) {
       console.error('[AdultJS][' + _ts() + '] Reguest исключение: ' + ex.message);
@@ -394,8 +631,14 @@
     var t0 = Date.now();
     console.log('[AdultJS][' + _ts() + '] fetch START → ' + url.substring(0, 80));
 
-    fetch(url, { method: 'GET' })
+    var controller = new AbortController();
+    var timerId = setTimeout(function () {
+      controller.abort();
+    }, TIMEOUT_CONFIG.FETCH_TIMEOUT);
+
+    fetch(url, { method: 'GET', signal: controller.signal })
       .then(function (r) {
+        clearTimeout(timerId);
         console.log('[AdultJS][' + _ts() + '] fetch HTTP ' + r.status + ' ' + (Date.now()-t0) + 'мс');
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.text();
@@ -405,15 +648,21 @@
         success(text);
       })
       .catch(function (e) {
-        console.error('[AdultJS][' + _ts() + '] fetch FAIL ' + (Date.now()-t0) + 'мс | ' + (e.message || e));
-        error(e);
+        clearTimeout(timerId);
+        if (e.name === 'AbortError') {
+          console.warn('[AdultJS][' + _ts() + '] fetch TIMEOUT ' + TIMEOUT_CONFIG.FETCH_TIMEOUT + 'мс');
+          error('fetch_timeout');
+        } else {
+          console.error('[AdultJS][' + _ts() + '] fetch FAIL ' + (Date.now()-t0) + 'мс | ' + (e.message || e));
+          error(e);
+        }
       });
   }
 
   function networkRequest(url, success, error) {
     console.log('[AdultJS][' + _ts() + '] networkRequest → ' + url.substring(0, 80));
 
-    _networkNative(url,
+    _networkNativeWithRetry(url,
       function (text) {
         console.log('[AdultJS][' + _ts() + '] ✅ успех: native+Worker');
         success(text);
@@ -496,8 +745,6 @@
     },
 
     // [1.6.0] Проксирование video URL через Worker.
-    // Необходимо для сайтов у которых get_file → 302 → CDN (ahcdn.com и др.)
-    // TV-плеер не может самостоятельно пройти редирект с нужными заголовками.
     proxyVideoUrl: function (url) {
       if (!url || url.indexOf('http') !== 0) return url;
       var w = (window.AdultPlugin && window.AdultPlugin.workerUrl)
@@ -535,10 +782,6 @@
                 Lampa.Loading.stop();
                 var qualities = data.qualities || data;
 
-                // [1.6.0] BUGFIX: проксируем все URL качеств через Worker.
-                // get_file → 302 → ahcdn.com требует прохождения через Worker
-                // с правильным Referer. TV-плеер не умеет следовать редиректам
-                // с произвольными заголовками напрямую.
                 for (var qKey in qualities) {
                   qualities[qKey] = Utils.proxyVideoUrl(qualities[qKey]);
                 }
@@ -555,7 +798,6 @@
               function (e) {
                 Lampa.Loading.stop();
                 console.warn('[AdultJS] qualities error:', e);
-                // [1.6.0] BUGFIX: fallback тоже проксируется
                 var video = {
                   title: element.name,
                   url:   Utils.proxyVideoUrl(element.video),
@@ -567,7 +809,6 @@
             );
           } else {
             Lampa.Loading.stop();
-            // [1.6.0] BUGFIX: нет метода qualities — тоже проксируем
             var video = {
               title: element.name,
               url:   Utils.proxyVideoUrl(element.video),
@@ -581,7 +822,6 @@
       }
 
       if (element.qualities) {
-        // [1.6.0] BUGFIX: проксируем и прямые qualities
         var proxiedQ = {};
         for (var k in element.qualities) {
           proxiedQ[k] = Utils.proxyVideoUrl(element.qualities[k]);
@@ -708,18 +948,20 @@
   // ----------------------------------------------------------
   // API — меню с GitHub + роутинг по парсерам
   // ----------------------------------------------------------
-  var menuCache = null;
-
   var Api = {
 
     menu: function (success, error) {
-      if (menuCache) { success(menuCache); return; }
+      // [1.7.0] Проверяем кэш
+      if (loadMenuCache(success)) return;
+
+      // Загружаем свежее меню
       var net = new Lampa.Reguest();
       net.silent(
         MENU_URL,
         function (data) {
           if (data && data.channels) {
             menuCache = data.channels;
+            saveMenuCache(data.channels);
             success(menuCache);
           } else {
             error('Неверный формат menu.json');
@@ -729,7 +971,7 @@
       );
     },
 
-    // [1.6.0] REFACTOR: использует resolveParserName() вместо inline domainMap
+    // [1.6.0] REFACTOR: использует resolveParserName()
     view: function (params, success, error) {
       var url = params.url || '';
 
@@ -749,7 +991,7 @@
       });
     },
 
-    // [1.6.0] REFACTOR: использует resolveParserName() вместо inline _dm
+    // [1.6.0] REFACTOR: использует resolveParserName()
     search: function (params, oncomplite, error) {
       Api.menu(function (channels) {
         var status  = new Lampa.Status(channels.length);
@@ -812,6 +1054,7 @@
 
   // ----------------------------------------------------------
   // КОМПОНЕНТ — главная (все источники плитками)
+  // [1.7.0] ОПТИМИЗАЦИЯ: параллельная загрузка источников
   // ----------------------------------------------------------
   function Sisi(object) {
     var comp = new Lampa.InteractionMain(object);
@@ -821,10 +1064,18 @@
       this.activity.loader(true);
 
       Api.menu(function (channels) {
-        var status = new Lampa.Status(channels.length);
-        var items  = [];
+     var status = new Lampa.Status(channels.length);
+     var items  = [];
+     var pendingRequests = {}; // Для отслеживания незавершённых запросов
+     // [1.7.2] Debounce для промежуточных перерисовок главной
+     var buildTimer;
+     function scheduleBuild() {
+       clearTimeout(buildTimer);
+       buildTimer = setTimeout(function () { _this.build(items); }, 200);
+     }
 
         status.onComplite = function (data) {
+          // Собираем результаты в порядке каналов
           channels.forEach(function (ch) {
             if (data[ch.playlist_url]) items.push(data[ch.playlist_url]);
           });
@@ -832,6 +1083,7 @@
           else              _this.empty();
         };
 
+        // Параллельная загрузка всех источников
         channels.forEach(function (ch) {
           if (ch.playlist_url === 'local://bookmarks') {
             var list = Bookmarks.all();
@@ -854,7 +1106,9 @@
             return;
           }
 
-          var parserName = ch.playlist_url.replace(GITHUB_BASE, '').split('?')[0].split('/')[0];
+          var parserName = resolveParserName(ch.playlist_url);
+          pendingRequests[ch.playlist_url] = true;
+
           loadParser(parserName, function (parser) {
             parser.main({ url: ch.playlist_url, page: 1 }, function (data) {
               data.title     = Utils.sourceTitle(ch.title);
@@ -865,8 +1119,18 @@
                 onEnter: function (card, el) { Utils.preview.hide(); Utils.play(el); },
               };
               Utils.fixCards(data.results);
+              delete pendingRequests[ch.playlist_url];
               status.append(ch.playlist_url, data);
-            }, function () { status.error(); });
+
+           // [1.7.2] Промежуточное обновление UI при получении результата
+           if (Object.keys(pendingRequests).length < channels.length / 2) {
+             // Уже загружено более половины — показываем что есть (через debounce)
+             scheduleBuild();
+           }
+            }, function () {
+              delete pendingRequests[ch.playlist_url];
+              status.error();
+            });
           });
         });
       }, function (e) {
