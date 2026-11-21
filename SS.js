@@ -146,8 +146,8 @@
     'ru.faphouse.com':      'fph',
     'retro.huyamba.mobi': 'huyamba',
     'huyamba.mobi':       'huyamba',
-'r17.mixporn.space':  'mixporn',
-'mixporn.space':      'mixporn',
+    'r17.mixporn.space':  'mixporn',
+    'mixporn.space':      'mixporn'
   };
 
   // [1.6.0] Единая функция разрешения имени парсера по URL.
