@@ -1,19 +1,21 @@
 // =============================================================
 // yjizz.js — Парсер YouJizz для AdultJS / AdultPlugin (Lampa)
-// Version  : 2.1.0
+// Version  : 2.2.0
 // Changes  :
-//   [2.1.0] Прямой fetch для qualities (обход Worker)
-//           Улучшен парсинг dataEncodings + fallback
-//           Более надёжные постеры
-//           Cookie mature=1 + нормальный UA
+//   [2.2.0] Полная переработка по данным анализа сайта (2026-11-21)
+//           Селекторы .video-item / data-original
+//           dataEncodings (mp4 + HLS) как основной источник
+//           cleanUrl + mature=1 + правильный Referer
+//           Формат qualities совместим с SS.js
 // =============================================================
 
 (function () {
   'use strict';
 
-  var NAME = 'yjizz';
-  var HOST = 'https://www.youjizz.com';
-  var TAG  = '[yjizz v2.1.0]';
+  var NAME    = 'yjizz';
+  var HOST    = 'https://www.youjizz.com';
+  var VERSION = '2.2.0';
+  var TAG     = '[yjizz v' + VERSION + ']';
 
   var SORTS = [
     { title: 'Популярное',  val: 'most-popular'    },
@@ -68,8 +70,16 @@
   ];
 
   // ----------------------------------------------------------
-  // HTTP
+  // Утилиты
   // ----------------------------------------------------------
+  function cleanUrl(u) {
+    if (!u) return '';
+    u = String(u).replace(/\\\//g, '/').replace(/\\/g, '').trim();
+    if (u.indexOf('//') === 0) u = 'https:' + u;
+    if (u.charAt(0) === '/' && u.charAt(1) !== '/') u = HOST + u;
+    return u;
+  }
+
   function httpGet(url, success, error) {
     if (window.AdultPlugin && typeof window.AdultPlugin.networkRequest === 'function') {
       window.AdultPlugin.networkRequest(url, success, error);
@@ -78,7 +88,7 @@
     }
   }
 
-  // Прямой запрос (для qualities) — обходит проблемы Worker
+  // Прямой запрос (для страницы видео) — лучше для dataEncodings
   function directGet(url, success, error) {
     if (typeof fetch === 'undefined') {
       httpGet(url, success, error);
@@ -92,6 +102,7 @@
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
         'Referer': HOST + '/',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.8',
       }
     })
       .then(function (r) {
@@ -100,7 +111,7 @@
       })
       .then(success)
       .catch(function (e) {
-        console.warn(TAG, 'direct failed, fallback Worker:', e.message || e);
+        console.warn(TAG, 'direct failed → Worker:', e.message || e);
         if (window.AdultPlugin && typeof window.AdultPlugin.networkRequest === 'function') {
           window.AdultPlugin.networkRequest(url, success, error);
         } else {
@@ -109,16 +120,8 @@
       });
   }
 
-  function cleanUrl(u) {
-    if (!u) return '';
-    u = u.replace(/\\\//g, '/').replace(/\\/g, '');
-    if (u.indexOf('//') === 0) u = 'https:' + u;
-    if (u.charAt(0) === '/' && u.charAt(1) !== '/') u = HOST + u;
-    return u;
-  }
-
   // ----------------------------------------------------------
-  // ПОСТРОЕНИЕ URL
+  // Построение URL
   // ----------------------------------------------------------
   function buildCatalogUrl(sort, page) {
     return HOST + '/' + (sort || SORTS[0].val) + '/' + (page || 1) + '.html';
@@ -134,14 +137,19 @@
   }
 
   // ----------------------------------------------------------
-  // ПАРСИНГ КАРТОЧЕК
+  // Парсинг карточек
   // ----------------------------------------------------------
   function parseCards(html) {
     if (!html) return [];
     var doc = new DOMParser().parseFromString(html, 'text/html');
     var cards = [];
-    var items = doc.querySelectorAll('.video-thumb, .video-item');
-    if (!items.length) return [];
+
+    // По анализу: основной контейнер .video-item, fallback .video-thumb
+    var items = doc.querySelectorAll('.video-item');
+    if (!items || !items.length) {
+      items = doc.querySelectorAll('.video-thumb');
+    }
+    if (!items || !items.length) return [];
 
     for (var i = 0; i < items.length; i++) {
       var card = _parseCard(items[i]);
@@ -152,18 +160,22 @@
   }
 
   function _parseCard(el) {
-    var aEl = el.querySelector('a.frame.video') ||
+    // Ссылка
+    var aEl = el.querySelector('a[href*="/videos/"]') ||
+              el.querySelector('a.frame.video') ||
               el.querySelector('a.frame') ||
-              el.querySelector('a[href*="/videos/"]');
+              el.querySelector('a[href]');
     if (!aEl) return null;
 
     var href = aEl.getAttribute('href') || '';
     if (!href) return null;
     href = cleanUrl(href);
 
+    // Превью-клип (если есть)
     var preview = aEl.getAttribute('data-clip') || null;
     if (preview) preview = cleanUrl(preview);
 
+    // Постер — data-original (по анализу)
     var imgEl = el.querySelector('img');
     var picture = '';
     if (imgEl) {
@@ -173,17 +185,22 @@
                 imgEl.getAttribute('src') || '';
     }
     picture = cleanUrl(picture);
-    if (picture.indexOf('spacer') !== -1 || picture.length < 15) picture = '';
+    if (picture.indexOf('spacer') !== -1 || picture.length < 20) picture = '';
 
-    var titleEl = el.querySelector('.video-title a, .video-title, a.agego-content-title');
+    // Название
+    var titleEl = el.querySelector('.video-title a') ||
+                  el.querySelector('.video-title') ||
+                  el.querySelector('a.agego-content-title');
     var name = '';
     if (titleEl) name = (titleEl.textContent || titleEl.getAttribute('title') || '').trim();
     if (!name) name = (aEl.getAttribute('title') || '').trim();
     if (!name) return null;
 
+    // Длительность
     var durEl = el.querySelector('span.time, .time');
     var time  = durEl ? durEl.textContent.replace(/[^\d:]/g, '').trim() : '';
 
+    // HD
     var quality = el.querySelector('span.i-hd, [class*="i-hd"]') ? 'HD' : '';
 
     return {
@@ -203,21 +220,22 @@
   }
 
   // ----------------------------------------------------------
-  // ИЗВЛЕЧЕНИЕ ВИДЕО
+  // Извлечение видео (dataEncodings — основной источник)
   // ----------------------------------------------------------
   function getVideoLinks(videoPageUrl, success, error) {
-    // Всегда пробуем прямой запрос для страницы видео
+    // Страницу видео лучше грузить напрямую
     directGet(videoPageUrl, function (html) {
       var qualitys = {};
 
-      // Метод 1: dataEncodings (основной)
+      // === Метод 1: dataEncodings (confirmed) ===
       try {
         var idx = html.indexOf('dataEncodings');
         if (idx !== -1) {
           var arrStart = html.indexOf('[', idx);
           if (arrStart !== -1) {
             var depth = 0, arrEnd = -1;
-            for (var ci = arrStart; ci < Math.min(html.length, arrStart + 50000); ci++) {
+            var limit = Math.min(html.length, arrStart + 80000);
+            for (var ci = arrStart; ci < limit; ci++) {
               if (html[ci] === '[') depth++;
               else if (html[ci] === ']') {
                 depth--;
@@ -227,11 +245,18 @@
             if (arrEnd !== -1) {
               var dataEnc = JSON.parse(html.substring(arrStart, arrEnd + 1));
               dataEnc.forEach(function (enc) {
-                if (!enc.filename) return;
+                if (!enc || !enc.filename) return;
                 var u = cleanUrl(enc.filename);
-                var key = (String(enc.quality || enc.name || 'auto').toLowerCase() === 'auto')
-                  ? 'auto'
-                  : (String(enc.quality || enc.name).replace(/p$/i, '') + 'p');
+                if (!u || u.indexOf('http') !== 0) return;
+
+                var q = String(enc.quality || enc.name || '').toLowerCase();
+                var key;
+                if (q === 'auto' || !q) {
+                  key = u.indexOf('.m3u8') !== -1 ? 'auto' : 'HD';
+                } else {
+                  key = q.replace(/p$/i, '') + 'p';
+                }
+
                 // Предпочитаем mp4, но берём и m3u8
                 if (!qualitys[key] || u.indexOf('.mp4') !== -1) {
                   qualitys[key] = u;
@@ -244,14 +269,14 @@
         console.warn(TAG, 'dataEncodings error:', e.message || e);
       }
 
-      // Метод 2: encodings = [...] (как в yt-dlp)
+      // === Метод 2: encodings = [...] (fallback) ===
       if (!Object.keys(qualitys).length) {
         try {
           var m = html.match(/[Ee]ncodings\s*=\s*(\[[\s\S]*?\]);/);
           if (m) {
             var encs = JSON.parse(m[1]);
             encs.forEach(function (enc) {
-              if (!enc.filename) return;
+              if (!enc || !enc.filename) return;
               var u = cleanUrl(enc.filename);
               var key = String(enc.quality || enc.name || 'HD').replace(/p$/i, '') + 'p';
               qualitys[key] = u;
@@ -260,15 +285,15 @@
         } catch (e) {}
       }
 
-      // Метод 3: regex на mp4 / m3u8
+      // === Метод 3: regex mp4 / m3u8 ===
       if (!Object.keys(qualitys).length) {
         var re = /((?:https?:)?\/\/(?:cdne-mobile|abre-videos|hlse-videos)\.youjizz\.com\/[^"'\s]+\.(?:mp4|m3u8)[^"'\s]*)/gi;
         var mm, cnt = 0;
-        while ((mm = re.exec(html)) !== null && cnt < 8) {
+        while ((mm = re.exec(html)) !== null && cnt < 10) {
           var u = cleanUrl(mm[1]);
-          if (u.indexOf('preview') !== -1) continue;
-          var q = u.match(/-(\d{3,4})-/);
-          var key = q ? q[1] + 'p' : ('HD' + (cnt || ''));
+          if (!u || u.indexOf('preview') !== -1) continue;
+          var qMatch = u.match(/-(\d{3,4})-/);
+          var key = qMatch ? qMatch[1] + 'p' : (u.indexOf('.m3u8') !== -1 ? 'auto' : 'HD' + (cnt || ''));
           if (!qualitys[key]) {
             qualitys[key] = u;
             cnt++;
@@ -282,13 +307,14 @@
       }
 
       console.log(TAG, 'qualities:', Object.keys(qualitys));
-      success(qualitys);
+      // SS.js ожидает либо { qualities: {...} }, либо просто объект
+      success({ qualities: qualitys });
 
     }, error);
   }
 
   // ----------------------------------------------------------
-  // МЕНЮ + РОУТЕР (без изменений по логике)
+  // Меню + роутер
   // ----------------------------------------------------------
   function buildMenu() {
     return [
@@ -371,7 +397,7 @@
   }
 
   // ----------------------------------------------------------
-  // ПУБЛИЧНЫЙ ИНТЕРФЕЙС
+  // Публичный интерфейс
   // ----------------------------------------------------------
   var YjizzParser = {
     main: function (params, success, error) {
