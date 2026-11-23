@@ -1,6 +1,6 @@
 // =============================================================
 // AdultJS.js — Lampa Adult Plugin
-// Version  : 1.7.2
+// Version  : 1.7.3
 // Changed  :
 //   [1.0.0] Полный рефакторинг с ab2024.ru → GitHub Pages
 //   [1.0.0] Убраны: RCH, история, лицензионные проверки
@@ -40,6 +40,7 @@
 //   [1.7.1] ОПТИМИЗАЦИЯ: исправление ....
 //   [1.7.2] BUGFIX: resolveParserName — экранирование точки в regex (/.js$/i → /\.js$/i).
 //           BUGFIX: debounce в Sisi для устранения мерцания UI при параллельной загрузке.
+//   [1.7.3] NEW проксирование picture через Worker
 // GitHub   : https://denis-tikhonov.github.io/plug/
 // Worker   :
 // =============================================================
@@ -725,7 +726,7 @@
     },
 
     // [1.5.8] проксирование picture через Worker
-    fixCards: function (list) {
+        fixCards: function (list) {
       var workerUrl = (window.AdultPlugin && window.AdultPlugin.workerUrl)
         ? window.AdultPlugin.workerUrl : '';
 
@@ -734,20 +735,23 @@
       }
 
       list.forEach(function (m) {
+        var src = m.picture || m.img || m.poster || m.background_image || '';
+
         if (workerUrl &&
-            m.picture &&
-            m.picture.indexOf('http') === 0 &&
-            m.picture.indexOf(workerUrl) !== 0) {
-          m.picture = workerUrl + encodeURIComponent(m.picture);
+            src &&
+            src.indexOf('http') === 0 &&
+            src.indexOf('workers.dev') === -1) {
+          src = workerUrl + encodeURIComponent(src);
         }
 
-        m.background_image = m.picture;
-        m.poster            = m.picture;
-        m.img               = m.picture;
+        m.picture = src;
+        m.img = src;
+        m.poster = src;
+        m.background_image = src;
         m.name = Lampa.Utils.capitalizeFirstLetter(m.name || '').replace(/&(.*?);/g, '');
       });
     },
-
+    
     // [1.6.0] Проксирование video URL через Worker.
     proxyVideoUrl: function (url) {
       if (!url || url.indexOf('http') !== 0) return url;
