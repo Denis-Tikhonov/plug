@@ -736,66 +736,23 @@
     // [1.5.8][1.7.4] проксирование picture через Worker + лог [AdultJS][Poster]
     fixCards: function (list) {
       if (!list || !list.length) return;
-
       var workerUrl = (window.AdultPlugin && window.AdultPlugin.workerUrl)
         ? window.AdultPlugin.workerUrl : '';
-
       if (workerUrl && workerUrl.charAt(workerUrl.length - 1) !== '=') {
         workerUrl = workerUrl + '=';
       }
-
-      var proxied = 0;
-      var skipped = 0;
-      var empty = 0;
-      var samples = [];
-
-      list.forEach(function (m, idx) {
+      list.forEach(function (m) {
         var src = m.picture || m.img || m.poster || m.background_image || '';
-        var before = src;
-
-        if (!src) {
-          empty++;
-        } else if (
-          workerUrl &&
-          src.indexOf('http') === 0 &&
-          src.indexOf('workers.dev') === -1 &&
-          src.indexOf('/?url=') === -1
-        ) {
+        if (workerUrl && src && src.indexOf('http') === 0 &&
+            src.indexOf('workers.dev') === -1 && src.indexOf('/?url=') === -1) {
           src = workerUrl + encodeURIComponent(src);
-          proxied++;
-        } else {
-          skipped++;
         }
-
         m.picture = src;
         m.img = src;
         m.poster = src;
         m.background_image = src;
         m.name = Lampa.Utils.capitalizeFirstLetter(m.name || '').replace(/&(.*?);/g, '');
-
-        if (ADULT_DEBUG_POSTERS && idx < 3) {
-          samples.push({
-            name: (m.name || '').substring(0, 30),
-            before: (before || '').substring(0, 70),
-            after: (src || '').substring(0, 100),
-            viaWorker: !!(src && (src.indexOf('workers.dev') !== -1 || src.indexOf('/?url=') !== -1)),
-          });
-        }
       });
-
-      if (ADULT_DEBUG_POSTERS) {
-        console.log(
-          '[AdultJS][Poster] fixCards: total=' + list.length +
-          ' proxied=' + proxied +
-          ' skipped=' + skipped +
-          ' empty=' + empty +
-          ' worker=' + (workerUrl ? workerUrl.substring(0, 55) : 'NONE')
-        );
-        samples.forEach(function (s, i) {
-          console.log('[AdultJS][Poster] #' + i + ' ' + s.name + ' | before: ' + s.before);
-          console.log('[AdultJS][Poster] #' + i + ' after: ' + s.after + ' | viaWorker=' + s.viaWorker);
-        });
-      }
     },
 
     // [1.6.0] Проксирование video URL через Worker.
