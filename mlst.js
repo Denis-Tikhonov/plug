@@ -22,14 +22,16 @@
 //           Search: /search/?q={query}
 //           Cat:    /categories/{slug}/
 //           Channel:/channels/{slug}/
+//   [1.1.0] FIX постеры: srcset/data-original + fallback по ID видео
 // =============================================================
 
 (function () {
   'use strict';
 
-  var VERSION = '1.0.0';
+  var VERSION = '1.1.0';
   var NAME    = 'mlst';
   var HOST    = 'https://ru.mylust.com';
+  var POSTER_TPL = 'https://i.mylust.com/videos_screenshots/{folder}/{id}/608x342/1.jpg';
   var TAG     = '[' + NAME + ' v' + VERSION + ']';
 
   // ============================================================
@@ -253,18 +255,59 @@
   // mylust: .item a[href*="/videos/"]  (НЕ /video/ как у anysex!)
   // Постер: i.mylust.com (img[src])
   // ============================================================
-  function getPicture(imgEl) {
-    if (!imgEl) return '';
-    var pic = cleanUrl(
-      imgEl.getAttribute('data-src')      ||
-      imgEl.getAttribute('data-original') ||
-      imgEl.getAttribute('data-lazy-src') ||
-      imgEl.getAttribute('src')           || ''
-    );
-    if (pic && (pic.indexOf('spacer') !== -1 || pic.indexOf('blank') !== -1 ||
-                pic.indexOf('data:') === 0 || pic.length < 10)) pic = '';
-    return pic;
+
+  // [1.1.0] Постер: data-original / srcset / src + fallback по ID видео
+  function firstSrcsetUrl(srcset) {
+    if (!srcset) return '';
+    var part = String(srcset).split(',')[0].trim();
+    return part.split(/\s+/)[0] || '';
   }
+
+  function posterFromVideoUrl(href) {
+    if (!href) return '';
+    var m = href.match(/\/videos?\/(\d+)\//);
+    if (!m) m = href.match(/\/videos?\/(\d+)/);
+    if (!m) return '';
+    var id = m[1];
+    var folder = String(Math.floor(parseInt(id, 10) / 1000) * 1000);
+    return POSTER_TPL.replace('{folder}', folder).replace('{id}', id);
+  }
+
+  function getPicture(imgEl, href) {
+    var pic = '';
+    if (imgEl) {
+      var parent = imgEl.parentNode;
+      var sources = parent && parent.querySelectorAll ? parent.querySelectorAll('source') : [];
+      var i, ss, type;
+      for (i = 0; i < sources.length; i++) {
+        type = (sources[i].getAttribute('type') || '').toLowerCase();
+        ss = sources[i].getAttribute('srcset') || '';
+        if (type.indexOf('jpeg') !== -1 || type.indexOf('jpg') !== -1) {
+          pic = firstSrcsetUrl(ss);
+          if (pic) break;
+        }
+      }
+      if (!pic) {
+        for (i = 0; i < sources.length; i++) {
+          pic = firstSrcsetUrl(sources[i].getAttribute('srcset') || '');
+          if (pic) break;
+        }
+      }
+      if (!pic) {
+        pic = imgEl.getAttribute('data-original') ||
+              imgEl.getAttribute('data-src') ||
+              imgEl.getAttribute('data-lazy-src') ||
+              imgEl.getAttribute('data-thumb') ||
+              imgEl.getAttribute('src') || '';
+      }
+    }
+    pic = cleanUrl(pic);
+    if (pic && pic.indexOf('data:') === 0) pic = '';
+    if (pic && (pic.length < 12 || /spacer|blank|pixel|logo|flag|1x1|transparent/i.test(pic))) pic = '';
+    if (!pic && href) pic = posterFromVideoUrl(href);
+    return pic || '';
+  }
+
 
   function parsePlaylist(html) {
     var results = [], seen = {};
@@ -280,7 +323,7 @@
           if (!href || href === '#' || seen[href]) continue;
           if (href.indexOf('http') !== 0) href = HOST + (href.charAt(0) === '/' ? '' : '/') + href;
           seen[href] = true;
-          var picA  = getPicture(links[j].querySelector('img'));
+          var picA  = getPicture(links[j].querySelector('img'), href);
           var nameA = (links[j].getAttribute('title') || links[j].textContent || '').replace(/\s+/g, ' ').trim();
           if (!nameA) nameA = slugToTitle(href);
           if (nameA) results.push(makeCard(nameA, href, picA, ''));
@@ -316,7 +359,7 @@
     if (!name) name = slugToTitle(href);
     if (!name) return null;
 
-    var pic  = getPicture(el.querySelector('img'));
+    var pic  = getPicture(el.querySelector('img'), href);
     var durEl = el.querySelector('.duration') || el.querySelector('.time') || el.querySelector('[class*="dur"]');
     var time  = durEl ? durEl.textContent.replace(/[^\d:]/g, '').trim() : '';
 
