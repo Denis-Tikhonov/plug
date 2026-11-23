@@ -436,14 +436,26 @@
   }
 
   var AnldParser = {
-    main: function (p, s, e) { routeView(NAME, 1, s, e); },
-    view: function (p, s, e) { routeView(p.url || NAME, p.page || 1, s, e); },
+    main: function (p, s, e) {
+      routeView(NAME, 1, function (data) {
+        logCards(data, 'main');
+        s(data);
+      }, e);
+    },
+    view: function (p, s, e) {
+      routeView(p.url || NAME, p.page || 1, function (data) {
+        logCards(data, 'view');
+        s(data);
+      }, e);
+    },
     search: function (p, s, e) {
       var q = (p.query || '').trim(), pg = parseInt(p.page, 10) || 1;
       if (!q) { s({ title: '', results: [], collection: true, total_pages: 1 }); return; }
       httpGet(buildUrl('search', q, pg), function (html) {
         var r = parsePlaylist(html);
-        s({ title: 'AnalDin: ' + q, results: r, collection: true, total_pages: r.length >= 28 ? pg + 1 : pg });
+        var data = { title: 'AnalDin: ' + q, results: r, collection: true, total_pages: r.length >= 28 ? pg + 1 : pg };
+        logCards(data, 'search');
+        s(data);
       }, e);
     },
     qualities: function (videoPageUrl, success, error) {
@@ -465,6 +477,19 @@
       }, error);
     },
   };
+
+  // ----- логи ленты/постеров: только здесь (потом удалить функцию и вызовы logCards) -----
+  function logCards(data, where) {
+    var r = (data && data.results) ? data.results : [];
+    console.log(TAG, where + ' → карточек:', r.length);
+    if (!r[0]) return;
+    var p0 = r[0].picture || r[0].img || r[0].poster || '';
+    console.log(TAG, 'poster[0]:', p0.substring(0, 100));
+    console.log(TAG, 'poster via:',
+      !p0 ? 'NO_PIC' :
+      (p0.indexOf('workers.dev') !== -1 || p0.indexOf('/?url=') !== -1) ? 'WORKER' : 'DIRECT'
+    );
+  }
 
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
