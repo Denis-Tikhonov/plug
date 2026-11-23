@@ -15,7 +15,6 @@
   var CARD_SELECTORS = ['.thumb', '.video-item', '.item'];
 
   var CATEGORIES = [
-  var CATEGORIES = [
     { title: '4K', slug: '4k' },
     { title: 'Full HD', slug: 'full-hd' },
     { title: 'Азиатки', slug: 'aziatki' },
@@ -141,7 +140,6 @@
     { title: 'Эротика', slug: 'erotika' },
     { title: 'Японки', slug: 'yaponki' },
     { title: 'Эротический массаж', slug: 'eroticheskiy-massaj' },
-  ];
   ];
 
   function httpGet(url, s, e) {
