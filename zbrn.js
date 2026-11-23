@@ -1,3 +1,4 @@
+//   [1.1.1] FIX постеры: селекторы .th.th-i вместо block-row; getPoster
 (function () {
   'use strict';
   var VERSION = '1.1.0';
@@ -11,7 +12,7 @@
     { label: 'HLS',  re: /['"](https?:\/\/[^'"]+\.m3u8[^'"]*)['"]/ },
   ];
 
-  var CARD_SELECTORS = ['div.block-row', '.video-item', '.thumb'];
+  var CARD_SELECTORS = ['.th.th-i', '.thumbs .th', '.thumb', 'a[href*="/videos/"]'];
 
   var CATEGORIES = [
     {title:"Blowjobs",slug:"blowjobs"},{title:"Babes",slug:"babes"},{title:"Big Tits",slug:"big-tits"},
@@ -65,15 +66,38 @@
     return q;
   }
   function makeCard(n,h,p,t){return{name:n,video:h,picture:p,img:p,poster:p,background_image:p,preview:null,time:t||'',quality:'HD',json:true,source:NAME};}
+  function getPoster(img) {
+    if (!img) return '';
+    var pic = cleanUrl(
+      img.getAttribute('data-original') ||
+      img.getAttribute('data-src') ||
+      img.getAttribute('data-lazy-src') ||
+      img.getAttribute('src') || ''
+    );
+    if (!pic || pic.indexOf('data:') === 0 || pic.length < 12) return '';
+    if (/spacer|blank|pixel|logo|flag/i.test(pic)) return '';
+    return pic;
+  }
+
   function parseCard(el) {
-    var a=el.querySelector('a[href*="/videos/"]'); if(!a) return null;
-    var href=cleanUrl(a.getAttribute('href')); if(!href) return null;
-    var img=el.querySelector('img'); var pic=img?cleanUrl(img.getAttribute('src')||''):'';
-    if(pic&&pic.indexOf('spacer')!==-1)pic='';
-    var t=el.querySelector('.title'); var name=t?t.textContent.trim():''; if(!name)name=a.getAttribute('title')||'Video';
-    name=name.replace(/[\t\n\r]+/g,' ').replace(/\s{2,}/g,' ').trim(); if(!name) return null;
-    var d=el.querySelector('[class*="duration"]'); var time=d?d.textContent.replace(/[^\d:]/g,'').trim():'';
-    return makeCard(name,href,pic,time);
+    var a = el.querySelector('a[href*="/videos/"]');
+    if (!a && el.tagName === 'A' && (el.getAttribute('href') || '').indexOf('/videos/') !== -1) a = el;
+    if (!a) return null;
+    var href = cleanUrl(a.getAttribute('href'));
+    if (!href) return null;
+
+    var img = el.querySelector('img') || a.querySelector('img');
+    var pic = getPoster(img);
+
+    var t = el.querySelector('.title, .th-title, .name');
+    var name = t ? t.textContent.trim() : '';
+    if (!name) name = (a.getAttribute('title') || (img && img.getAttribute('alt')) || '').trim();
+    name = name.replace(/[\t\n\r]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+    if (!name) return null;
+
+    var d = el.querySelector('[class*="duration"], .time, .duration');
+    var time = d ? d.textContent.replace(/[^\d:]/g, '').trim() : '';
+    return makeCard(name, href, pic, time);
   }
   function parsePlaylist(html) {
     var res=[], doc=new DOMParser().parseFromString(html,'text/html'), items;
