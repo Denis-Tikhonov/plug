@@ -100,8 +100,16 @@
         var imgEl = el.querySelector('img');
         var pic = '';
         if (imgEl) {
-            pic = imgEl.getAttribute('data-original') || imgEl.getAttribute('src') || '';
-            if (pic && pic.indexOf('http') !== 0) pic = HOST + pic;
+          pic = imgEl.getAttribute('data-original') ||
+                imgEl.getAttribute('data-src') ||
+                imgEl.getAttribute('data-lazy-src') ||
+                imgEl.getAttribute('src') || '';
+          if (pic.indexOf('data:') === 0) pic = '';
+          if (pic && pic.indexOf('http') !== 0) {
+            if (pic.charAt(0) === '/') pic = HOST + pic;
+            else pic = HOST + '/' + pic;
+          }
+          if (pic.length < 12 || /spacer|blank|pixel/i.test(pic)) pic = '';
         }
 
         var vidEl = el.querySelector('video[data-preview]');
