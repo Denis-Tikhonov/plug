@@ -1,6 +1,6 @@
 // =============================================================
 // AdultJS.js — Lampa Adult Plugin
-// Version  : 1.7.3
+// Version  : 1.7.4
 // Changed  :
 //   [1.0.0] Полный рефакторинг с ab2024.ru → GitHub Pages
 //   [1.0.0] Убраны: RCH, история, лицензионные проверки
@@ -41,6 +41,7 @@
 //   [1.7.2] BUGFIX: resolveParserName — экранирование точки в regex (/.js$/i → /\.js$/i).
 //           BUGFIX: debounce в Sisi для устранения мерцания UI при параллельной загрузке.
 //   [1.7.3] NEW проксирование picture через Worker
+//   [1.7.4] FIX fixCards: picture/img/poster → Worker + [AdultJS][Poster] debug
 // GitHub   : https://denis-tikhonov.github.io/plug/
 // Worker   :
 // =============================================================
@@ -55,7 +56,7 @@
   // КОНСТАНТЫ И КОНФИГУРАЦИЯ
   // ----------------------------------------------------------
   var PLUGIN_ID      = 'adult_lampac';
-  var PLUGIN_VERSION = '1.7.2';
+  var PLUGIN_VERSION = '1.7.4';
 
   // Константы таймаутов
   var TIMEOUT_CONFIG = {
@@ -100,6 +101,10 @@
   var READY_FLAG  = 'plugin_' + PLUGIN_ID + '_ready';
 
   var WORKER_DEFAULT = 'https://zonaproxy.777b737.workers.dev/?url=';
+
+  // Подробный лог прокси постеров в Console: [AdultJS][Poster]
+  // false — выключить после проверки
+  var ADULT_DEBUG_POSTERS = true;
 
   var STORAGE_KEYS = [
     'adult_bookmarks_list',
@@ -709,6 +714,10 @@
     Parsers[name] = parserObj;
     console.log('[AdultJS] Parser registered:', name);
   };
+
+  console.log('[AdultJS] v' + PLUGIN_VERSION +
+    ' worker=' + WORKER_DEFAULT +
+    ' debugPosters=' + ADULT_DEBUG_POSTERS);
   window.AdultPlugin.networkRequest = networkRequest;
   Object.defineProperty(window.AdultPlugin, 'workerUrl', {
     get: function () { return WORKER_DEFAULT; },
@@ -724,9 +733,10 @@
     sourceTitle: function (title) {
       return Lampa.Utils.capitalizeFirstLetter((title || '').split('.')[0]);
     },
+    // [1.5.8][1.7.4] проксирование picture через Worker + лог [AdultJS][Poster]
+    fixCards: function (list) {
+      if (!list || !list.length) return;
 
-    // [1.5.8] проксирование picture через Worker
-        fixCards: function (list) {
       var workerUrl = (window.AdultPlugin && window.AdultPlugin.workerUrl)
         ? window.AdultPlugin.workerUrl : '';
 
@@ -734,14 +744,27 @@
         workerUrl = workerUrl + '=';
       }
 
-      list.forEach(function (m) {
-        var src = m.picture || m.img || m.poster || m.background_image || '';
+      var proxied = 0;
+      var skipped = 0;
+      var empty = 0;
+      var samples = [];
 
-        if (workerUrl &&
-            src &&
-            src.indexOf('http') === 0 &&
-            src.indexOf('workers.dev') === -1) {
+      list.forEach(function (m, idx) {
+        var src = m.picture || m.img || m.poster || m.background_image || '';
+        var before = src;
+
+        if (!src) {
+          empty++;
+        } else if (
+          workerUrl &&
+          src.indexOf('http') === 0 &&
+          src.indexOf('workers.dev') === -1 &&
+          src.indexOf('/?url=') === -1
+        ) {
           src = workerUrl + encodeURIComponent(src);
+          proxied++;
+        } else {
+          skipped++;
         }
 
         m.picture = src;
@@ -749,9 +772,32 @@
         m.poster = src;
         m.background_image = src;
         m.name = Lampa.Utils.capitalizeFirstLetter(m.name || '').replace(/&(.*?);/g, '');
+
+        if (ADULT_DEBUG_POSTERS && idx < 3) {
+          samples.push({
+            name: (m.name || '').substring(0, 30),
+            before: (before || '').substring(0, 70),
+            after: (src || '').substring(0, 100),
+            viaWorker: !!(src && (src.indexOf('workers.dev') !== -1 || src.indexOf('/?url=') !== -1)),
+          });
+        }
       });
+
+      if (ADULT_DEBUG_POSTERS) {
+        console.log(
+          '[AdultJS][Poster] fixCards: total=' + list.length +
+          ' proxied=' + proxied +
+          ' skipped=' + skipped +
+          ' empty=' + empty +
+          ' worker=' + (workerUrl ? workerUrl.substring(0, 55) : 'NONE')
+        );
+        samples.forEach(function (s, i) {
+          console.log('[AdultJS][Poster] #' + i + ' ' + s.name + ' | before: ' + s.before);
+          console.log('[AdultJS][Poster] #' + i + ' after: ' + s.after + ' | viaWorker=' + s.viaWorker);
+        });
+      }
     },
-    
+
     // [1.6.0] Проксирование video URL через Worker.
     proxyVideoUrl: function (url) {
       if (!url || url.indexOf('http') !== 0) return url;
