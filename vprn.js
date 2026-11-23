@@ -500,38 +500,57 @@
     },
 
     qualities: function (videoPageUrl, success, error) {
-      logInfo('qualities: ' + truncate(videoPageUrl, DEBUG_URL_LEN));
+      // URL вида https://www.winporn.club/video/2344237/slug
+      var m = (videoPageUrl || '').match(/\/video\/(\d+)/);
+      if (!m) {
+        console.log(TAG, 'qualities: нет ID в URL', videoPageUrl);
+        error('WinPorn: нет ID видео');
+        return;
+      }
+      var id = m[1];
+      var saveUrl = HOST + '/video/download/save/' + id;
+      console.log(TAG, 'qualities → save', saveUrl);
 
-      httpGet(videoPageUrl, function (html) {
-        if (!html || html.length < 500) {
-          logError('HTML too short (' + (html ? html.length : 0) + ' bytes)');
-          logWarn('Possible: age gate, CF block, bad URL');
-          error('HTML < 500 bytes');
+      // 1) Пробуем /resolve — получить финальный gcdn .mp4
+      var workerBase = 'https://zonaproxy.777b737.workers.dev';
+      var resolveUrl = workerBase + '/resolve?url=' + encodeURIComponent(saveUrl);
+
+      function ok(url, label) {
+        if (!url || url.indexOf('http') !== 0) {
+          error('WinPorn: пустой URL потока');
           return;
         }
+        console.log(TAG, 'qualities OK', label, url.substring(0, 100));
+        var q = {};
+        q[label || 'HD'] = url;
+        success({ qualities: q });
+      }
 
-        var result = extractQualities(html);
-        var found  = result.qualities;
-        var keys   = Object.keys(found);
-
-        logInfo('Found ' + keys.length + ' qualities: ' + keys.join(', '));
-
-        if (keys.length > 0) {
-          // Clean trailing params from mp4 URLs
-          keys.forEach(function (k) {
-            if (found[k].indexOf('.mp4') !== -1) {
-              found[k] = cleanMp4Url(found[k]);
+      // fetch JSON resolve (через networkRequest может вернуть текст JSON)
+      if (window.AdultPlugin && window.AdultPlugin.networkRequest) {
+        window.AdultPlugin.networkRequest(resolveUrl, function (text) {
+          try {
+            var j = typeof text === 'string' ? JSON.parse(text) : text;
+            var finalUrl = (j && (j.final || j.url)) ? (j.final || j.url) : '';
+            // если resolve дал gcdn/mp4 — берём его
+            if (finalUrl && /\.mp4/i.test(finalUrl) && finalUrl.indexOf('/tmb/') === -1) {
+              ok(finalUrl, 'HD');
+              return;
             }
-          });
-          success({ qualities: found });
-        } else {
-          logWarn('No video qualities found');
-          error('Video not found');
-        }
-      }, error);
+          } catch (e) {
+            console.log(TAG, 'qualities resolve parse fail', e.message || e);
+          }
+          // 2) fallback: сам saveUrl — Worker при play пройдёт 302
+          console.log(TAG, 'qualities fallback saveUrl');
+          ok(saveUrl, 'HD');
+        }, function () {
+          console.log(TAG, 'qualities resolve fail → saveUrl');
+          ok(saveUrl, 'HD');
+        });
+      } else {
+        ok(saveUrl, 'HD');
+      }
     },
-  };
-
   // ============================================================
   // §11. REGISTRATION
   // ============================================================
