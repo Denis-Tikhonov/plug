@@ -2,6 +2,7 @@
 // briz.js — Парсер PornoBriz для AdultJS / AdultPlugin (Lampa)
 // Version  : 3.1.1 (Refactored to YouJizz/XDS Architecture)
 // Changed  :
+//   [3.1.1] FIX постеры: data-original + абсолютный URL, игнор data: placeholder
 //   [3.1.0] Внедрена система «умного роутинга» (routeView)
 //           Исправлен поиск через фильтр (search_on: true)
 //           Добавлены обязательные поля постеров: img, poster, background_image
@@ -83,60 +84,76 @@
   // ----------------------------------------------------------
   // ПАРСИНГ КАРТОЧЕК
   // ----------------------------------------------------------
+  function getPoster(imgEl) {
+    if (!imgEl) return '';
+    var pic =
+      imgEl.getAttribute('data-original') ||
+      imgEl.getAttribute('data-src') ||
+      imgEl.getAttribute('data-lazy-src') ||
+      '';
+    // src часто data:image placeholder — только если нет data-original
+    if (!pic) {
+      pic = imgEl.getAttribute('src') || '';
+      if (pic.indexOf('data:') === 0) pic = '';
+    }
+    if (!pic || pic.indexOf('data:') === 0) return '';
+    pic = pic.replace(/&amp;/g, '&').trim();
+    if (pic.indexOf('//') === 0) pic = 'https:' + pic;
+    if (pic.charAt(0) === '/') pic = HOST + pic;
+    else if (pic.indexOf('http') !== 0) pic = HOST + '/' + pic;
+    if (pic.length < 12 || /spacer|blank|pixel/i.test(pic)) return '';
+    return pic;
+  }
+
   function parseCards(html) {
     if (!html) return [];
     var doc = new DOMParser().parseFromString(html, 'text/html');
     var results = [];
     var items = doc.querySelectorAll('div.thumb_main');
+    var i, el, a, href, imgEl, pic, name, titleEl, durEl, time, vidEl, preview;
 
-    for (var i = 0; i < items.length; i++) {
-        var el = items[i];
-        var a = el.querySelector('a[href*="/video/"]');
-        if (!a) continue;
+    for (i = 0; i < items.length; i++) {
+      el = items[i];
+      a = el.querySelector('a[href*="/video/"]');
+      if (!a) continue;
 
-        var href = a.getAttribute('href');
-        if (href.indexOf('http') !== 0) href = HOST + href;
+      href = a.getAttribute('href') || '';
+      if (href.indexOf('http') !== 0) {
+        href = href.charAt(0) === '/' ? HOST + href : HOST + '/' + href;
+      }
 
-        var imgEl = el.querySelector('img');
-        var pic = '';
-        if (imgEl) {
-          pic = imgEl.getAttribute('data-original') ||
-                imgEl.getAttribute('data-src') ||
-                imgEl.getAttribute('data-lazy-src') ||
-                imgEl.getAttribute('src') || '';
-          if (pic.indexOf('data:') === 0) pic = '';
-          if (pic && pic.indexOf('http') !== 0) {
-            if (pic.charAt(0) === '/') pic = HOST + pic;
-            else pic = HOST + '/' + pic;
-          }
-          if (pic.length < 12 || /spacer|blank|pixel/i.test(pic)) pic = '';
-        }
+      imgEl = el.querySelector('img');
+      pic = getPoster(imgEl);
 
-        var vidEl = el.querySelector('video[data-preview]');
-        var preview = vidEl ? vidEl.getAttribute('data-preview') : null;
-        if (preview && preview.indexOf('http') !== 0) preview = HOST + preview;
+      vidEl = el.querySelector('video[data-preview]');
+      preview = vidEl ? vidEl.getAttribute('data-preview') : null;
+      if (preview && preview.indexOf('http') !== 0) {
+        preview = preview.charAt(0) === '/' ? HOST + preview : HOST + '/' + preview;
+      }
 
-        var titleEl = el.querySelector('.th-title');
-        var name = titleEl ? titleEl.textContent.trim() : (imgEl ? imgEl.getAttribute('alt') : 'No Title');
+      titleEl = el.querySelector('.th-title');
+      name = titleEl ? titleEl.textContent.trim() : '';
+      if (!name && imgEl) name = (imgEl.getAttribute('alt') || '').trim();
+      if (!name) name = (a.getAttribute('title') || 'Video').trim();
 
-        var durEl = el.querySelector('.duration');
-        var time = durEl ? durEl.textContent.trim() : '';
+      durEl = el.querySelector('.duration');
+      time = durEl ? durEl.textContent.trim() : '';
 
-        results.push({
-            name: name,
-            video: href,
-            // ИСПРАВЛЕНИЕ ПОСТЕРОВ ДЛЯ ADULTJS
-            picture: pic,
-            img: pic,
-            poster: pic,
-            background_image: pic,
-            preview: preview,
-            time: time,
-            quality: 'HD',
-            json: true,
-            source: NAME
-        });
+      results.push({
+        name: name,
+        video: href,
+        picture: pic,
+        img: pic,
+        poster: pic,
+        background_image: pic,
+        preview: preview,
+        time: time,
+        quality: 'HD',
+        json: true,
+        source: NAME,
+      });
     }
+    console.log('[briz] parseCards →', results.length, results[0] ? results[0].picture : '');
     return results;
   }
 
