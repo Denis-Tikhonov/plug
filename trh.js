@@ -1,220 +1,184 @@
 // =============================================================
 // trh.js — Парсер TrahKino (trahkino.me) для AdultJS
+// Version  : 1.5.0
+// Changes  :
+//   [1.5.0] FIX cleanMp4Url: не портить v-acctoken (не добавлять / в конец query)
+//           qualities: video_url + get_file с сохранением token
+//           Worker: trahkino.me + tkvids.com + cookie-jar
+//   [1.4.0] UNIVERSAL_TEMPLATE, function/0 cleanUrl
 // =============================================================
-// Версия  : 1.4.0
-// Адаптация: UNIVERSAL_TEMPLATE + W170 + AdultJS 1.5.9
-// Изменения:
-//   [1.4.0] Полная адаптация под UNIVERSAL_TEMPLATE
-//   [1.4.0] Улучшен cleanUrl — надёжно вытаскивает вложенный URL из function/0/
-//   [1.4.0] VIDEO_RULES + extractQualities с приоритетом kt_player
-//   [1.4.0] CARD_SELECTORS оптимизированы под .item
-//   [1.4.0] buildUrl использует /latest-updates/ как главную (как в 1.3.0)
-//   [1.4.0] Добавлены диагностические логи для отладки через Worker
-
 (function () {
   'use strict';
 
-  var VERSION = '1.4.0';
+  var VERSION = '1.5.0';
   var NAME    = 'trh';
   var HOST    = 'https://trahkino.me';
-  var TAG     = '[TRH]';
+  var TAG     = '[trh v' + VERSION + ']';
 
   var CATEGORIES = [
-    { title: 'Любительское',       slug: 'lyubitelskiy-seks'   },
-    { title: 'Минет',              slug: 'minet'               },
-    { title: 'Брюнетки',           slug: 'bryunetki'           },
-    { title: 'Большие члены',      slug: 'bolshie-hui'         },
-    { title: 'Анал',               slug: 'anal'                },
-    { title: 'Милфы',              slug: 'milfy'               },
-    { title: 'Домашнее',           slug: 'domashka'            },
-    { title: 'Соло',               slug: 'solo'                },
-    { title: 'Большие сиськи',     slug: 'bolshie-siski'       },
-    { title: 'От первого лица',    slug: 'ot-pervogo-lica'     },
-    { title: 'Большие попки',      slug: 'bolshie-popki'       },
-    { title: 'Кончают внутрь',     slug: 'konchayut-vnutr'     },
-    { title: 'Мулатки',            slug: 'mulatki'             },
-    { title: 'Красотки',           slug: 'krasotki'            },
-    { title: 'Русское',            slug: 'russkie'             },
-    { title: 'Наездница',          slug: 'naezdnica'           },
-    { title: 'Толстушки',          slug: 'tolstye'             },
-    { title: 'Натуральные сиськи', slug: 'naturalnye-siski'    },
-    { title: 'Раком',              slug: 'rakom'               },
-    { title: 'Ролевые игры',       slug: 'rolevye-igry'        },
-    { title: 'Фетиш',              slug: 'fetish'              },
-    { title: 'Дрочка члена',       slug: 'drochka-chlena'      },
-    { title: 'Татуированные',      slug: 'tatu'                },
-    { title: 'Групповуха',         slug: 'gruppovuha'          },
-    { title: 'Бритые киски',       slug: 'britye-kiski'        },
-    { title: 'Мастурбация',        slug: 'masturbaciya'        },
-    { title: 'Массаж',             slug: 'eroticheskiy-massaj' },
-    { title: 'Сперма',             slug: 'sperma'              },
-    { title: 'Куни',               slug: 'kuni'                },
-    { title: 'Блондинки',          slug: 'blondinki'           },
-    { title: 'Женский оргазм',     slug: 'jenskiy-orgazm'      },
-    { title: 'Развратное',         slug: 'razvrat'             },
-    { title: 'Латинки',            slug: 'latinki'             },
-    { title: 'Француженки',        slug: 'francujenki'         },
-    { title: 'МЖМ',                slug: 'mjm'                 },
-    { title: 'В очках',            slug: 'v-ochkah'            },
-    { title: 'Реальное',           slug: 'realnyy-seks'        },
-    { title: 'Бондаж',             slug: 'bondaj'              },
-    { title: 'В ванной',           slug: 'v-vannoy'            },
-    { title: 'Подборки',           slug: 'podborki'            },
+    { title: 'Любительское',     slug: 'lyubitelskiy-seks' },
+    { title: 'Минет',            slug: 'minet' },
+    { title: 'Анал',             slug: 'anal' },
+    { title: 'Русское',          slug: 'russkoe' },
+    { title: 'Домашнее',         slug: 'domashnee' },
+    { title: 'Групповое',        slug: 'gruppovoe' },
+    { title: 'Зрелые',           slug: 'zrelye' },
+    { title: 'Молодые',          slug: 'molodye' },
+    { title: 'Секс втроём',      slug: 'seks-vtroem' },
+    { title: 'Жёсткое',          slug: 'zhestkoe' }
   ];
 
   var VIDEO_RULES = [
-    { label: '720p',  re: /video_alt_url2\s*[:=]\s*['"]([^'"]+)['"]/ },
-    { label: '360p',  re: /video_alt_url\s*[:=]\s*['"]([^'"]+)['"]/  },
-    { label: '240p',  re: /video_url\s*[:=]\s*['"]([^'"]+)['"]/      },
-    { label: 'HLS',   re: /video_url_hls\s*[:=]\s*['"]([^'"]+)['"]/  },
+    { label: 'HD',   re: /video_url\s*[:=]\s*['"]([^'"]+)['"]/i },
+    { label: '480p', re: /video_alt_url\s*[:=]\s*['"]([^'"]+)['"]/i },
+    { label: '720p', re: /video_alt_url2\s*[:=]\s*['"]([^'"]+)['"]/i },
+    { label: '360p', re: /video_alt_url3\s*[:=]\s*['"]([^'"]+)['"]/i },
+    { label: 'HLS',  re: /video_url_hls\s*[:=]\s*['"]([^'"]+)['"]/i }
   ];
 
-  var CARD_SELECTORS = [
-    '.item',
-    '.video-item',
-    'div.thumb',
-    '.thumb'
-  ];
+  var CARD_SELECTORS = ['.item', '.thumb', '.video-item', 'div[class*="thumb"]'];
 
-  // ----------------------------------------------------------
-  // ТРАНСПОРТ (AdultPlugin + W170)
-  // ----------------------------------------------------------
   function httpGet(url, success, error) {
     if (window.AdultPlugin && typeof window.AdultPlugin.networkRequest === 'function') {
-      console.log(TAG, 'networkRequest →', url.substring(0, 90));
       window.AdultPlugin.networkRequest(url, success, error);
     } else {
-      fetch(url).then(r => r.text()).then(success).catch(error);
+      fetch(url).then(function (r) { return r.text(); }).then(success).catch(error);
     }
   }
 
-  // ----------------------------------------------------------
-  // УЛУЧШЕННЫЙ cleanUrl (учитывает function/0/)
-  // ----------------------------------------------------------
   function cleanUrl(raw) {
     if (!raw) return '';
-    let u = String(raw).replace(/\\\//g, '/').replace(/\\/g, '').trim();
-
-    // Форма A и B: function/0/https://...
-    const funcMatch = u.match(/function\/\d+\/(https?:\/\/.+)$/i);
-    if (funcMatch) {
-      u = funcMatch[1];
-      console.log(TAG, 'cleanUrl → extracted from function/0/');
-    }
-
+    var u = String(raw).replace(/\\\//g, '/').replace(/\\/g, '').replace(/&amp;/g, '&').trim();
+    var funcMatch = u.match(/function\/\d+\/(https?:\/\/.+)$/i);
+    if (funcMatch) u = funcMatch[1];
     if (u.indexOf('//') === 0) u = 'https:' + u;
     if (u.charAt(0) === '/' && u.charAt(1) !== '/') u = HOST + u;
-
     return u;
   }
 
+  // [1.5.0] НЕ дописывать "/" после query — ломает v-acctoken
   function cleanMp4Url(url) {
-    return url
-      .replace(/[?&]rnd=\d+/g, '')
-      .replace(/[?&]br=\d+/g, '')
-      .replace(/[?&]_=\d+/g, '')
-      .replace(/[?&]+$/g, '')
-      .replace(/\/+$/, '') + '/';
+    if (!url) return '';
+    var i = url.indexOf('?');
+    var path = i === -1 ? url : url.slice(0, i);
+    var qs = i === -1 ? '' : url.slice(i);
+    path = path.replace(/\/+$/, '');
+    // убрать только rnd/br/_ из query, token оставить
+    if (qs) {
+      qs = qs
+        .replace(/[?&]rnd=\d+/g, '')
+        .replace(/[?&]br=\d+/g, '')
+        .replace(/[?&]_=\d+/g, '')
+        .replace(/^[?&]+/, '?')
+        .replace(/[?&]+$/, '');
+      if (qs === '?') qs = '';
+    }
+    return path + qs;
   }
 
-  // ----------------------------------------------------------
-  // extractQualities — по шаблону
-  // ----------------------------------------------------------
   function extractQualities(html) {
     var q = {};
-    var add = function(label, url) {
+    var add = function (label, url) {
       var u = cleanUrl(url);
       if (!u || u.indexOf('{') !== -1 || u.indexOf('spacer') !== -1) return;
-      if (u.indexOf('.mp4') !== -1) u = cleanMp4Url(u);
+      if (u.indexOf('.mp4') !== -1 || u.indexOf('get_file') !== -1) {
+        u = cleanMp4Url(u);
+      }
+      if (!u) return;
+      // не брать превью скриншотов
+      if (u.indexOf('videos_screenshots') !== -1 || u.indexOf('preview') !== -1) return;
       if (!q[label]) q[label] = u;
     };
 
-    // 1. VIDEO_RULES (kt_player)
-    VIDEO_RULES.forEach(function(rule) {
+    VIDEO_RULES.forEach(function (rule) {
       var m = html.match(rule.re);
-      if (m && m[1]) add(rule.label, m[1]);
+      if (m && m[1]) {
+        var lab = rule.label;
+        var um = m[1].match(/_(\d+)p\.mp4/i);
+        if (um) lab = um[1] + 'p';
+        add(lab, m[1]);
+      }
     });
 
-    // 2. Прямой поиск get_file
-    var getFileRe = /https?:\/\/[^"'\s]+\/get_file\/[^"'\s]+\.mp4[^"'\s]*/gi;
+    var getFileRe = /https?:\/\/[^"'\s]+\/get_file\/[^"'\s]+/gi;
     var match;
     while ((match = getFileRe.exec(html)) !== null) {
       var url = match[0];
-      var qm = url.match(/_(\d+)p?\.mp4/i);
+      if (url.indexOf('videos_screenshots') !== -1) continue;
+      var qm = url.match(/_(\d+)p\.mp4/i);
       add(qm ? qm[1] + 'p' : 'HD', url);
-    }
-
-    // 3. Fallback — любые mp4
-    if (Object.keys(q).length === 0) {
-      var allMp4 = html.match(/https?:\/\/[^"'\s<>]+\.mp4[^"'\s<>]*/gi);
-      if (allMp4) {
-        allMp4.forEach(function(u, i) {
-          if (u.indexOf('{') !== -1) return;
-          var qm = u.match(/_(\d+)p?\.mp4/i);
-          add(qm ? qm[1] + 'p' : ('HD' + i), u);
-        });
-      }
     }
 
     return q;
   }
 
-  // ----------------------------------------------------------
-  // Парсинг карточек
-  // ----------------------------------------------------------
+  function makeCard(name, href, pic, time) {
+    return {
+      name: name,
+      video: href,
+      picture: pic || '',
+      img: pic || '',
+      poster: pic || '',
+      background_image: pic || '',
+      time: time || '',
+      quality: 'HD',
+      json: true,
+      source: NAME
+    };
+  }
+
   function parsePlaylist(html) {
     var results = [];
-    var doc = new DOMParser().parseFromString(html, 'text/html');
-    var items = null;
+    var seen = {};
+    try {
+      var doc = new DOMParser().parseFromString(html, 'text/html');
+      var items = null;
+      for (var s = 0; s < CARD_SELECTORS.length; s++) {
+        items = doc.querySelectorAll(CARD_SELECTORS[s]);
+        if (items && items.length) break;
+      }
+      if (!items || !items.length) {
+        items = doc.querySelectorAll('a[href*="/video/"]');
+      }
 
-    for (var s = 0; s < CARD_SELECTORS.length; s++) {
-      items = doc.querySelectorAll(CARD_SELECTORS[s]);
-      if (items.length > 0) break;
+      for (var i = 0; i < items.length; i++) {
+        var el = items[i];
+        var link = el.tagName === 'A' ? el : el.querySelector('a[href*="/video/"]');
+        if (!link) continue;
+        var href = cleanUrl(link.getAttribute('href') || '');
+        if (!href || href.indexOf('/video/') === -1) continue;
+        if (seen[href]) continue;
+        seen[href] = true;
+
+        var img = el.querySelector ? el.querySelector('img') : null;
+        if (!img && link.querySelector) img = link.querySelector('img');
+        var pic = '';
+        if (img) {
+          pic = cleanUrl(
+            img.getAttribute('data-original') ||
+            img.getAttribute('data-src') ||
+            img.getAttribute('src') || ''
+          );
+          if (pic.indexOf('data:') === 0) pic = '';
+        }
+
+        var titleEl = el.querySelector ? el.querySelector('.title, .th-title, .name, strong') : null;
+        var name = '';
+        if (titleEl) name = titleEl.textContent.replace(/\s+/g, ' ').trim();
+        if (!name) name = (link.getAttribute('title') || (img && img.getAttribute('alt')) || '').trim();
+        if (!name) continue;
+
+        var d = el.querySelector ? el.querySelector('.duration, .time, [class*="duration"]') : null;
+        var time = d ? d.textContent.replace(/[^\d:]/g, '').trim() : '';
+        results.push(makeCard(name, href, pic, time));
+      }
+    } catch (e) {
+      console.log(TAG, 'parsePlaylist error', e.message || e);
     }
-
-    if (!items || items.length === 0) {
-      items = doc.querySelectorAll('a[href*="/video/"]');
-    }
-
-    for (var i = 0; i < items.length; i++) {
-      var el = items[i].closest('.item') || items[i];
-      var link = el.querySelector('a[href*="/video/"]');
-      if (!link) continue;
-
-      var href = cleanUrl(link.getAttribute('href'));
-      if (!href) continue;
-
-      var img = el.querySelector('img');
-      var pic = img ? cleanUrl(img.getAttribute('data-original') || img.getAttribute('data-src') || img.getAttribute('src')) : '';
-
-      var titleEl = el.querySelector('.title, strong, .th-title');
-      var name = titleEl ? titleEl.textContent.trim() : (link.getAttribute('title') || '');
-      if (!name) name = href.split('/').filter(Boolean).pop().replace(/-/g, ' ');
-
-      var dur = el.querySelector('.duration, .time');
-      var time = dur ? dur.textContent.trim() : '';
-
-      results.push({
-        name: name,
-        video: href,
-        picture: pic,
-        img: pic,
-        poster: pic,
-        background_image: pic,
-        time: time,
-        quality: 'HD',
-        json: true,
-        source: NAME,
-      });
-    }
-
-    console.log(TAG, 'найдено карточек:', results.length);
+    console.log(TAG, 'cards', results.length);
     return results;
   }
 
-  // ----------------------------------------------------------
-  // URL builder
-  // ----------------------------------------------------------
   function buildUrl(type, value, page) {
     page = parseInt(page, 10) || 1;
     if (type === 'search') {
@@ -223,17 +187,15 @@
       return u;
     }
     if (type === 'cat') {
-      var u = HOST + '/?c=' + encodeURIComponent(value);
-      if (page > 1) u += '&page=' + page;
-      return u;
+      // KVS часто ?c=slug или /categories/slug/
+      var u2 = HOST + '/categories/' + encodeURIComponent(value) + '/';
+      if (page > 1) u2 += page + '/';
+      return u2;
     }
-    // Главная — latest-updates (рекомендуется)
-    return page > 1 ? HOST + '/latest-updates/?page=' + page : HOST + '/latest-updates/';
+    if (page > 1) return HOST + '/latest-updates/' + page + '/';
+    return HOST + '/latest-updates/';
   }
 
-  // ----------------------------------------------------------
-  // Меню
-  // ----------------------------------------------------------
   function buildMenu() {
     return [
       { title: '🔍 Поиск', search_on: true, playlist_url: NAME + '/search/' },
@@ -241,107 +203,104 @@
       {
         title: '📂 Категории',
         playlist_url: 'submenu',
-        submenu: CATEGORIES.map(function(c) {
+        submenu: CATEGORIES.map(function (c) {
           return { title: c.title, playlist_url: NAME + '/cat/' + c.slug };
         })
       }
     ];
   }
 
-  // ----------------------------------------------------------
-  // Роутинг
-  // ----------------------------------------------------------
   function routeView(url, page, success, error) {
-    var fetchUrl = buildUrl('main', null, page);
-    var searchMatch = url.match(/[?&]search=([^&]*)/);
-    if (searchMatch) {
-      fetchUrl = buildUrl('search', decodeURIComponent(searchMatch[1]), page);
-    } else if (url.indexOf(NAME + '/cat/') === 0) {
-      var cat = url.replace(NAME + '/cat/', '').split('?')[0];
-      fetchUrl = buildUrl('cat', cat, page);
-    } else if (url.indexOf(NAME + '/search/') === 0) {
+    page = parseInt(page, 10) || 1;
+    var fetchUrl;
+    var sm = (url || '').match(/[?&]search=([^&]*)/);
+    if (sm) {
+      fetchUrl = buildUrl('search', decodeURIComponent(sm[1]), page);
+    } else if ((url || '').indexOf(NAME + '/cat/') === 0) {
+      fetchUrl = buildUrl('cat', url.replace(NAME + '/cat/', '').split('?')[0].split('/')[0], page);
+    } else if ((url || '').indexOf(NAME + '/search/') === 0) {
       var q = decodeURIComponent(url.replace(NAME + '/search/', '').split('?')[0]).trim();
-      if (q) fetchUrl = buildUrl('search', q, page);
-    } else if (url.indexOf(NAME + '/new') === 0) {
+      fetchUrl = buildUrl('search', q, page);
+    } else {
       fetchUrl = buildUrl('main', null, page);
     }
 
-    console.log(TAG, 'запрос →', fetchUrl);
-    httpGet(fetchUrl, function(html) {
+    console.log(TAG, 'fetch', fetchUrl);
+    httpGet(fetchUrl, function (html) {
       var results = parsePlaylist(html);
-      if (results.length === 0) {
-        error('Контент не найден');
+      if (!results.length) {
+        error('TrahKino: ничего не найдено');
         return;
       }
       success({
         results: results,
         collection: true,
-        total_pages: results.length >= 20 ? page + 1 : page,
+        total_pages: results.length >= 24 ? page + 1 : page,
         menu: buildMenu()
       });
     }, error);
   }
 
-  // ----------------------------------------------------------
-  // Парсер API
-  // ----------------------------------------------------------
   var TrhParser = {
-    main: function(params, success, error) {
-      routeView(NAME, params.page || 1, success, error);
+    main: function (params, success, error) {
+      routeView(NAME + '/new', 1, success, error);
     },
-
-    view: function(params, success, error) {
-      routeView(params.url || NAME, params.page || 1, success, error);
+    view: function (params, success, error) {
+      routeView((params && params.url) || NAME, (params && params.page) || 1, success, error);
     },
-
-    search: function(params, success, error) {
+    search: function (params, success, error) {
       var query = (params.query || '').trim();
-      if (!query) return success({ results: [] });
-      httpGet(buildUrl('search', query, params.page || 1), function(html) {
+      var page = parseInt(params.page, 10) || 1;
+      if (!query) {
+        success({ title: '', results: [], collection: true, total_pages: 1 });
+        return;
+      }
+      httpGet(buildUrl('search', query, page), function (html) {
+        var r = parsePlaylist(html);
         success({
           title: 'TrahKino: ' + query,
-          results: parsePlaylist(html),
+          results: r,
           collection: true,
-          total_pages: 2
+          total_pages: r.length >= 24 ? page + 1 : page,
+          menu: buildMenu()
         });
       }, error);
     },
-
-    qualities: function(videoPageUrl, success, error) {
-      console.log(TAG, 'qualities() →', videoPageUrl);
-      httpGet(videoPageUrl, function(html) {
-        var qualities = extractQualities(html);
-        var keys = Object.keys(qualities);
-        console.log(TAG, 'найдено качеств:', keys.length, keys);
-
-        if (keys.length > 0) {
-          success({ qualities: qualities });
+    qualities: function (videoPageUrl, success, error) {
+      console.log(TAG, 'qualities →', videoPageUrl);
+      httpGet(videoPageUrl, function (html) {
+        if (!html || html.length < 500) {
+          error('TrahKino: страница недоступна');
+          return;
+        }
+        var found = extractQualities(html);
+        var keys = Object.keys(found);
+        console.log(TAG, 'qualities найдено:', keys.length, JSON.stringify(keys));
+        if (keys.length) {
+          // лог первого URL без порчи token (обрезаем для лога)
+          console.log(TAG, 'qualities sample', (found[keys[0]] || '').substring(0, 90));
+          success({ qualities: found });
         } else {
-          console.warn(TAG, 'video_url:', (html.match(/video_url/gi) || []).length);
-          console.warn(TAG, 'get_file:', (html.match(/get_file/gi) || []).length);
-          console.warn(TAG, 'function/0:', (html.match(/function\/0/gi) || []).length);
-          error('Видео не найдено');
+          console.log(TAG, 'video_url cnt', (html.match(/video_url/gi) || []).length);
+          console.log(TAG, 'get_file cnt', (html.match(/get_file/gi) || []).length);
+          error('TrahKino: видео не найдено');
         }
       }, error);
     }
   };
 
-  // ----------------------------------------------------------
-  // Регистрация
-  // ----------------------------------------------------------
-  function register() {
-    if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
+  function tryReg() {
+    if (window.AdultPlugin && window.AdultPlugin.registerParser) {
       window.AdultPlugin.registerParser(NAME, TrhParser);
-      console.log(TAG, 'v' + VERSION + ' успешно зарегистрирован');
+      console.log(TAG, 'OK');
       return true;
     }
     return false;
   }
-
-  if (!register()) {
-    var interval = setInterval(function() {
-      if (register()) clearInterval(interval);
-    }, 300);
-    setTimeout(function() { clearInterval(interval); }, 8000);
+  if (!tryReg()) {
+    var t = 0, id = setInterval(function () {
+      t += 200;
+      if (tryReg() || t > 6000) clearInterval(id);
+    }, 200);
   }
 })();
