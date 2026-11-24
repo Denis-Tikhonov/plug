@@ -1,7 +1,8 @@
 // =============================================================
 // ept.js — Парсер EptaPorno (eptaporno.com) для AdultJS
-// Version  : 1.3.0
+// Version  : 1.3.1
 // Changes  :
+//   [1.3.1] qualities: /resolve get_file → финальный awmcdn (обход 410/Signature на Worker)
 //   [1.3.0] qualities: приоритет <source>/video_url; не резать query; сырые URL
 //   [1.2.0] FIX qualities: get_file → awmcdn 302; cookie-jar Worker
 //   [1.1.0] submenu категории
@@ -9,7 +10,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.3.0';
+  var VERSION = '1.3.1';
   var NAME    = 'ept';
   var HOST    = 'https://eptaporno.com';
   var TAG     = '[ept v' + VERSION + ']';
@@ -33,6 +34,27 @@
     } else {
       fetch(url).then(function (r) { return r.text(); }).then(success).catch(error);
     }
+  }
+
+  function workerBase() {
+    var w = (window.AdultPlugin && window.AdultPlugin.workerUrl) ||
+      'https://zonaproxy.777b737.workers.dev/?url=';
+    return String(w).replace(/\/?\?url=?$/i, '').replace(/\/$/, '');
+  }
+
+  /** Раскрыть get_file → финальный CDN (awmcdn) через Worker /resolve */
+  function resolveStream(url, done) {
+    if (!url || url.indexOf('get_file') === -1) { done(url); return; }
+    var base = workerBase();
+    var resolveUrl = base + '/resolve?url=' + encodeURIComponent(url);
+    fetch(resolveUrl)
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        var fin = (j && j.final) ? j.final : url;
+        console.log(TAG, 'resolve', url.substring(0, 60), '→', String(fin).substring(0, 80));
+        done(fin);
+      })
+      .catch(function () { done(url); });
   }
 
   function absUrl(u) {
@@ -218,12 +240,24 @@
         var found = extractQualities(html);
         var keys = Object.keys(found);
         console.log(TAG, 'qualities найдено:', keys.length, JSON.stringify(keys));
-        if (keys.length) {
-          success({ qualities: found });
-        } else {
+        if (!keys.length) {
           console.log(TAG, 'get_file cnt', (html.match(/get_file/gi) || []).length);
           error('Epta: видео не найдено');
+          return;
         }
+        // Раскрываем get_file → awmcdn (Worker иначе даёт 410/SignatureDoesNotMatch)
+        var left = keys.length;
+        var out = {};
+        keys.forEach(function (k) {
+          resolveStream(found[k], function (finalUrl) {
+            out[k] = finalUrl;
+            left--;
+            if (left <= 0) {
+              console.log(TAG, 'qualities final', JSON.stringify(Object.keys(out)));
+              success({ qualities: out });
+            }
+          });
+        });
       }, error);
     }
   };
