@@ -1,6 +1,6 @@
 // =============================================================
 // AdultJS.js — Lampa Adult Plugin
-// Version  : 1.7.5
+// Version  : 1.7.6
 // Changed  :
 //   [1.0.0] Полный рефакторинг с ab2024.ru → GitHub Pages
 //   [1.0.0] Убраны: RCH, история, лицензионные проверки
@@ -43,6 +43,7 @@
 //   [1.7.3] NEW проксирование picture через Worker
 //   [1.7.4] FIX fixCards: picture/img/poster → Worker + [AdultJS][Poster] debug
 //   [1.7.5] Сброс: лёгкий (память) без confirm; полный без закладок + опция закладок
+//   [1.7.6] Ключи Storage → adultjs_*; proxy posters/video тумблеры (сброс не трогает)
 // GitHub   : https://denis-tikhonov.github.io/plug/
 // Worker   :
 // =============================================================
@@ -57,7 +58,7 @@
   // КОНСТАНТЫ И КОНФИГУРАЦИЯ
   // ----------------------------------------------------------
   var PLUGIN_ID      = 'adult_lampac';
-  var PLUGIN_VERSION = '1.7.5';
+  var PLUGIN_VERSION = '1.7.6';
 
   // Константы таймаутов
   var TIMEOUT_CONFIG = {
@@ -107,14 +108,37 @@
   // false — выключить после проверки
   var ADULT_DEBUG_POSTERS = true;
 
+  // [1.7.6] Только ключи AdultJS. Proxy-флаги сюда НЕ входят — сброс их не трогает.
   var STORAGE_KEYS = [
-    'adult_bookmarks_list',
-    'sisi_preview',
-    'sisi_unic_id',
-    'lampac_unic_id',
-    'adult_menu_cache',         // [1.7.0] Кэш меню
-    'adult_domain_history',     // [1.7.0] История таймаутов по доменам
+    'adultjs_bookmarks_list',
+    'adultjs_preview',
+    'adultjs_menu_cache',
+    'adultjs_domain_history',
   ];
+
+  // Тумблеры Worker (только вручную в настройках; defaults = true)
+  var KEY_PROXY_POSTERS = 'adultjs_proxy_posters';
+  var KEY_PROXY_VIDEO   = 'adultjs_proxy_video';
+  var KEY_PREVIEW       = 'adultjs_preview';
+  var KEY_BOOKMARKS     = 'adultjs_bookmarks_list';
+  var KEY_MENU_CACHE    = 'adultjs_menu_cache';
+  var KEY_DOMAIN_HIST   = 'adultjs_domain_history';
+
+  // [1.7.6] однократный перенос со старых ключей
+  (function migrateAdultKeys() {
+    try {
+      if (!Lampa.Storage.get(KEY_BOOKMARKS, null) && Lampa.Storage.get('adult_bookmarks_list', null)) {
+        Lampa.Storage.set(KEY_BOOKMARKS, Lampa.Storage.get('adult_bookmarks_list', null));
+      }
+      if (Lampa.Storage.get(KEY_MENU_CACHE, null) == null && Lampa.Storage.get('adult_menu_cache', null)) {
+        Lampa.Storage.set(KEY_MENU_CACHE, Lampa.Storage.get('adult_menu_cache', null));
+      }
+      if (Lampa.Storage.get(KEY_DOMAIN_HIST, null) == null && Lampa.Storage.get('adult_domain_history', null)) {
+        Lampa.Storage.set(KEY_DOMAIN_HIST, Lampa.Storage.get('adult_domain_history', null));
+      }
+    } catch (e) {}
+  })();
+
 
   // ----------------------------------------------------------
   // [1.6.0] DOMAIN_MAP — единая карта домен → имя парсера.
@@ -192,7 +216,7 @@
    * Загрузить историю домена из storage
    */
   function loadDomainHistory() {
-    var raw = Lampa.Storage.get('adult_domain_history', '{}');
+    var raw = Lampa.Storage.get('adultjs_domain_history', '{}');
     try {
       return JSON.parse(raw);
     } catch (e) {
@@ -212,7 +236,7 @@
         delete history[host];
       }
     }
-    Lampa.Storage.set('adult_domain_history', JSON.stringify(history));
+    Lampa.Storage.set('adultjs_domain_history', JSON.stringify(history));
   }
 
   /**
@@ -296,6 +320,10 @@
     adult_bm_empty:    { ru: 'Закладки пусты. Удержите ОК на видео для добавления.', en: 'No bookmarks yet. Hold OK on a card to add.' },
     adult_bm_saved:    { ru: 'Сохранено в закладки', en: 'Saved to bookmarks' },
     adult_bm_removed:  { ru: 'Удалено из закладок',  en: 'Removed from bookmarks' },
+    adult_proxy_posters:      { ru: 'Постеры через Worker',     en: 'Posters via Worker' },
+    adult_proxy_posters_descr:{ ru: 'Проксировать обложки (не сбрасывается)', en: 'Proxy posters (not cleared by reset)' },
+    adult_proxy_video:        { ru: 'Видео через Worker',       en: 'Video via Worker' },
+    adult_proxy_video_descr:  { ru: 'Проксировать потоки (не сбрасывается)', en: 'Proxy streams (not cleared by reset)' },
     adult_reset_light:       { ru: 'Очистить кэш парсеров',                    en: 'Clear parser cache' },
     adult_reset_light_descr: { ru: 'Память и скрипты парсеров, без подтверждения', en: 'Memory and parser scripts, no confirm' },
     adult_reset_light_done:  { ru: 'Кэш парсеров очищен',                      en: 'Parser cache cleared' },
@@ -313,7 +341,7 @@
   // ЗАКЛАДКИ
   // ----------------------------------------------------------
   var Bookmarks = {
-    _key: 'adult_bookmarks_list',
+    _key: 'adultjs_bookmarks_list',
 
     _load: function () {
       var v = Lampa.Storage.get(this._key, []);
@@ -372,14 +400,14 @@
   // clearBookmarks=true — дополнительно стереть adult_bookmarks_list.
   function resetFull(clearBookmarks) {
     resetLight();
-    Lampa.Storage.set('adult_menu_cache', null);
-    Lampa.Storage.set('adult_domain_history', null);
-    Lampa.Storage.set('sisi_preview', null);
-    Lampa.Storage.set('sisi_unic_id', null);
-    Lampa.Storage.set('lampac_unic_id', null);
+    // кэш меню / history / preview — без proxy-тумблеров
+    Lampa.Storage.set(KEY_MENU_CACHE, null);
+    Lampa.Storage.set(KEY_DOMAIN_HIST, null);
+    Lampa.Storage.set(KEY_PREVIEW, null);
     if (clearBookmarks) {
-      Lampa.Storage.set('adult_bookmarks_list', null);
+      Lampa.Storage.set(KEY_BOOKMARKS, null);
     }
+    // KEY_PROXY_POSTERS / KEY_PROXY_VIDEO — НЕ сбрасываем (только вручную)
     window.adult_settings_ready = false;
     Lampa.Noty.show(
       Lampa.Lang.translate(clearBookmarks ? 'adult_reset_done_bm' : 'adult_reset_done'),
@@ -457,7 +485,7 @@
   var menuCache = null;
 
   function loadMenuCache(callback) {
-    var cached = Lampa.Storage.get('adult_menu_cache', null);
+    var cached = Lampa.Storage.get('adultjs_menu_cache', null);
     if (cached) {
       try {
         var parsed = typeof cached === 'string' ? JSON.parse(cached) : cached;
@@ -479,7 +507,7 @@
   }
 
   function saveMenuCache(channels) {
-    Lampa.Storage.set('adult_menu_cache', JSON.stringify({
+    Lampa.Storage.set('adultjs_menu_cache', JSON.stringify({
       channels: channels,
       timestamp: Date.now(),
     }));
@@ -758,10 +786,12 @@
     // [1.5.8][1.7.4] проксирование picture через Worker + лог [AdultJS][Poster]
     fixCards: function (list) {
       if (!list || !list.length) return;
-      var workerUrl = (window.AdultPlugin && window.AdultPlugin.workerUrl)
-        ? window.AdultPlugin.workerUrl : '';
-      if (workerUrl && workerUrl.charAt(workerUrl.length - 1) !== '=') {
-        workerUrl = workerUrl + '=';
+      var useProxy = Lampa.Storage.field(KEY_PROXY_POSTERS);
+      if (useProxy === null || useProxy === undefined) useProxy = true;
+      var workerUrl = '';
+      if (useProxy && window.AdultPlugin && window.AdultPlugin.workerUrl) {
+        workerUrl = window.AdultPlugin.workerUrl;
+        if (workerUrl.charAt(workerUrl.length - 1) !== '=') workerUrl = workerUrl + '=';
       }
       list.forEach(function (m) {
         var src = m.picture || m.img || m.poster || m.background_image || '';
@@ -780,11 +810,14 @@
     // [1.6.0] Проксирование video URL через Worker.
     proxyVideoUrl: function (url) {
       if (!url || url.indexOf('http') !== 0) return url;
+      var useProxy = Lampa.Storage.field(KEY_PROXY_VIDEO);
+      if (useProxy === null || useProxy === undefined) useProxy = true;
+      if (!useProxy) return url;
       var w = (window.AdultPlugin && window.AdultPlugin.workerUrl)
         ? window.AdultPlugin.workerUrl : '';
       if (!w) return url;
       if (w.charAt(w.length - 1) !== '=') w = w + '=';
-      if (url.indexOf(w) === 0) return url; // уже проксирован
+      if (url.indexOf(w) === 0) return url;
       return w + encodeURIComponent(url);
     },
 
@@ -923,7 +956,7 @@
 
         timer = setTimeout(function () {
           try {
-            if (!Lampa.Storage.field('sisi_preview')) return;
+            if (!Lampa.Storage.field(KEY_PREVIEW)) return;
             if (!target || !target.length) return;
 
             var container = target.find('.adult-video-preview');
@@ -1340,11 +1373,18 @@
     if (window.adult_settings_ready) return;
     window.adult_settings_ready = true;
 
-    var previewVal = Lampa.Storage.field('sisi_preview');
-    if (previewVal === null || previewVal === undefined) {
-      Lampa.Storage.set('sisi_preview', true);
-      console.log('[AdultJS] sisi_preview инициализирован: true');
+    // preview default false (пункт меню может отсутствовать)
+    if (Lampa.Storage.field(KEY_PREVIEW) === null || Lampa.Storage.field(KEY_PREVIEW) === undefined) {
+      Lampa.Storage.set(KEY_PREVIEW, false);
     }
+    // proxy defaults true — сброс их не трогает
+    if (Lampa.Storage.field(KEY_PROXY_POSTERS) === null || Lampa.Storage.field(KEY_PROXY_POSTERS) === undefined) {
+      Lampa.Storage.set(KEY_PROXY_POSTERS, true);
+    }
+    if (Lampa.Storage.field(KEY_PROXY_VIDEO) === null || Lampa.Storage.field(KEY_PROXY_VIDEO) === undefined) {
+      Lampa.Storage.set(KEY_PROXY_VIDEO, true);
+    }
+
 
     var componentName = Lampa.Lang.translate('adult_plugin_name') + '  v' + PLUGIN_VERSION;
 
@@ -1352,6 +1392,26 @@
       component: PLUGIN_ID,
       name:      componentName,
       icon:      '<svg width="200" height="243" viewBox="0 0 200 243" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M187.714 130.727C206.862 90.1515 158.991 64.2019 100.983 64.2019C42.9759 64.2019 -4.33044 91.5669 10.875 130.727C26.0805 169.888 63.2501 235.469 100.983 234.997C138.716 234.526 168.566 171.303 187.714 130.727Z" stroke="currentColor" stroke-width="15"/><path d="M102.11 62.3146C109.995 39.6677 127.46 28.816 169.692 24.0979C172.514 56.1811 135.338 64.2018 102.11 62.3146Z" stroke="currentColor" stroke-width="15"/><path d="M90.8467 62.7863C90.2285 34.5178 66.0667 25.0419 31.7127 33.063C28.8904 65.1461 68.8826 62.7863 90.8467 62.7863Z" stroke="currentColor" stroke-width="15"/><path d="M100.421 58.5402C115.627 39.6677 127.447 13.7181 85.2149 9C82.3926 41.0832 83.5258 35.4214 100.421 58.5402Z" stroke="currentColor" stroke-width="15"/><rect x="39.0341" y="98.644" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="90.8467" y="92.0388" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="140.407" y="98.644" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="116.753" y="139.22" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="64.9404" y="139.22" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="93.0994" y="176.021" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/></svg>',
+    });
+
+    Lampa.SettingsApi.addParam({
+      component: PLUGIN_ID,
+      param:     { name: KEY_PROXY_POSTERS, type: 'trigger', values: '', default: true },
+      field:     {
+        name:        Lampa.Lang.translate('adult_proxy_posters'),
+        description: Lampa.Lang.translate('adult_proxy_posters_descr'),
+      },
+      onRender:  function () {},
+    });
+
+    Lampa.SettingsApi.addParam({
+      component: PLUGIN_ID,
+      param:     { name: KEY_PROXY_VIDEO, type: 'trigger', values: '', default: true },
+      field:     {
+        name:        Lampa.Lang.translate('adult_proxy_video'),
+        description: Lampa.Lang.translate('adult_proxy_video_descr'),
+      },
+      onRender:  function () {},
     });
 
     // [1.7.5] Лёгкий сброс — без подтверждения
