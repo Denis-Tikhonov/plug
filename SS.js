@@ -1,6 +1,6 @@
 // =============================================================
 // AdultJS.js — Lampa Adult Plugin
-// Version  : 1.7.4
+// Version  : 1.7.5
 // Changed  :
 //   [1.0.0] Полный рефакторинг с ab2024.ru → GitHub Pages
 //   [1.0.0] Убраны: RCH, история, лицензионные проверки
@@ -42,6 +42,7 @@
 //           BUGFIX: debounce в Sisi для устранения мерцания UI при параллельной загрузке.
 //   [1.7.3] NEW проксирование picture через Worker
 //   [1.7.4] FIX fixCards: picture/img/poster → Worker + [AdultJS][Poster] debug
+//   [1.7.5] Сброс: лёгкий (память) без confirm; полный без закладок + опция закладок
 // GitHub   : https://denis-tikhonov.github.io/plug/
 // Worker   :
 // =============================================================
@@ -56,7 +57,7 @@
   // КОНСТАНТЫ И КОНФИГУРАЦИЯ
   // ----------------------------------------------------------
   var PLUGIN_ID      = 'adult_lampac';
-  var PLUGIN_VERSION = '1.7.4';
+  var PLUGIN_VERSION = '1.7.5';
 
   // Константы таймаутов
   var TIMEOUT_CONFIG = {
@@ -295,10 +296,15 @@
     adult_bm_empty:    { ru: 'Закладки пусты. Удержите ОК на видео для добавления.', en: 'No bookmarks yet. Hold OK on a card to add.' },
     adult_bm_saved:    { ru: 'Сохранено в закладки', en: 'Saved to bookmarks' },
     adult_bm_removed:  { ru: 'Удалено из закладок',  en: 'Removed from bookmarks' },
-    adult_reset:         { ru: 'Сброс плагина',                           en: 'Reset plugin'                        },
-    adult_reset_descr:   { ru: 'Очистить кэш меню, парсеры и закладки',   en: 'Clear menu cache, parsers and bookmarks' },
-    adult_reset_done:    { ru: 'Плагин сброшен до начальных установок',   en: 'Plugin reset to defaults'            },
-    adult_reset_confirm: { ru: 'Сбросить плагин? Закладки будут удалены!', en: 'Reset plugin? Bookmarks will be deleted!' },
+    adult_reset_light:       { ru: 'Очистить кэш парсеров',                    en: 'Clear parser cache' },
+    adult_reset_light_descr: { ru: 'Память и скрипты парсеров, без подтверждения', en: 'Memory and parser scripts, no confirm' },
+    adult_reset_light_done:  { ru: 'Кэш парсеров очищен',                      en: 'Parser cache cleared' },
+    adult_reset:             { ru: 'Полный сброс',                             en: 'Full reset' },
+    adult_reset_descr:       { ru: 'Кэш меню и настройки (закладки по умолчанию сохраняются)', en: 'Menu cache and settings (bookmarks kept by default)' },
+    adult_reset_done:        { ru: 'Плагин сброшен (закладки сохранены)',      en: 'Plugin reset (bookmarks kept)' },
+    adult_reset_done_bm:     { ru: 'Плагин сброшен, закладки удалены',         en: 'Plugin reset, bookmarks deleted' },
+    adult_reset_confirm:     { ru: 'Полный сброс (закладки сохранить)',        en: 'Full reset (keep bookmarks)' },
+    adult_reset_confirm_bm:  { ru: 'Полный сброс + удалить закладки',          en: 'Full reset + delete bookmarks' },
     adult_worker_403:      { ru: 'Домен не разрешён в Worker',                  en: 'Domain not allowed in Worker'         },
     adult_worker_fallback: { ru: 'Worker заблокировал домен, прямой запрос...', en: 'Worker blocked domain, direct request...' },
   });
@@ -350,25 +356,41 @@
   // ----------------------------------------------------------
   // СБРОС ПЛАГИНА
   // ----------------------------------------------------------
-  function resetPlugin() {
+  // [1.7.5] Лёгкий сброс: только память (парсеры, menuCache). Без confirm.
+  function resetLight() {
     menuCache = null;
-
-    // [1.7.0] Очистка LRU-кеша парсеров
     Object.keys(Parsers).forEach(function (name) { delete Parsers[name]; });
     parserAccessOrder = [];
     document.querySelectorAll('script[data-adult-parser]').forEach(function (s) {
-      s.parentNode.removeChild(s);
+      if (s.parentNode) s.parentNode.removeChild(s);
     });
+    Lampa.Noty.show(Lampa.Lang.translate('adult_reset_light_done'), { time: 2500 });
+    console.log('[AdultJS] resetLight, version:', PLUGIN_VERSION);
+  }
 
-    // [1.7.0] Очистка кэша меню и истории доменов
+  // [1.7.5] Полный сброс: кэш меню, история доменов, настройки.
+  // clearBookmarks=true — дополнительно стереть adult_bookmarks_list.
+  function resetFull(clearBookmarks) {
+    resetLight();
     Lampa.Storage.set('adult_menu_cache', null);
     Lampa.Storage.set('adult_domain_history', null);
-
-    STORAGE_KEYS.forEach(function (key) { Lampa.Storage.set(key, null); });
-
+    Lampa.Storage.set('sisi_preview', null);
+    Lampa.Storage.set('sisi_unic_id', null);
+    Lampa.Storage.set('lampac_unic_id', null);
+    if (clearBookmarks) {
+      Lampa.Storage.set('adult_bookmarks_list', null);
+    }
     window.adult_settings_ready = false;
-    Lampa.Noty.show(Lampa.Lang.translate('adult_reset_done'), { time: 4000 });
-    console.log('[AdultJS] Plugin reset to defaults, version:', PLUGIN_VERSION);
+    Lampa.Noty.show(
+      Lampa.Lang.translate(clearBookmarks ? 'adult_reset_done_bm' : 'adult_reset_done'),
+      { time: 3500 }
+    );
+    console.log('[AdultJS] resetFull bookmarks=' + !!clearBookmarks + ', version:', PLUGIN_VERSION);
+  }
+
+  // совместимость со старым именем
+  function resetPlugin() {
+    resetFull(false);
   }
 
   // ----------------------------------------------------------
@@ -1332,6 +1354,22 @@
       icon:      '<svg width="200" height="243" viewBox="0 0 200 243" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M187.714 130.727C206.862 90.1515 158.991 64.2019 100.983 64.2019C42.9759 64.2019 -4.33044 91.5669 10.875 130.727C26.0805 169.888 63.2501 235.469 100.983 234.997C138.716 234.526 168.566 171.303 187.714 130.727Z" stroke="currentColor" stroke-width="15"/><path d="M102.11 62.3146C109.995 39.6677 127.46 28.816 169.692 24.0979C172.514 56.1811 135.338 64.2018 102.11 62.3146Z" stroke="currentColor" stroke-width="15"/><path d="M90.8467 62.7863C90.2285 34.5178 66.0667 25.0419 31.7127 33.063C28.8904 65.1461 68.8826 62.7863 90.8467 62.7863Z" stroke="currentColor" stroke-width="15"/><path d="M100.421 58.5402C115.627 39.6677 127.447 13.7181 85.2149 9C82.3926 41.0832 83.5258 35.4214 100.421 58.5402Z" stroke="currentColor" stroke-width="15"/><rect x="39.0341" y="98.644" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="90.8467" y="92.0388" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="140.407" y="98.644" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="116.753" y="139.22" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="64.9404" y="139.22" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/><rect x="93.0994" y="176.021" width="19.1481" height="30.1959" rx="9.57407" fill="currentColor"/></svg>',
     });
 
+    // [1.7.5] Лёгкий сброс — без подтверждения
+    Lampa.SettingsApi.addParam({
+      component: PLUGIN_ID,
+      param: { name: 'adult_reset_light_action', type: 'button', values: '', default: '' },
+      field: {
+        name:        Lampa.Lang.translate('adult_reset_light'),
+        description: Lampa.Lang.translate('adult_reset_light_descr'),
+      },
+      onRender: function (item) {
+        item.on('hover:enter', function () {
+          resetLight();
+        });
+      },
+    });
+
+    // [1.7.5] Полный сброс — с подтверждением; закладки опционально
     Lampa.SettingsApi.addParam({
       component: PLUGIN_ID,
       param: { name: 'adult_reset_action', type: 'button', values: '', default: '' },
@@ -1345,11 +1383,12 @@
           Lampa.Select.show({
             title: Lampa.Lang.translate('adult_reset'),
             items: [
-              { title: '⚠  ' + Lampa.Lang.translate('adult_reset_confirm'), confirm: true },
+              { title: Lampa.Lang.translate('adult_reset_confirm'), confirm: true, clearBookmarks: false },
+              { title: '⚠  ' + Lampa.Lang.translate('adult_reset_confirm_bm'), confirm: true, clearBookmarks: true },
               { title: Lampa.Lang.translate('cancel') || 'Отмена', cancel: true },
             ],
             onSelect: function (m) {
-              if (m.confirm) resetPlugin();
+              if (m.confirm) resetFull(!!m.clearBookmarks);
               Lampa.Controller.toggle(ctrl);
             },
             onBack: function () { Lampa.Controller.toggle(ctrl); },
