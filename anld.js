@@ -1,6 +1,7 @@
 // =============================================================
 // anld.js — Парсер www.analdin.com для AdultJS
-// Version  : 1.1.0
+// Version  : 1.2.0
+//   [1.2.0] S0 get_file/video_url приоритет; query/token не резать
 // Site     : https://www.analdin.com
 // Engine   : KVS + flowplayer (PLAYER: "flowplayer")
 // Strategy : SSR каталог /videos/, flowplayer / kt_player qualities
@@ -33,7 +34,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.0.0';
+  var VERSION = '1.2.0';
   var NAME    = 'anld';
   var HOST    = 'https://www.analdin.com';
   var TAG     = '[' + NAME + ' v' + VERSION + ']';
@@ -129,7 +130,7 @@
     try {
       var u = raw;
       u = u.replace(/\\\//g, '/').replace(/\\/g, '');   // unescape-backslash
-      if (u.indexOf('%') !== -1) { try { u = decodeURIComponent(u); } catch (e) {} }
+      // не decodeURIComponent весь URL — ломает подписи/query
       if (u.indexOf('//') === 0) u = 'https:' + u;      // add-protocol
       if (u.charAt(0) === '/' && u.charAt(1) !== '/') u = HOST + u; // prepend-host
       return u;
@@ -148,6 +149,27 @@
   // ============================================================
   function extractQualities(html) {
     var q = {};
+
+    // [1.2.0] S0 — KVS video_url / get_file (приоритет, с query)
+    try {
+      var reVu = /video(?:_alt)?_url(?:_text)?\s*[:=]\s*['"]([^'"]+)['"]/gi;
+      var vm;
+      while ((vm = reVu.exec(html)) !== null) {
+        var vu = cleanUrl(vm[1]);
+        if (vu && vu.indexOf('http') === 0 && !q['HD']) q['HD'] = vu;
+      }
+      var reGf0 = /https?:\/\/[^"'\s<>]+\/get_file\/[^"'\s<>]*?\.mp4[^"'\s<>]*/gi;
+      while ((vm = reGf0.exec(html)) !== null) {
+        var gfu = cleanUrl(vm[0]);
+        if (!gfu || gfu.indexOf('download=') !== -1) continue;
+        var lbl = 'HD';
+        var gm = gfu.match(/_(\d{3,4})p\.mp4/i);
+        if (gm) lbl = gm[1] + 'p';
+        if (!q[lbl]) q[lbl] = gfu;
+      }
+      if (Object.keys(q).length) return q;
+    } catch (e0) { console.warn(TAG, 'S0 error', e0.message || e0); }
+
 
     // S1 — flowplayer: playlist / clip.url
     try {
