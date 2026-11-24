@@ -1,15 +1,15 @@
 // =============================================================
 // ept.js — Парсер EptaPorno (eptaporno.com) для AdultJS
-// Version  : 1.2.0
+// Version  : 1.3.0
 // Changes  :
-//   [1.2.0] FIX qualities: get_file (+ source) → awmcdn 302
-//           Не ломать URL; Worker: eptaporno.com + awmcdn + cookie-jar
+//   [1.3.0] qualities: приоритет <source>/video_url; не резать query; сырые URL
+//   [1.2.0] FIX qualities: get_file → awmcdn 302; cookie-jar Worker
 //   [1.1.0] submenu категории
 // =============================================================
 (function () {
   'use strict';
 
-  var VERSION = '1.2.0';
+  var VERSION = '1.3.0';
   var NAME    = 'ept';
   var HOST    = 'https://eptaporno.com';
   var TAG     = '[ept v' + VERSION + ']';
@@ -107,33 +107,38 @@
     var q = {};
     var add = function (label, url) {
       url = absUrl(url);
-      if (!url || url.indexOf('get_file') === -1) return;
+      if (!url || url.indexOf('http') !== 0) return;
       if (url.indexOf('{') !== -1) return;
+      // только потоки get_file / mp4
+      if (url.indexOf('get_file') === -1 && !/\.mp4/i.test(url)) return;
+      if (url.indexOf('download=true') !== -1) return;
       if (!q[label]) q[label] = url;
     };
+    var labelFrom = function (u) {
+      var m1 = u.match(/_(\d{3,4})p\.mp4/i);
+      if (m1) return m1[1] + 'p';
+      var m2 = u.match(/\/(\d{3,5})\.mp4/i);
+      if (m2) return 'HD';
+      return 'HD';
+    };
 
-    // 1) <source src="...get_file...">
-    var reSrc = /<source[^>]+src=["']([^"']+)["']/gi;
+    // 0) video_url / video_alt_url (KVS)
+    var reVu = /video(?:_alt)?_url(?:_text)?\s*[:=]\s*['"]([^'"]+)['"]/gi;
     var m;
-    while ((m = reSrc.exec(html)) !== null) {
-      var u = m[1];
-      if (u.indexOf('get_file') !== -1 || /\.mp4/i.test(u)) {
-        var lab = 'HD';
-        var qm = u.match(/_(\d+)p?\.mp4/i) || u.match(/\/(\d+)\.mp4/i);
-        if (qm) lab = /\d+p/.test(qm[0]) ? qm[1] + 'p' : 'HD';
-        add(lab, u);
-      }
+    while ((m = reVu.exec(html)) !== null) {
+      add(labelFrom(m[1]), m[1]);
     }
 
-    // 2) любые get_file .mp4
-    var reGf = /https?:\/\/[^"'\s<>]+\/get_file\/[^"'\s<>]+\.mp4[^"'\s<>]*/gi;
+    // 1) <source src="...">
+    var reSrc = /<source[^>]+src=["']([^"']+)["']/gi;
+    while ((m = reSrc.exec(html)) !== null) {
+      add(labelFrom(m[1]), m[1]);
+    }
+
+    // 2) любые get_file .mp4 (с query v-acctoken и trailing /)
+    var reGf = /https?:\/\/[^"'\s<>]+\/get_file\/[^"'\s<>]*?\.mp4[^"'\s<>]*/gi;
     while ((m = reGf.exec(html)) !== null) {
-      var u2 = m[0];
-      if (u2.indexOf('download=') !== -1) continue;
-      var lab2 = 'HD';
-      var qm2 = u2.match(/_(\d+)p\.mp4/i);
-      if (qm2) lab2 = qm2[1] + 'p';
-      add(lab2, u2);
+      add(labelFrom(m[0]), m[0]);
     }
 
     return q;
