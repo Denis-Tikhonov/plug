@@ -1,13 +1,14 @@
 // =============================================================
 // btit.js — Парсер BigTitsLust для AdultJS (Lampa)
 // =============================================================
-// Версия  : 1.2.2
+// Версия  : 1.3.0
+//   [1.3.0] video_url+token; сырые URL (SS proxy); не резать query
 // =============================================================
 
 (function () {
   'use strict';
 
-  var VERSION = '1.2.2';
+  var VERSION = '1.3.0';
   var NAME    = 'btit';
   var HOST    = 'https://www.bigtitslust.com';
   var TAG     = '[' + NAME + ']';
@@ -120,67 +121,63 @@
   // ----------------------------------------------------------
   function extractQualities(html, videoPageUrl, success, error) {
     var q = {};
-    
-    console.log(TAG, '=== extractQualities START ===');
-    
-    // S1: Поиск get_file URL (он ведёт на remote_control через редирект)
-    var getFileMatches = html.match(/https?:\/\/[^"'\s<>]+get_file[^"'\s<>]+\.mp4[^"'\s<>]*/gi);
-    
-    if (getFileMatches && getFileMatches.length) {
-        var getFileUrl = getFileMatches[0].replace(/\\/g, '');
-        console.log(TAG, '✅ Найден get_file URL:', getFileUrl.substring(0, 100));
-        
-        // Проксируем get_file URL через Worker (Worker обработает редирект)
-        var proxiedUrl = WORKER_URL + '/?url=' + encodeURIComponent(getFileUrl);
-        q['HD'] = proxiedUrl;
-        console.log(TAG, '✅ Проксируем get_file:', proxiedUrl.substring(0, 100));
-        success({ qualities: q });
-        return;
+    console.log(TAG, 'extractQualities START html=', html.length);
+
+    function add(label, url) {
+      if (!url) return;
+      url = cleanUrl(url);
+      if (!url || url.indexOf('http') !== 0) return;
+      if (url.indexOf('{') !== -1) return;
+      if (!q[label]) q[label] = url;
     }
-    
-    // S2: Поиск remote_control.php напрямую (если вдруг есть)
-    var rcMatches = html.match(/https?:\/\/media\d+\.bigtitslust\.com\/remote_control\.php\?[^"'\s<>]+/gi);
-    if (rcMatches && rcMatches.length) {
-        var videoUrl = rcMatches[0].replace(/\\/g, '');
-        var proxiedUrl = WORKER_URL + '/?url=' + encodeURIComponent(videoUrl);
-        q['HD'] = proxiedUrl;
-        console.log(TAG, '✅ Найден remote_control напрямую');
-        success({ qualities: q });
-        return;
+    function lab(u) {
+      var m = u.match(/_(\d{3,4})p\.mp4/i);
+      return m ? m[1] + 'p' : 'HD';
     }
-    
-    // S3: Поиск в flashvars
-    var flashvarsMatch = html.match(/flashvars\s*[:=]\s*({[^;]+?})\s*[;}]/i);
-    if (flashvarsMatch) {
-        var rcMatch = flashvarsMatch[1].match(/remote_control\s*:\s*['"]([^'"]+)['"]/i);
-        if (rcMatch && rcMatch[1]) {
-            var videoUrl = rcMatch[1].replace(/\\/g, '');
-            var proxiedUrl = WORKER_URL + '/?url=' + encodeURIComponent(videoUrl);
-            q['HD'] = proxiedUrl;
-            console.log(TAG, '✅ flashvars.remote_control');
-            success({ qualities: q });
-            return;
-        }
+
+    // S0: video_url / video_alt_url (полный v-acctoken!)
+    var reVu = /video(?:_alt)?_url(?:_text)?\s*[:=]\s*['"]([^'"]+)['"]/gi;
+    var mm;
+    while ((mm = reVu.exec(html)) !== null) {
+      add(lab(mm[1]), mm[1]);
     }
-    
-    // S4: Fallback - любой .mp4
-    var mp4Matches = html.match(/https?:\/\/[^"'\s<>\\]+\.mp4[^"'\s<>\\]*/gi);
-    if (mp4Matches && mp4Matches.length) {
-        for (var i = 0; i < mp4Matches.length; i++) {
-            var mp4 = mp4Matches[i];
-            var proxiedUrl = WORKER_URL + '/?url=' + encodeURIComponent(mp4);
-            q['HD'] = proxiedUrl;
-            console.log(TAG, '⚠️ Fallback .mp4');
-            success({ qualities: q });
-            return;
-        }
+
+    // S1: get_file ... mp4 ... (с query)
+    if (!Object.keys(q).length) {
+      var reGf = /https?:\/\/[^"'\s<>]+\/get_file\/[^"'\s<>]*?\.mp4[^"'\s<>]*/gi;
+      while ((mm = reGf.exec(html)) !== null) {
+        if (mm[0].indexOf('download=') !== -1) continue;
+        add(lab(mm[0]), mm[0]);
+      }
     }
-    
-    console.error(TAG, '❌ ВИДЕО НЕ НАЙДЕНО!');
-    error('Видео не найдено');
+
+    // S2: remote_control.php
+    if (!Object.keys(q).length) {
+      var reRc = /https?:\/\/media\d+\.bigtitslust\.com\/remote_control\.php\?[^"'\s<>]+/gi;
+      while ((mm = reRc.exec(html)) !== null) {
+        add('HD', mm[0]);
+      }
+    }
+
+    // S3: flashvars remote_control
+    if (!Object.keys(q).length) {
+      var fm = html.match(/remote_control\s*:\s*['"]([^'"]+)['"]/i);
+      if (fm) add('HD', fm[1]);
+    }
+
+    var keys = Object.keys(q);
+    console.log(TAG, 'qualities keys', keys.length, JSON.stringify(keys));
+    if (keys.length) {
+      // сырые URL — SS.js proxyVideoUrl + Worker cookie/redirect
+      success({ qualities: q });
+    } else {
+      console.error(TAG, 'поток не найден');
+      error('BigTitsLust: видео не найдено');
+    }
   }
+
   // ----------------------------------------------------------
-  // URL BUILDER
+  // URL BUILDER  // URL BUILDER
   // ----------------------------------------------------------
   function buildUrl(type, value, page) {
     var url = HOST;
