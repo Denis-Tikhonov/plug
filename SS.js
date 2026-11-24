@@ -1,6 +1,6 @@
 // =============================================================
 // AdultJS.js — Lampa Adult Plugin
-// Version  : 1.7.6
+// Version  : 1.7.7
 // Changed  :
 //   [1.0.0] Полный рефакторинг с ab2024.ru → GitHub Pages
 //   [1.0.0] Убраны: RCH, история, лицензионные проверки
@@ -44,6 +44,7 @@
 //   [1.7.4] FIX fixCards: picture/img/poster → Worker + [AdultJS][Poster] debug
 //   [1.7.5] Сброс: лёгкий (память) без confirm; полный без закладок + опция закладок
 //   [1.7.6] Ключи Storage → adultjs_*; proxy posters/video тумблеры (сброс не трогает)
+//   [1.7.7] Старт: ping Worker (Noty). Диагностика парсера 1×/сессию в loadParser (SS)
 // GitHub   : https://denis-tikhonov.github.io/plug/
 // Worker   :
 // =============================================================
@@ -58,7 +59,7 @@
   // КОНСТАНТЫ И КОНФИГУРАЦИЯ
   // ----------------------------------------------------------
   var PLUGIN_ID      = 'adult_lampac';
-  var PLUGIN_VERSION = '1.7.6';
+  var PLUGIN_VERSION = '1.7.7';
 
   // Константы таймаутов
   var TIMEOUT_CONFIG = {
@@ -138,6 +139,129 @@
       }
     } catch (e) {}
   })();
+
+  // ============================================================
+  // [1.7.7] ДИАГНОСТИКА: Worker при старте + парсер 1× за сессию
+  // ============================================================
+  var _workerDiagDone = false;
+  var _parserDiagDone = {};  // name → true
+  var _parserDiagPending = {};
+
+  function _workerBase() {
+    var w = WORKER_DEFAULT || '';
+    // https://host/?url=  → https://host
+    return w.replace(/\/?\?url=?$/i, '').replace(/\/$/, '');
+  }
+
+  /** Один раз при запуске плагина: Worker доступен? */
+  function checkWorkerOnStart() {
+    if (_workerDiagDone) return;
+    _workerDiagDone = true;
+    var base = _workerBase();
+    if (!base) {
+      console.warn('[AdultJS] Worker URL пуст');
+      try { Lampa.Noty.show('AdultJS v' + PLUGIN_VERSION + ' · Worker не задан', { time: 4000 }); } catch (e) {}
+      return;
+    }
+    var url = base + '/_check?host=example.com';
+    var done = false;
+    var finish = function (ok, detail) {
+      if (done) return;
+      done = true;
+      console.log('[AdultJS] Worker diag:', ok ? 'OK' : 'FAIL', detail || '');
+      try {
+        if (ok) {
+          Lampa.Noty.show('AdultJS v' + PLUGIN_VERSION + ' · Worker OK', { time: 2800 });
+        } else {
+          Lampa.Noty.show('AdultJS · Worker недоступен' + (detail ? ': ' + detail : ''), { time: 4500 });
+        }
+      } catch (e) {}
+    };
+    try {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', url, true);
+      xhr.timeout = 6000;
+      xhr.onload = function () {
+        finish(xhr.status >= 200 && xhr.status < 500, 'HTTP ' + xhr.status);
+      };
+      xhr.onerror = function () { finish(false, 'network'); };
+      xhr.ontimeout = function () { finish(false, 'timeout'); };
+      xhr.send();
+    } catch (e) {
+      // fallback fetch
+      if (typeof fetch === 'function') {
+        fetch(url).then(function (r) {
+          finish(r.ok || (r.status > 0), 'HTTP ' + r.status);
+        }).catch(function (err) {
+          finish(false, (err && err.message) || 'fetch');
+        });
+      } else {
+        finish(false, e.message || 'xhr');
+      }
+    }
+  }
+
+  /** Домен для имени парсера из DOMAIN_MAP (первый match). */
+  function hostForParser(name) {
+    if (!name || typeof DOMAIN_MAP === 'undefined') return '';
+    for (var d in DOMAIN_MAP) {
+      if (DOMAIN_MAP.hasOwnProperty(d) && DOMAIN_MAP[d] === name) return d;
+    }
+    return '';
+  }
+
+  /**
+   * Диагностика парсера один раз за сессию:
+   * скрипт зарегистрирован + пробный GET главной сайта через networkRequest.
+   * Не обещает play (HD tube и т.п.) — только «шина до сайта».
+   */
+  function diagParserOnce(name) {
+    if (!name || _parserDiagDone[name] || _parserDiagPending[name]) return;
+    _parserDiagPending[name] = true;
+
+    var host = hostForParser(name);
+    if (!host) {
+      _parserDiagDone[name] = true;
+      _parserDiagPending[name] = false;
+      console.log('[AdultJS][Diag]', name, '· script OK (нет DOMAIN_MAP)');
+      return;
+    }
+
+    var testUrl = 'https://' + host + '/';
+    console.log('[AdultJS][Diag]', name, '· probe', testUrl);
+
+    // networkRequest может быть объявлен позже — отложить до вызова из loadParser (после определения networkRequest)
+    var run = function () {
+      if (typeof networkRequest !== 'function') {
+        _parserDiagPending[name] = false;
+        console.warn('[AdultJS][Diag]', name, '· networkRequest ещё нет');
+        return;
+      }
+      networkRequest(
+        testUrl,
+        function (html) {
+          _parserDiagDone[name] = true;
+          _parserDiagPending[name] = false;
+          var ok = html && String(html).length > 400;
+          console.log('[AdultJS][Diag]', name, ok ? '· site OK (' + String(html).length + 'b)' : '· site empty');
+          if (!ok) {
+            try {
+              Lampa.Noty.show(name + ': сайт без контента / блок', { time: 3500 });
+            } catch (e) {}
+          }
+        },
+        function (err) {
+          _parserDiagDone[name] = true;
+          _parserDiagPending[name] = false;
+          console.warn('[AdultJS][Diag]', name, '· site FAIL', err);
+          try {
+            Lampa.Noty.show(name + ': нет доступа к сайту', { time: 3500 });
+          } catch (e) {}
+        }
+      );
+    };
+    run();
+  }
 
 
   // ----------------------------------------------------------
@@ -454,6 +578,7 @@
     // Проверяем кэш
     if (Parsers[name]) {
       touchParser(name);
+      try { diagParserOnce(name); } catch (e) {}
       callback(Parsers[name]);
       return;
     }
@@ -469,12 +594,22 @@
       }, 100);
 
       touchParser(name);
-      if (Parsers[name]) callback(Parsers[name]);
-      else console.warn('[AdultJS] Parser not registered after load:', name);
+      if (Parsers[name]) {
+        try { diagParserOnce(name); } catch (e) {}
+        callback(Parsers[name]);
+      } else {
+        console.warn('[AdultJS] Parser not registered after load:', name);
+        try {
+          Lampa.Noty.show(name + ': парсер не зарегистрировался', { time: 3500 });
+        } catch (e2) {}
+      }
     };
     script.onerror = function () {
       console.error('[AdultJS] Failed to load parser:', url);
       if (script.parentNode) script.parentNode.removeChild(script);
+      try {
+        Lampa.Noty.show(name + ': ошибка загрузки скрипта', { time: 3500 });
+      } catch (e) {}
     };
     document.head.appendChild(script);
   }
@@ -1557,6 +1692,10 @@
     addMenuButton();
     addFilter();
     addSettings();
+    // [1.7.7] один раз: доступность Worker
+    try { checkWorkerOnStart(); } catch (e) {
+      console.warn('[AdultJS] Worker check error', e);
+    }
   }
 
   function startPlugin() {
