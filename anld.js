@@ -1,6 +1,7 @@
 // =============================================================
 // anld.js — Парсер www.analdin.com для AdultJS
-// Version  : 1.2.0
+// Version  : 1.2.1
+//   [1.2.1] qualities: resolve get_file → CDN; постеры через proxy если SS
 //   [1.2.0] S0 get_file/video_url приоритет; query/token не резать
 // Site     : https://www.analdin.com
 // Engine   : KVS + flowplayer (PLAYER: "flowplayer")
@@ -34,7 +35,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.2.0';
+  var VERSION = '1.2.1';
   var NAME    = 'anld';
   var HOST    = 'https://www.analdin.com';
   var TAG     = '[' + NAME + ' v' + VERSION + ']';
@@ -120,6 +121,28 @@
         .catch(error);
     }
   }
+
+  function workerBase() {
+    var w = (window.AdultPlugin && window.AdultPlugin.workerUrl) ||
+      'https://zonaproxy.777b737.workers.dev/?url=';
+    return String(w).replace(/\/?\?url=?$/i, '').replace(/\/$/, '');
+  }
+
+  function resolveStream(url, done) {
+    if (!url || (url.indexOf('get_file') === -1 && url.indexOf('function/') === -1)) {
+      done(url); return;
+    }
+    var resolveUrl = workerBase() + '/resolve?url=' + encodeURIComponent(url);
+    fetch(resolveUrl)
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        var fin = (j && j.final) ? j.final : url;
+        console.log(TAG, 'resolve →', String(fin).substring(0, 90));
+        done(fin);
+      })
+      .catch(function () { done(url); });
+  }
+
 
   // ============================================================
   // §3. cleanUrl
@@ -488,13 +511,21 @@
         var keys  = Object.keys(found);
         console.log(TAG, 'qualities() найдено:', keys.length, JSON.stringify(keys));
         if (keys.length > 0) {
-          success({ qualities: found });
+          var left = keys.length;
+          var out = {};
+          keys.forEach(function (k) {
+            resolveStream(found[k], function (finalUrl) {
+              out[k] = finalUrl;
+              left--;
+              if (left <= 0) success({ qualities: out });
+            });
+          });
         } else {
           console.warn(TAG, 'html.length =',       html.length);
           console.warn(TAG, 'flowplayer found =',  html.indexOf('flowplayer') !== -1);
           console.warn(TAG, 'playlist found =',    html.indexOf('playlist') !== -1);
           console.warn(TAG, '.mp4 cnt =',          (html.match(/\.mp4/gi) || []).length);
-          error('Видео не найдено — нужен анализ CDN-домена видео-страницы');
+          error('AnalDin: видео не найдено');
         }
       }, error);
     },
