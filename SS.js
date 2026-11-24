@@ -1,6 +1,6 @@
 // =============================================================
 // AdultJS.js — Lampa Adult Plugin
-// Version  : 1.7.7
+// Version  : 1.8.0
 // Changed  :
 //   [1.0.0] Полный рефакторинг с ab2024.ru → GitHub Pages
 //   [1.0.0] Убраны: RCH, история, лицензионные проверки
@@ -45,6 +45,7 @@
 //   [1.7.5] Сброс: лёгкий (память) без confirm; полный без закладок + опция закладок
 //   [1.7.6] Ключи Storage → adultjs_*; proxy posters/video тумблеры (сброс не трогает)
 //   [1.7.7] Старт: ping Worker (Noty). Диагностика парсера 1×/сессию в loadParser (SS)
+//   [1.8.0] 3 уровня Noty: Worker / постеры каталога / play; сетка cols--3 всегда; заглушки
 // GitHub   : https://denis-tikhonov.github.io/plug/
 // Worker   :
 // =============================================================
@@ -59,7 +60,7 @@
   // КОНСТАНТЫ И КОНФИГУРАЦИЯ
   // ----------------------------------------------------------
   var PLUGIN_ID      = 'adult_lampac';
-  var PLUGIN_VERSION = '1.7.7';
+  var PLUGIN_VERSION = '1.8.0';
 
   // Константы таймаутов
   var TIMEOUT_CONFIG = {
@@ -141,57 +142,64 @@
   })();
 
   // ============================================================
-  // [1.7.7] ДИАГНОСТИКА: Worker при старте + парсер 1× за сессию
+  // [1.8.0] ДИАГНОСТИКА 3 уровней (только Noty + console)
+  //   1) Worker  — при старте плагина
+  //   2) Постеры — после первой выдачи карточек парсера
+  //   3) Видео   — при play / qualities
   // ============================================================
   var _workerDiagDone = false;
-  var _parserDiagDone = {};  // name → true
-  var _parserDiagPending = {};
+  var _posterDiagDone = {};  // parser name
+  var _workerOk = null;      // true/false/null
+
+  function _adultNoty(msg, time) {
+    try { Lampa.Noty.show(String(msg), { time: time || 3500 }); } catch (e) {}
+    console.log('[AdultJS][Noty]', msg);
+  }
 
   function _workerBase() {
     var w = WORKER_DEFAULT || '';
-    // https://host/?url=  → https://host
     return w.replace(/\/?\?url=?$/i, '').replace(/\/$/, '');
   }
 
-  /** Один раз при запуске плагина: Worker доступен? */
+  /** 1) Worker — один раз при init */
   function checkWorkerOnStart() {
     if (_workerDiagDone) return;
     _workerDiagDone = true;
     var base = _workerBase();
     if (!base) {
-      console.warn('[AdultJS] Worker URL пуст');
-      try { Lampa.Noty.show('AdultJS v' + PLUGIN_VERSION + ' · Worker не задан', { time: 4000 }); } catch (e) {}
+      _workerOk = false;
+      _adultNoty('AdultJS v' + PLUGIN_VERSION + ' · Worker не задан', 4000);
       return;
     }
-    var url = base + '/_check?host=example.com';
+    var url = base + '/_check?host=www.google.com';
     var done = false;
     var finish = function (ok, detail) {
       if (done) return;
       done = true;
-      console.log('[AdultJS] Worker diag:', ok ? 'OK' : 'FAIL', detail || '');
-      try {
-        if (ok) {
-          Lampa.Noty.show('AdultJS v' + PLUGIN_VERSION + ' · Worker OK', { time: 2800 });
-        } else {
-          Lampa.Noty.show('AdultJS · Worker недоступен' + (detail ? ': ' + detail : ''), { time: 4500 });
-        }
-      } catch (e) {}
+      _workerOk = !!ok;
+      console.log('[AdultJS] Worker:', ok ? 'OK' : 'FAIL', detail || '');
+      if (ok) {
+        _adultNoty('AdultJS v' + PLUGIN_VERSION + ' · Worker OK', 3000);
+      } else {
+        _adultNoty('AdultJS · Worker недоступен' + (detail ? ' (' + detail + ')' : '') +
+          '. Play/постеры через proxy могут не работать', 5000);
+      }
     };
     try {
       var xhr = new XMLHttpRequest();
       xhr.open('GET', url, true);
-      xhr.timeout = 6000;
+      xhr.timeout = 7000;
       xhr.onload = function () {
-        finish(xhr.status >= 200 && xhr.status < 500, 'HTTP ' + xhr.status);
+        // любой HTTP-ответ = Worker жив (даже 403 на host)
+        finish(xhr.status > 0, 'HTTP ' + xhr.status);
       };
       xhr.onerror = function () { finish(false, 'network'); };
       xhr.ontimeout = function () { finish(false, 'timeout'); };
       xhr.send();
     } catch (e) {
-      // fallback fetch
       if (typeof fetch === 'function') {
         fetch(url).then(function (r) {
-          finish(r.ok || (r.status > 0), 'HTTP ' + r.status);
+          finish(true, 'HTTP ' + r.status);
         }).catch(function (err) {
           finish(false, (err && err.message) || 'fetch');
         });
@@ -201,7 +209,6 @@
     }
   }
 
-  /** Домен для имени парсера из DOMAIN_MAP (первый match). */
   function hostForParser(name) {
     if (!name || typeof DOMAIN_MAP === 'undefined') return '';
     for (var d in DOMAIN_MAP) {
@@ -211,60 +218,66 @@
   }
 
   /**
-   * Диагностика парсера один раз за сессию:
-   * скрипт зарегистрирован + пробный GET главной сайта через networkRequest.
-   * Не обещает play (HD tube и т.п.) — только «шина до сайта».
+   * 2) Постеры — после первой ленты парсера (fixCards).
+   * Разделение:
+   *   - нет URL в карточках → парсер/селекторы (Xtits и т.п.)
+   *   - URL есть, proxy выкл → напомнить тумблер
+   *   - URL есть, proxy вкл, Worker мёртв → Worker
+   *   - URL есть → «обложки в ленте: N/M» (факт наличия полей, не HTTP Img)
    */
-  function diagParserOnce(name) {
-    if (!name || _parserDiagDone[name] || _parserDiagPending[name]) return;
-    _parserDiagPending[name] = true;
+  function diagPostersOnce(parserName, list) {
+    if (!parserName || _posterDiagDone[parserName]) return;
+    if (!list || !list.length) return;
+    _posterDiagDone[parserName] = true;
 
-    var host = hostForParser(name);
-    if (!host) {
-      _parserDiagDone[name] = true;
-      _parserDiagPending[name] = false;
-      console.log('[AdultJS][Diag]', name, '· script OK (нет DOMAIN_MAP)');
+    var withPic = 0;
+    var sample = '';
+    for (var i = 0; i < list.length; i++) {
+      var m = list[i];
+      var src = (m && (m.picture || m.img || m.poster || m.background_image)) || '';
+      if (src && src.indexOf('http') === 0) {
+        withPic++;
+        if (!sample) sample = src;
+      }
+    }
+    var total = list.length;
+    var useProxy = Lampa.Storage.field(KEY_PROXY_POSTERS);
+    if (useProxy === null || useProxy === undefined) useProxy = true;
+
+    console.log('[AdultJS][Diag][Poster]', parserName, withPic + '/' + total, sample.substring(0, 80));
+
+    if (withPic === 0) {
+      _adultNoty(parserName + ': нет URL обложек (парсер не отдаёт picture — не сеть)', 4500);
       return;
     }
-
-    var testUrl = 'https://' + host + '/';
-    console.log('[AdultJS][Diag]', name, '· probe', testUrl);
-
-    // networkRequest может быть объявлен позже — отложить до вызова из loadParser (после определения networkRequest)
-    var run = function () {
-      if (typeof networkRequest !== 'function') {
-        _parserDiagPending[name] = false;
-        console.warn('[AdultJS][Diag]', name, '· networkRequest ещё нет');
-        return;
-      }
-      networkRequest(
-        testUrl,
-        function (html) {
-          _parserDiagDone[name] = true;
-          _parserDiagPending[name] = false;
-          var ok = html && String(html).length > 400;
-          console.log('[AdultJS][Diag]', name, ok ? '· site OK (' + String(html).length + 'b)' : '· site empty');
-          if (!ok) {
-            try {
-              Lampa.Noty.show(name + ': сайт без контента / блок', { time: 3500 });
-            } catch (e) {}
-          }
-        },
-        function (err) {
-          _parserDiagDone[name] = true;
-          _parserDiagPending[name] = false;
-          console.warn('[AdultJS][Diag]', name, '· site FAIL', err);
-          try {
-            Lampa.Noty.show(name + ': нет доступа к сайту', { time: 3500 });
-          } catch (e) {}
-        }
-      );
-    };
-    run();
+    if (!useProxy) {
+      _adultNoty(parserName + ': обложки ' + withPic + '/' + total +
+        ' · proxy постеров ВЫКЛ — при Img noload включите в настройках', 4500);
+      return;
+    }
+    if (_workerOk === false) {
+      _adultNoty(parserName + ': обложки через Worker, но Worker был недоступен', 4500);
+      return;
+    }
+    // URL есть + proxy вкл — успех по полям; загрузка Img на TV отдельно
+    _adultNoty(parserName + ': обложки в ленте ' + withPic + '/' + total +
+      (useProxy ? ' (через Worker)' : ''), 3200);
   }
 
+  /** Сообщение при пустом каталоге */
+  function diagEmptyCatalog(parserName, err) {
+    var n = parserName || '?';
+    var extra = (typeof err === 'string' && err) ? (' · ' + err) : '';
+    _adultNoty(n + ': нет карточек' + extra, 4500);
+  }
 
-  // ----------------------------------------------------------
+  /**
+   * 3) Видео — при play / qualities
+   */
+  function diagVideo(msg) {
+    _adultNoty(msg, 4500);
+  }
+
   // [1.6.0] DOMAIN_MAP — единая карта домен → имя парсера.
   //         Новые источники добавлять ТОЛЬКО ЗДЕСЬ
   //         (+ в ALLOWED_TARGETS Worker).
@@ -578,7 +591,6 @@
     // Проверяем кэш
     if (Parsers[name]) {
       touchParser(name);
-      try { diagParserOnce(name); } catch (e) {}
       callback(Parsers[name]);
       return;
     }
@@ -595,8 +607,7 @@
 
       touchParser(name);
       if (Parsers[name]) {
-        try { diagParserOnce(name); } catch (e) {}
-        callback(Parsers[name]);
+          callback(Parsers[name]);
       } else {
         console.warn('[AdultJS] Parser not registered after load:', name);
         try {
@@ -904,6 +915,8 @@
     ' worker=' + WORKER_DEFAULT +
     ' debugPosters=' + ADULT_DEBUG_POSTERS);
   window.AdultPlugin.networkRequest = networkRequest;
+  window.AdultPlugin.checkWorker = checkWorkerOnStart;
+
   Object.defineProperty(window.AdultPlugin, 'workerUrl', {
     get: function () { return WORKER_DEFAULT; },
     enumerable: true,
@@ -919,7 +932,7 @@
       return Lampa.Utils.capitalizeFirstLetter((title || '').split('.')[0]);
     },
     // [1.5.8][1.7.4] проксирование picture через Worker + лог [AdultJS][Poster]
-    fixCards: function (list) {
+    fixCards: function (list, parserName) {
       if (!list || !list.length) return;
       var useProxy = Lampa.Storage.field(KEY_PROXY_POSTERS);
       if (useProxy === null || useProxy === undefined) useProxy = true;
@@ -928,11 +941,20 @@
         workerUrl = window.AdultPlugin.workerUrl;
         if (workerUrl.charAt(workerUrl.length - 1) !== '=') workerUrl = workerUrl + '=';
       }
+      // Заглушка: одна на все карточки без URL — сетка не плывёт (не list-mode)
+      var PLACEHOLDER = 'data:image/svg+xml,' + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180">' +
+        '<rect fill="#1a1a1a" width="100%" height="100%"/>' +
+        '<text x="50%" y="50%" fill="#666" font-size="18" text-anchor="middle" dy=".3em">no poster</text></svg>'
+      );
       list.forEach(function (m) {
         var src = m.picture || m.img || m.poster || m.background_image || '';
-        if (workerUrl && src && src.indexOf('http') === 0 &&
-            src.indexOf('workers.dev') === -1 && src.indexOf('/?url=') === -1) {
-          src = workerUrl + encodeURIComponent(src);
+        if (src && src.indexOf('http') === 0) {
+          if (workerUrl && src.indexOf('workers.dev') === -1 && src.indexOf('/?url=') === -1) {
+            src = workerUrl + encodeURIComponent(src);
+          }
+        } else {
+          src = PLACEHOLDER;
         }
         m.picture = src;
         m.img = src;
@@ -940,6 +962,14 @@
         m.background_image = src;
         m.name = Lampa.Utils.capitalizeFirstLetter(m.name || '').replace(/&(.*?);/g, '');
       });
+      try {
+        if (parserName) diagPostersOnce(parserName, list);
+        else {
+          // source с первой карточки
+          var sn = (list[0] && list[0].source) ? list[0].source : '';
+          if (sn) diagPostersOnce(sn, list);
+        }
+      } catch (e) {}
     },
 
     // [1.6.0] Проксирование video URL через Worker.
@@ -982,14 +1012,23 @@
               function (data) {
                 Lampa.Loading.stop();
                 var qualities = data.qualities || data;
-
+                var keys = qualities ? Lampa.Arrays.getKeys(qualities) : [];
+                if (!keys.length) {
+                  try { diagVideo((element.source || 'video') + ': qualities пусто — поток не найден'); } catch (e1) {}
+                  return;
+                }
                 for (var qKey in qualities) {
                   qualities[qKey] = Utils.proxyVideoUrl(qualities[qKey]);
                 }
-
+                var playUrl = Utils.qualityDefault(qualities) || Utils.proxyVideoUrl(element.video);
+                if (!playUrl || playUrl.indexOf('http') !== 0) {
+                  try { diagVideo((element.source || 'video') + ': нет URL потока'); } catch (e2) {}
+                  return;
+                }
+                console.log('[AdultJS][Diag][Video]', element.source || '', keys.join(','));
                 var video = {
                   title:   element.name,
-                  url:     Utils.qualityDefault(qualities) || Utils.proxyVideoUrl(element.video),
+                  url:     playUrl,
                   quality: qualities,
                 };
                 Lampa.Player.play(video);
@@ -999,24 +1038,14 @@
               function (e) {
                 Lampa.Loading.stop();
                 console.warn('[AdultJS] qualities error:', e);
-                var video = {
-                  title: element.name,
-                  url:   Utils.proxyVideoUrl(element.video),
-                };
-                Lampa.Player.play(video);
-                Lampa.Player.playlist([video]);
-                Lampa.Player.callback(function () { Lampa.Controller.toggle(ctrl); });
+                var errMsg = (typeof e === 'string') ? e : (e && e.message) ? e.message : 'ошибка qualities';
+                try { diagVideo((element.source || 'video') + ': ' + errMsg); } catch (e3) {}
+                // не открываем page-URL как «видео» — это путает
               }
             );
           } else {
             Lampa.Loading.stop();
-            var video = {
-              title: element.name,
-              url:   Utils.proxyVideoUrl(element.video),
-            };
-            Lampa.Player.play(video);
-            Lampa.Player.playlist([video]);
-            Lampa.Player.callback(function () { Lampa.Controller.toggle(ctrl); });
+            try { diagVideo((parserName || element.source || 'video') + ': нет qualities() у парсера'); } catch (e4) {}
           }
         });
         return;
@@ -1395,13 +1424,34 @@
             }
           });
         }
+        if (!data.results || !data.results.length) {
+          var pname = '';
+          try {
+            if (object.url && object.url.indexOf('local://') !== 0) {
+              pname = resolveParserName(object.url) || object.url;
+            }
+          } catch (e) {}
+          if (object.url === 'local://bookmarks') {
+            _adultNoty(Lampa.Lang.translate('adult_bm_empty'), 8000);
+          } else {
+            try { diagEmptyCatalog(pname || object.title || 'каталог'); } catch (e) {}
+          }
+        }
         _this.build(data);
         var rendered = comp.render();
-        if (rendered) rendered.find('.category-full').addClass('mapping--grid cols--3');
-        if (!data.results.length && object.url === 'local://bookmarks') {
-          Lampa.Noty.show(Lampa.Lang.translate('adult_bm_empty'), { time: 8000 });
+        // Всегда 3 колонки; без постеров — заглушки в fixCards, не list-mode
+        if (rendered) {
+          rendered.find('.category-full').addClass('mapping--grid cols--3');
+          rendered.find('.category-full').removeClass('cols--2 cols--4 cols--5 cols--6');
         }
-      }, this.empty.bind(this));
+      }, function (err) {
+        try {
+          var pn = '';
+          try { pn = resolveParserName(object.url) || ''; } catch (e) {}
+          diagEmptyCatalog(pn || object.title || 'каталог', err);
+        } catch (e2) {}
+        _this.empty(err);
+      });
     };
 
     comp.nextPageReuest = function (object, resolve, reject) {
