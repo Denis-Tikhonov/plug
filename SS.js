@@ -1334,13 +1334,6 @@
 
     Lampa.SettingsApi.addParam({
       component: PLUGIN_ID,
-      param:     { name: 'sisi_preview', type: 'trigger', values: '', default: true },
-      field:     { name: 'Предпросмотр', description: 'Показывать превью при наведении на карточку' },
-      onRender:  function () {},
-    });
-
-    Lampa.SettingsApi.addParam({
-      component: PLUGIN_ID,
       param: { name: 'adult_reset_action', type: 'button', values: '', default: '' },
       field: {
         name:        Lampa.Lang.translate('adult_reset'),
