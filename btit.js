@@ -1,14 +1,15 @@
 // =============================================================
 // btit.js — Парсер BigTitsLust для AdultJS (Lampa)
 // =============================================================
-// Версия  : 1.3.0
+// Версия  : 1.3.1
+//   [1.3.1] Категории: /categories/{slug}/ (не /{slug}/)
 //   [1.3.0] video_url+token; сырые URL (SS proxy); не резать query
 // =============================================================
 
 (function () {
   'use strict';
 
-  var VERSION = '1.3.0';
+  var VERSION = '1.3.1';
   var NAME    = 'btit';
   var HOST    = 'https://www.bigtitslust.com';
   var TAG     = '[' + NAME + ']';
@@ -186,10 +187,15 @@
       url += '/search/?q=' + encodeURIComponent(value);
       if (page > 1) url += '&page=' + page;
     } else if (type === 'cat' && value) {
-      url += '/' + value + '/';
-      if (page > 1) url += '?page=' + page;
+      // most-popular / latest на корне; остальное — /categories/{slug}/
+      var root = { 'most-popular': 1, 'latest-updates': 1, 'top-rated': 1 };
+      if (root[value]) url += '/' + value + '/';
+      else url += '/categories/' + value + '/';
+      if (page > 1) url += page + '/';
     } else {
-      if (page > 1) url += '/?page=' + page;
+      // новинки
+      if (page > 1) url += '/latest-updates/' + page + '/';
+      else url += '/latest-updates/';
     }
     return url;
   }
@@ -242,7 +248,7 @@
   // ----------------------------------------------------------
   var BtitParser = {
 
-    main: function (p, s, e) { routeView(NAME + '/new', 1, s, e); },
+    main: function (p, s, e) { routeView(NAME + '/latest', 1, s, e); },
     view: function (p, s, e) { routeView(p.url || NAME, p.page || 1, s, e); },
 
     search: function (p, s, e) {
