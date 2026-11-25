@@ -1,16 +1,41 @@
 // =============================================================
 // scpr.js — Video-Scat (video-scat.com) AdultJS
-// Version  : 1.0.0
+// Version  : 1.1.0
+// [1.1.0] Категории /ru/{slug}/best|new/
 // Каталог: div.th + /pornvideos?url=/ru/videos/… → нормализация
 // Play: direct mp4 (scatporn.club)
 // Worker: video-scat.com, scatporn.club
 // =============================================================
 (function () {
   'use strict';
-  var VERSION = '1.0.0';
+  var VERSION = '1.1.0';
   var NAME = 'scpr';
   var HOST = 'https://video-scat.com';
   var TAG = '[scpr v' + VERSION + ']';
+
+  var CATEGORIES = [
+    { title: 'Дерьмо', slug: 'shit' },
+    { title: 'Моча', slug: 'piss' },
+    { title: 'Проникновение', slug: 'penetration' },
+    { title: 'Оргия', slug: 'orgy' },
+    { title: 'Рвота', slug: 'puking' },
+    { title: 'Милфы', slug: 'milf' },
+    { title: 'Какашка', slug: 'poop' },
+    { title: 'Молоденькие', slug: 'teen' },
+    { title: 'Жены', slug: 'wife' },
+    { title: 'Зрелые', slug: 'mature' },
+    { title: 'На публике', slug: 'public' },
+    { title: 'На природе', slug: 'outdoor' },
+    { title: 'Мастурбация', slug: 'masturbating' },
+    { title: 'Белье', slug: 'lingerie' },
+    { title: 'Трусики', slug: 'panties' },
+    { title: 'Рыжие', slug: 'redhead' },
+    { title: 'В рот', slug: 'mouth' },
+    { title: 'Письки', slug: 'pussy' },
+    { title: 'Колготки', slug: 'pantyhose' },
+    { title: 'Брюки', slug: 'pants' }
+  ];
+
 
   function httpGet(url, success, error) {
     if (window.AdultPlugin && window.AdultPlugin.networkRequest) {
@@ -103,7 +128,14 @@
     return [
       { title: '🔍 Поиск', search_on: true, playlist_url: NAME + '/search/' },
       { title: '🆕 Новые', playlist_url: NAME + '/new' },
-      { title: '🔥 Лучшие', playlist_url: NAME + '/best' }
+      { title: '🔥 Лучшие', playlist_url: NAME + '/best' },
+      {
+        title: '📂 Категории',
+        playlist_url: 'submenu',
+        submenu: CATEGORIES.map(function (c) {
+          return { title: c.title, playlist_url: NAME + '/cat/' + c.slug };
+        })
+      }
     ];
   }
 
@@ -136,6 +168,11 @@
       if (url.indexOf(NAME + '/search/') === 0) {
         var q = decodeURIComponent(url.replace(NAME + '/search/', '').split('?')[0]);
         loadList(HOST + '/ru/?q=' + encodeURIComponent(q), page, s, e);
+        return;
+      }
+      if (url.indexOf(NAME + '/cat/') === 0) {
+        var slug = url.replace(NAME + '/cat/', '').split('?')[0];
+        loadList(HOST + '/ru/' + slug + '/best/' + page + '/', page, s, e);
         return;
       }
       if (url.indexOf(NAME + '/best') === 0) { loadList(listUrl('best', page), page, s, e); return; }
