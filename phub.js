@@ -1,8 +1,9 @@
 // =============================================================
 // phub.js — Парсер PornHub для AdultJS (Lampa)
-// Version  : 2.1.1
+// Version  : 2.2.0
 // Based on : 2.0.0 (структура) + p365_140 (архитектура extractQualities)
 //
+// [2.2.0] get_media → progressive mp4 (не HLS/412)
 // [2.1.1] empty catalog → error; HLS label; soft note play
 // [2.1.0] ИСПРАВЛЕНО извлечение видео:
 //   — УДАЛЁН split('?')[0] — обрезал токены авторизации CDN → 403
@@ -419,47 +420,89 @@
       }, error);
     },
 
-    // [2.1.0] qualities() — исправлено
     qualities: function (videoPageUrl, success, error) {
-      console.log('[PHUB] qualities() → страница:', videoPageUrl);
+      console.log('[PHUB] qualities() →', videoPageUrl);
 
       httpGet(videoPageUrl, function (html) {
-        console.log('[PHUB] qualities() → html длина:', html.length);
-
+        console.log('[PHUB] html длина:', html.length);
         if (!html || html.length < 1000) {
-          console.warn('[PHUB] qualities() → html слишком короткий, возможно блокировка');
-          error('Страница видео недоступна (html < 1000 байт)');
+          error('Страница видео недоступна (html < 1000)');
           return;
         }
 
-        var found = extractQualities(html);
-        var keys  = Object.keys(found);
-
-        console.log('[PHUB] qualities() → найдено качеств:', keys.length, JSON.stringify(keys));
-
-        if (keys.length > 0) {
-          // HLS .m3u8 — Lampa/Dalvik часто крутит только таймлайн без картинки.
-          // Нужен VPN + «Видео через Worker» ВЫКЛ; либо плеер с HLS.
-          var onlyHls = keys.every(function (k) {
-            return (found[k] || '').indexOf('.m3u8') !== -1;
-          });
-          if (onlyHls) {
-            console.warn('[PHUB] только HLS m3u8 — при «время без картинки» выкл Worker video + VPN');
+        // 1) Progressive MP4 через get_media (нужны cookies страницы — Worker cookie-jar)
+        var mediaApi = null;
+        var flashRe = /flashvars_\d+\s*=\s*(\{[\s\S]+?\});\s*(?:var\s|\n|<\/script>)/;
+        var flashMatch = html.match(flashRe);
+        if (flashMatch) {
+          try {
+            var data = JSON.parse(flashMatch[1]);
+            var defs = data.mediaDefinitions || [];
+            for (var i = 0; i < defs.length; i++) {
+              var def = defs[i];
+              var vu = def.videoUrl || '';
+              if (vu.indexOf('/video/get_media') !== -1 || def.remote || def.format === 'mp4') {
+                mediaApi = cleanUrl(vu);
+                if (mediaApi.indexOf('http') !== 0 && mediaApi.indexOf('/video/get_media') === 0) {
+                  mediaApi = HOST + mediaApi;
+                }
+                break;
+              }
+            }
+          } catch (e) {
+            console.warn('[PHUB] flashvars parse', e.message || e);
           }
-          success({ qualities: found });
-        } else {
-          // Диагностика
-          console.warn('[PHUB] qualities() → ничего не найдено');
-          console.warn('[PHUB]   flashvars:',  (html.match(/flashvars_\d+/gi)   || []).length);
-          console.warn('[PHUB]   videoUrl:',   (html.match(/"videoUrl"/gi)       || []).length);
-          console.warn('[PHUB]   phncdn:',     (html.match(/phncdn\.com/gi)      || []).length);
-          console.warn('[PHUB]   .m3u8:',      (html.match(/\.m3u8/gi)           || []).length);
-          console.warn('[PHUB]   .mp4:',       (html.match(/\.mp4/gi)            || []).length);
-          error('Видео не найдено');
         }
+
+        function finishWithHls() {
+          var found = extractQualities(html);
+          var keys = Object.keys(found);
+          console.log('[PHUB] HLS fallback keys', keys);
+          if (keys.length) success({ qualities: found });
+          else error('Видео не найдено (ни mp4, ни m3u8)');
+        }
+
+        if (mediaApi) {
+          console.log('[PHUB] get_media →', mediaApi.substring(0, 90));
+          httpGet(mediaApi, function (jsonText) {
+            var q = {};
+            try {
+              var arr = JSON.parse(jsonText);
+              if (arr && arr.length) {
+                for (var j = 0; j < arr.length; j++) {
+                  var it = arr[j];
+                  var mp4 = cleanUrl(it.videoUrl || '');
+                  if (!mp4 || mp4.indexOf('.mp4') === -1) continue;
+                  if (mp4.indexOf('/pics/gifs/') !== -1) continue;
+                  var h = it.quality || it.height || '';
+                  var label = h ? (String(h) + 'p') : 'HD';
+                  if (!q[label]) {
+                    q[label] = mp4;
+                    console.log('[PHUB] mp4', label, mp4.substring(0, 80));
+                  }
+                }
+              }
+            } catch (e2) {
+              console.warn('[PHUB] get_media JSON', e2.message || e2);
+            }
+            if (Object.keys(q).length) {
+              success({ qualities: q });
+            } else {
+              console.warn('[PHUB] get_media пусто → HLS');
+              finishWithHls();
+            }
+          }, function (err) {
+            console.warn('[PHUB] get_media fail', err);
+            finishWithHls();
+          });
+          return;
+        }
+
+        finishWithHls();
       }, error);
     },
   };
+
 
   // ----------------------------------------------------------
   // Регистрация
@@ -467,7 +510,7 @@
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, phubParser);
-      console.log('[PHUB] v2.1.1 зарегистрирован');
+      console.log('[PHUB] v2.2.0 зарегистрирован');
       return true;
     }
     return false;
