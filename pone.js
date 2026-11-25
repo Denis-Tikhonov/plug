@@ -1,13 +1,13 @@
 // =============================================================
 // pone.js — PornOne (pornone.com) AdultJS
-// Version  : 1.1.1
+// Version  : 1.1.2
 // [1.1.1] title из .videotitle (не alt HD badge)
 // [1.1.0] постеры data-src/src; категории; qualities source mp4
 // Worker: pornone.com, th-*.pornone.com, s*.pornone.com
 // =============================================================
 (function () {
   'use strict';
-  var VERSION = '1.1.1';
+  var VERSION = '1.1.2';
   var NAME = 'pone';
   var HOST = 'https://pornone.com';
   var TAG = '[pone v' + VERSION + ']';
@@ -74,8 +74,12 @@
       var pic = '';
       var im = slice.match(/data-src="(https?:\/\/[^"]+\.(?:jpg|jpeg|webp)[^"]*)"/i) ||
                slice.match(/src="(https?:\/\/th-[^"]+\.(?:jpg|jpeg|webp)[^"]*)"/i) ||
-               slice.match(/src="(https?:\/\/[^"]*pornone[^"]*\.(?:jpg|jpeg|webp)[^"]*)"/i);
-      if (im) pic = abs(im[1]);
+               slice.match(/src="(https?:\/\/[^"]*pornone[^"]*\.(?:jpg|jpeg|webp)[^"]*)"/i) ||
+               slice.match(/(?:data-src|src)="(https?:\/\/[^"]+\.(?:jpg|jpeg|webp)[^"]*)"/i);
+      if (im) {
+        pic = abs(im[1]);
+        if (pic.indexOf('data:') === 0 || /hd\.svg|icon|logo/i.test(pic)) pic = '';
+      }
 
       var name = '';
       var tm = slice.match(/class="videotitle\s*"[^>]*>([^<]{3,200})</i);
