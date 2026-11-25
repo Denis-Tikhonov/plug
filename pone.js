@@ -1,16 +1,30 @@
 // =============================================================
-// pone.js — PornOne (pornone.com) для AdultJS
-// Version  : 1.0.0
-// Каталог: a.videocard / img.imgvi
-// Qualities: <source> + .mp4 на CDN s*.pornone.com
+// pone.js — PornOne (pornone.com) AdultJS
+// Version  : 1.1.0
+// [1.1.0] постеры data-src/src; категории /categories/; qualities source mp4
 // Worker: pornone.com, th-*.pornone.com, s*.pornone.com
 // =============================================================
 (function () {
   'use strict';
-  var VERSION = '1.0.0';
+  var VERSION = '1.1.0';
   var NAME = 'pone';
   var HOST = 'https://pornone.com';
   var TAG = '[pone v' + VERSION + ']';
+
+  var CATEGORIES = [
+    { title: 'Amateur', slug: 'amateur' },
+    { title: 'Anal', slug: 'anal' },
+    { title: 'Asian', slug: 'asian' },
+    { title: 'Blonde', slug: 'blonde' },
+    { title: 'Brunette', slug: 'brunette' },
+    { title: 'Ebony', slug: 'ebony' },
+    { title: 'Hardcore', slug: 'hardcore' },
+    { title: 'Lesbian', slug: 'lesbian' },
+    { title: 'MILF', slug: 'milf' },
+    { title: 'Teen', slug: 'teen' },
+    { title: 'Threesome', slug: 'threesome' },
+    { title: 'Big Tits', slug: 'big-tits' }
+  ];
 
   function httpGet(url, success, error) {
     if (window.AdultPlugin && window.AdultPlugin.networkRequest) {
@@ -31,34 +45,41 @@
   function parsePlaylist(html) {
     var results = [];
     var seen = {};
-    var re = /<a[^>]+href="(https:\/\/pornone\.com\/[^"]+\/\d+\/)"[^>]*class="[^"]*videocard[^"]*"[^>]*>[\s\S]*?<img[^>]+(?:src|data-src)="([^"]+)"[^>]*alt="([^"]*)"/gi;
+    // videocard / vidLinkFX links ending with /digits/
+    var re = /href="(https:\/\/pornone\.com\/[^"]+\/\d+\/)"[^>]*class="[^"]*vid(?:eo)?card[^"]*"/gi;
     var m;
-    while ((m = re.exec(html)) !== null) {
-      var href = abs(m[1]);
+    var matches = [];
+    while ((m = re.exec(html)) !== null) matches.push({ href: m[1], index: m.index });
+    if (!matches.length) {
+      re = /href="(https:\/\/pornone\.com\/[^"]+\/\d+\/)"/gi;
+      while ((m = re.exec(html)) !== null) {
+        if (m[1].indexOf('/search/') !== -1) continue;
+        matches.push({ href: m[1], index: m.index });
+      }
+    }
+    for (var i = 0; i < matches.length; i++) {
+      var href = abs(matches[i].href);
       if (seen[href]) continue;
       seen[href] = 1;
-      var pic = abs(m[2]);
-      if (pic.indexOf('data:') === 0) pic = '';
-      var name = (m[3] || 'Video').replace(/\s+/g, ' ').trim();
+      var slice = html.substring(matches[i].index, matches[i].index + 1200);
+      var pic = '';
+      var im = slice.match(/data-src="(https?:\/\/[^"]+\.(?:jpg|jpeg|webp)[^"]*)"/i) ||
+               slice.match(/src="(https?:\/\/th-[^"]+\.(?:jpg|jpeg|webp)[^"]*)"/i) ||
+               slice.match(/src="(https?:\/\/[^"]*pornone[^"]*\.(?:jpg|jpeg|webp)[^"]*)"/i);
+      if (im) pic = abs(im[1]);
+      var name = '';
+      var al = slice.match(/alt="([^"]{3,120})"/);
+      if (al) name = al[1];
+      if (!name) {
+        var parts = href.replace(/\/$/, '').split('/');
+        name = decodeURIComponent(parts[parts.length - 2] || 'Video').replace(/-/g, ' ');
+      }
+      name = name.replace(/\s+/g, ' ').trim();
       results.push({
         name: name, video: href,
         picture: pic, img: pic, poster: pic, background_image: pic,
         time: '', quality: 'HD', json: true, source: NAME
       });
-    }
-    // fallback: any videocard link
-    if (!results.length) {
-      re = /href="(https:\/\/pornone\.com\/[^"]+\/\d+\/)"[^>]*class="[^"]*vidLink/gi;
-      while ((m = re.exec(html)) !== null) {
-        var h = abs(m[1]);
-        if (seen[h]) continue;
-        seen[h] = 1;
-        results.push({
-          name: 'Video', video: h,
-          picture: '', img: '', poster: '', background_image: '',
-          time: '', quality: 'HD', json: true, source: NAME
-        });
-      }
     }
     console.log(TAG, 'cards', results.length);
     return results;
@@ -71,8 +92,6 @@
     while ((m = re.exec(html)) !== null) {
       var u = abs(m[1]);
       var lab = 'HD';
-      var qm = u.match(/_(\d{3,4})x\d+_/i) || u.match(/(\d{3,4})p/i);
-      if (qm) lab = qm[1] + (String(qm[1]).indexOf('p') >= 0 ? '' : 'p');
       if (/1080|1920/.test(u)) lab = '1080p';
       else if (/720/.test(u)) lab = '720p';
       else if (/480|406/.test(u)) lab = '480p';
@@ -89,10 +108,17 @@
     return q;
   }
 
-  function pageUrl(page) {
-    page = parseInt(page, 10) || 1;
-    if (page <= 1) return HOST + '/';
-    return HOST + '/' + page + '/';
+  function menu() {
+    return [
+      { title: '🔍 Поиск', search_on: true, playlist_url: NAME + '/search/' },
+      { title: '🔥 Новинки', playlist_url: NAME },
+      {
+        title: '📂 Категории', playlist_url: 'submenu',
+        submenu: CATEGORIES.map(function (c) {
+          return { title: c.title, playlist_url: NAME + '/cat/' + c.slug };
+        })
+      }
+    ];
   }
 
   function loadList(url, page, success, error) {
@@ -104,25 +130,27 @@
       success({
         results: results, collection: true,
         total_pages: results.length >= 20 ? page + 1 : page,
-        menu: [
-          { title: '🔍 Поиск', search_on: true, playlist_url: NAME + '/search/' },
-          { title: '🔥 Новинки', playlist_url: NAME }
-        ]
+        menu: menu()
       });
     }, error);
   }
 
   var Parser = {
-    main: function (p, s, e) { loadList(pageUrl(1), 1, s, e); },
+    main: function (p, s, e) { loadList(HOST + '/', 1, s, e); },
     view: function (p, s, e) {
       var url = (p && p.url) || NAME;
       var page = parseInt((p && p.page) || 1, 10) || 1;
+      if (url.indexOf(NAME + '/cat/') === 0) {
+        var slug = url.replace(NAME + '/cat/', '').split('?')[0];
+        loadList(HOST + '/' + slug + '/' + (page > 1 ? page + '/' : ''), page, s, e);
+        return;
+      }
       if (url.indexOf(NAME + '/search/') === 0) {
         var q = decodeURIComponent(url.replace(NAME + '/search/', '').split('?')[0]);
         loadList(HOST + '/search/videos/' + encodeURIComponent(q) + (page > 1 ? '/' + page + '/' : '/'), page, s, e);
         return;
       }
-      loadList(pageUrl(page), page, s, e);
+      loadList(page > 1 ? (HOST + '/' + page + '/') : (HOST + '/'), page, s, e);
     },
     search: function (p, s, e) {
       var q = (p.query || '').trim();
@@ -135,9 +163,8 @@
       console.log(TAG, 'qualities', videoUrl);
       httpGet(videoUrl, function (html) {
         var found = extractQualities(html || '');
-        var keys = Object.keys(found);
-        console.log(TAG, 'qualities keys', keys);
-        if (keys.length) success({ qualities: found });
+        console.log(TAG, 'keys', Object.keys(found));
+        if (Object.keys(found).length) success({ qualities: found });
         else error('PornOne: поток не найден');
       }, error);
     }
