@@ -1,13 +1,13 @@
 // =============================================================
-// epor.js — EPorner для AdultJS
-// Version  : 1.0.0
-// Каталог: /video-{id}/{slug}/
-// Qualities: gvideo.eporner.com + /dload/
-// Worker: eporner.com, eporner CDN
+// epor.js — EPorner AdultJS
+// Version  : 1.1.0
+// [1.1.0] CF Worker IP → JS-challenge (html ~300b). Сообщаем явно.
+//         Селекторы /video-id/slug/ если страница всё же пришла.
+// Worker: eporner.com часто БЛОКИРУЕТ workers.dev
 // =============================================================
 (function () {
   'use strict';
-  var VERSION = '1.0.0';
+  var VERSION = '1.1.0';
   var NAME = 'epor';
   var HOST = 'https://www.eporner.com';
   var TAG = '[epor v' + VERSION + ']';
@@ -31,18 +31,18 @@
   function parsePlaylist(html) {
     var results = [];
     var seen = {};
-    var re = /href="(\/video-[a-zA-Z0-9]+\/[^"]+\/)"/gi;
+    var re = /href="(\/video-[a-zA-Z0-9]+\/[^"]+\/?)"/gi;
     var m;
     while ((m = re.exec(html)) !== null) {
       var href = abs(m[1]);
+      if (href.charAt(href.length - 1) !== '/') href += '/';
       if (seen[href]) continue;
       seen[href] = 1;
       var slug = m[1].replace(/\/$/, '').split('/').pop() || 'Video';
       var name = decodeURIComponent(slug).replace(/-/g, ' ');
       name = name.replace(/\b\w/g, function (c) { return c.toUpperCase(); });
-      var slice = html.substring(Math.max(0, m.index - 200), m.index + 600);
+      var slice = html.substring(Math.max(0, m.index - 100), m.index + 700);
       var im = slice.match(/(?:data-src|src)="(https?:\/\/[^"]+(?:eporner|cdn)[^"]*\.(?:jpg|jpeg|webp)[^"]*)"/i);
-      if (!im) im = slice.match(/(?:data-src|src)="(https?:\/\/[^"]+\.(?:jpg|jpeg|webp)[^"]*)"/i);
       var pic = im ? abs(im[1]) : '';
       results.push({
         name: name, video: href,
@@ -50,7 +50,7 @@
         time: '', quality: 'HD', json: true, source: NAME
       });
     }
-    console.log(TAG, 'cards', results.length);
+    console.log(TAG, 'cards', results.length, 'html', html ? html.length : 0);
     return results;
   }
 
@@ -64,13 +64,7 @@
     re = /\/dload\/[^"'\s]+\/(\d{3,4})\/[^"'\s]+\.mp4/gi;
     while ((m = re.exec(html)) !== null) {
       var lab = m[1] + 'p';
-      var full = abs(m[0]);
-      if (!q[lab]) q[lab] = full;
-    }
-    re = /https?:\/\/[^"'\s]+\.mp4[^"'\s]*/gi;
-    while ((m = re.exec(html)) !== null) {
-      if (m[0].indexOf('eporner') === -1 && m[0].indexOf('gvideo') === -1) continue;
-      if (!q['HD']) q['HD'] = m[0];
+      if (!q[lab]) q[lab] = abs(m[0]);
     }
     return q;
   }
@@ -78,7 +72,14 @@
   function loadList(url, page, success, error) {
     console.log(TAG, 'fetch', url);
     httpGet(url, function (html) {
-      if (!html || html.length < 500) { error('EPorner: страница недоступна'); return; }
+      if (!html || html.length < 800) {
+        error('EPorner: блокировка Worker/CF (JS-challenge). Нужен другой proxy или зеркало.');
+        return;
+      }
+      if (html.indexOf('fromCharCode') !== -1 && html.length < 2000) {
+        error('EPorner: anti-bot challenge с IP Cloudflare Worker');
+        return;
+      }
       var results = parsePlaylist(html);
       if (!results.length) { error('EPorner: нет карточек'); return; }
       success({
@@ -99,7 +100,7 @@
       var page = parseInt((p && p.page) || 1, 10) || 1;
       if (url.indexOf(NAME + '/search/') === 0) {
         var q = decodeURIComponent(url.replace(NAME + '/search/', '').split('?')[0]);
-        loadList(HOST + '/search/' + encodeURIComponent(q) + (page > 1 ? '/' + page + '/' : '/'), page, s, e);
+        loadList(HOST + '/search/' + encodeURIComponent(q) + '/', page, s, e);
         return;
       }
       loadList(page > 1 ? (HOST + '/' + page + '/') : (HOST + '/'), page, s, e);
@@ -112,9 +113,12 @@
       }, e);
     },
     qualities: function (videoUrl, success, error) {
-      console.log(TAG, 'qualities', videoUrl);
       httpGet(videoUrl, function (html) {
-        var found = extractQualities(html || '');
+        if (!html || html.length < 800) {
+          error('EPorner: страница видео недоступна через Worker');
+          return;
+        }
+        var found = extractQualities(html);
         if (Object.keys(found).length) success({ qualities: found });
         else error('EPorner: поток не найден');
       }, error);
