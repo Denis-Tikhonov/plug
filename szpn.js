@@ -1,6 +1,7 @@
 // =============================================================
 // szpn.js — SexZoo (sexzoo.net) AdultJS
-// Version  : 1.0.0
+// Version  : 1.1.0
+// [1.1.0] меню Категории → /ru/sexlist/{slug}/
 // Каталог: /ru/movie/… + img mediacont.net
 // Play: 247sexvideo.net …mp4 (не preview mediacont)
 // Worker: sexzoo.net, 247sexvideo.net, mediacont.net
@@ -8,10 +9,29 @@
 // =============================================================
 (function () {
   'use strict';
-  var VERSION = '1.0.0';
+  var VERSION = '1.1.0';
   var NAME = 'szpn';
   var HOST = 'https://sexzoo.net';
   var TAG = '[szpn v' + VERSION + ']';
+
+  var CATEGORIES = [
+    { title: 'Интенсивный секс', slug: 'intense-sex' },
+    { title: 'Лошади', slug: 'horse-zoo' },
+    { title: 'Минет / deepthroat', slug: 'blowjob-deepthroat' },
+    { title: 'Зоо секс видео', slug: 'zoo-sex-video' },
+    { title: 'Зоофилия порно', slug: 'zoophilia-porn-video' },
+    { title: 'Блондинки', slug: 'sexy-blondes' },
+    { title: 'Собаки', slug: 'dog-zoo-sex' },
+    { title: 'Животный секс', slug: 'animal-sex' },
+    { title: 'Ферма', slug: 'farm-sex' },
+    { title: 'Групповая зоофилия', slug: 'group-zoophilia' },
+    { title: 'Анальный', slug: 'anal-bestiality' },
+    { title: 'Горячая ебля', slug: 'hot-fucking' },
+    { title: 'Клипы', slug: 'zoo-sex-clips' },
+    { title: 'Бесплатное порно', slug: 'free-bestiality-porn' },
+    { title: 'Порно с лошадьми', slug: 'free-horse-porn' }
+  ];
+
 
   function httpGet(url, success, error) {
     if (window.AdultPlugin && window.AdultPlugin.networkRequest) {
@@ -93,7 +113,14 @@
   function menu() {
     return [
       { title: '🔍 Поиск', search_on: true, playlist_url: NAME + '/search/' },
-      { title: '🔥 Новинки', playlist_url: NAME }
+      { title: '🔥 Новинки', playlist_url: NAME },
+      {
+        title: '📂 Категории',
+        playlist_url: 'submenu',
+        submenu: CATEGORIES.map(function (c) {
+          return { title: c.title, playlist_url: NAME + '/cat/' + c.slug };
+        })
+      }
     ];
   }
 
