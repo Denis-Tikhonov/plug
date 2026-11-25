@@ -1,8 +1,9 @@
 // =============================================================
 // phub.js — Парсер PornHub для AdultJS (Lampa)
-// Version  : 2.1.0
+// Version  : 2.1.1
 // Based on : 2.0.0 (структура) + p365_140 (архитектура extractQualities)
 //
+// [2.1.1] empty catalog → error; HLS label; soft note play
 // [2.1.0] ИСПРАВЛЕНО извлечение видео:
 //   — УДАЛЁН split('?')[0] — обрезал токены авторизации CDN → 403
 //   — УДАЛЁН поиск data-mp4 /pics/gifs/ — это GIF-превью, не видео
@@ -373,7 +374,15 @@
 
     httpGet(fetchUrl, function (html) {
       console.log('[PHUB] html длина:', html.length);
+      if (!html || html.length < 1000) {
+        error('Phub: страница недоступна (html короткий)');
+        return;
+      }
       var cards = parseCards(html);
+      if (!cards.length) {
+        error('Phub: нет карточек');
+        return;
+      }
       success({
         results:     cards,
         collection:  true,
@@ -429,7 +438,14 @@
         console.log('[PHUB] qualities() → найдено качеств:', keys.length, JSON.stringify(keys));
 
         if (keys.length > 0) {
-          // [2.1.0] ИСПРАВЛЕНО: success({ qualities: q }) вместо success(q)
+          // HLS .m3u8 — Lampa/Dalvik часто крутит только таймлайн без картинки.
+          // Нужен VPN + «Видео через Worker» ВЫКЛ; либо плеер с HLS.
+          var onlyHls = keys.every(function (k) {
+            return (found[k] || '').indexOf('.m3u8') !== -1;
+          });
+          if (onlyHls) {
+            console.warn('[PHUB] только HLS m3u8 — при «время без картинки» выкл Worker video + VPN');
+          }
           success({ qualities: found });
         } else {
           // Диагностика
@@ -451,7 +467,7 @@
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, phubParser);
-      console.log('[PHUB] v2.1.0 зарегистрирован');
+      console.log('[PHUB] v2.1.1 зарегистрирован');
       return true;
     }
     return false;
