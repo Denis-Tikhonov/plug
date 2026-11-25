@@ -1,9 +1,10 @@
 // =============================================================
 // phub.js — Парсер PornHub для AdultJS (Lampa)
-// Version  : 2.2.0
+// Version  : 2.3.0
 // Based on : 2.0.0 (структура) + p365_140 (архитектура extractQualities)
 //
-// [2.2.0] get_media → progressive mp4 (не HLS/412)
+// [2.3.0] qualities отдают get_media URL; Worker 1.9.8 pipe → mp4 (IP-binding)
+// [2.2.0] get_media → progressive mp4
 // [2.1.1] empty catalog → error; HLS label; soft note play
 // [2.1.0] ИСПРАВЛЕНО извлечение видео:
 //   — УДАЛЁН split('?')[0] — обрезал токены авторизации CDN → 403
@@ -463,38 +464,10 @@
         }
 
         if (mediaApi) {
-          console.log('[PHUB] get_media →', mediaApi.substring(0, 90));
-          httpGet(mediaApi, function (jsonText) {
-            var q = {};
-            try {
-              var arr = JSON.parse(jsonText);
-              if (arr && arr.length) {
-                for (var j = 0; j < arr.length; j++) {
-                  var it = arr[j];
-                  var mp4 = cleanUrl(it.videoUrl || '');
-                  if (!mp4 || mp4.indexOf('.mp4') === -1) continue;
-                  if (mp4.indexOf('/pics/gifs/') !== -1) continue;
-                  var h = it.quality || it.height || '';
-                  var label = h ? (String(h) + 'p') : 'HD';
-                  if (!q[label]) {
-                    q[label] = mp4;
-                    console.log('[PHUB] mp4', label, mp4.substring(0, 80));
-                  }
-                }
-              }
-            } catch (e2) {
-              console.warn('[PHUB] get_media JSON', e2.message || e2);
-            }
-            if (Object.keys(q).length) {
-              success({ qualities: q });
-            } else {
-              console.warn('[PHUB] get_media пусто → HLS');
-              finishWithHls();
-            }
-          }, function (err) {
-            console.warn('[PHUB] get_media fail', err);
-            finishWithHls();
-          });
+          // Не резолвим mp4 здесь: ip= в подписи = IP того, кто вызвал get_media.
+          // Отдаём get_media URL → SS/Worker proxy → Worker 1.9.8 pipe в одном запросе.
+          console.log('[PHUB] quality=get_media (pipe)', mediaApi.substring(0, 90));
+          success({ qualities: { 'HD': mediaApi } });
           return;
         }
 
@@ -510,7 +483,7 @@
   function tryRegister() {
     if (window.AdultPlugin && typeof window.AdultPlugin.registerParser === 'function') {
       window.AdultPlugin.registerParser(NAME, phubParser);
-      console.log('[PHUB] v2.2.0 зарегистрирован');
+      console.log('[PHUB] v2.3.0 зарегистрирован');
       return true;
     }
     return false;
