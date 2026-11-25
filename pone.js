@@ -1,12 +1,13 @@
 // =============================================================
 // pone.js — PornOne (pornone.com) AdultJS
-// Version  : 1.1.0
-// [1.1.0] постеры data-src/src; категории /categories/; qualities source mp4
+// Version  : 1.1.1
+// [1.1.1] title из .videotitle (не alt HD badge)
+// [1.1.0] постеры data-src/src; категории; qualities source mp4
 // Worker: pornone.com, th-*.pornone.com, s*.pornone.com
 // =============================================================
 (function () {
   'use strict';
-  var VERSION = '1.1.0';
+  var VERSION = '1.1.1';
   var NAME = 'pone';
   var HOST = 'https://pornone.com';
   var TAG = '[pone v' + VERSION + ']';
@@ -42,10 +43,17 @@
     return u;
   }
 
+  function decodeEntities(s) {
+    if (!s) return '';
+    return String(s)
+      .replace(/&lpar;/gi, '(').replace(/&rpar;/gi, ')')
+      .replace(/&amp;/g, '&').replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+  }
+
   function parsePlaylist(html) {
     var results = [];
     var seen = {};
-    // videocard / vidLinkFX links ending with /digits/
     var re = /href="(https:\/\/pornone\.com\/[^"]+\/\d+\/)"[^>]*class="[^"]*vid(?:eo)?card[^"]*"/gi;
     var m;
     var matches = [];
@@ -61,20 +69,32 @@
       var href = abs(matches[i].href);
       if (seen[href]) continue;
       seen[href] = 1;
-      var slice = html.substring(matches[i].index, matches[i].index + 1200);
+      // карточка: ссылка + соседний блок titlecont/videotitle (часто после закрытия <a>)
+      var slice = html.substring(matches[i].index, matches[i].index + 2500);
       var pic = '';
       var im = slice.match(/data-src="(https?:\/\/[^"]+\.(?:jpg|jpeg|webp)[^"]*)"/i) ||
                slice.match(/src="(https?:\/\/th-[^"]+\.(?:jpg|jpeg|webp)[^"]*)"/i) ||
                slice.match(/src="(https?:\/\/[^"]*pornone[^"]*\.(?:jpg|jpeg|webp)[^"]*)"/i);
       if (im) pic = abs(im[1]);
+
       var name = '';
-      var al = slice.match(/alt="([^"]{3,120})"/);
-      if (al) name = al[1];
+      var tm = slice.match(/class="videotitle\s*"[^>]*>([^<]{3,200})</i);
+      if (tm) name = decodeEntities(tm[1]).replace(/\s+/g, ' ').trim();
+      if (!name) {
+        var al = slice.match(/alt="([^"]{5,120})"/);
+        if (al && !/^HD\s*Video$/i.test(al[1])) name = decodeEntities(al[1]).replace(/\s+/g, ' ').trim();
+      }
       if (!name) {
         var parts = href.replace(/\/$/, '').split('/');
         name = decodeURIComponent(parts[parts.length - 2] || 'Video').replace(/-/g, ' ');
+        name = name.replace(/\b\w/g, function (c) { return c.toUpperCase(); });
       }
-      name = name.replace(/\s+/g, ' ').trim();
+      if (/^HD\s*Video$/i.test(name)) {
+        var parts2 = href.replace(/\/$/, '').split('/');
+        name = decodeURIComponent(parts2[parts2.length - 2] || 'Video').replace(/-/g, ' ');
+        name = name.replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+      }
+
       results.push({
         name: name, video: href,
         picture: pic, img: pic, poster: pic, background_image: pic,
